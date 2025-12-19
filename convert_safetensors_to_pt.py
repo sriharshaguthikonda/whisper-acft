@@ -4,6 +4,8 @@ Convert safetensors HF model to PyTorch .pt format for whisper.cpp conversion.
 
 Usage:
     python convert_safetensors_to_pt.py --model_dir ./model_train-tiny3_extracted --output ./model.pt
+
+    python whisper.cpp/models/convert-hf-to-gguf.py --hf-repo ./model_train-tiny3_extracted  --outdir ggml_output --output-format gguf --qtype q8_0
 """
 
 import os

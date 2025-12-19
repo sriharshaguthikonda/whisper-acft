@@ -6,10 +6,13 @@
 
 # Model directories
 ggml_output/
+gguf_output/
 model_train-tiny3_extracted/
+Futo_original_model/
 
 # Subrepositories
 whisper.cpp/
+whisper/
 
 # Python
 __pycache__/
