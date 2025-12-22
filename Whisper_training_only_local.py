@@ -575,12 +575,22 @@ if __name__ == "__main__":
         if val_drive_rows:
             local_val_dir = os.path.join(LOCAL_EPOCH_CACHE_ROOT, "_val_cache")
             val_cached = copy_epoch_subset_to_local(val_drive_rows, local_val_dir, show_progress=True)
-            val_loader = build_loader_from_rows(val_cached, VAL_BATCH_SIZE, num_workers=EVAL_NUM_WORKERS, persistent_workers=EVAL_PERSISTENT_WORKERS, prefetch_factor=EVAL_PREFETCH_FACTOR)
-            forced_decoder_ids = processor.get_decoder_prompt_ids(language=EVAL_LANGUAGE, task=EVAL_TASK)
-            gen_model = WhisperForConditionalGeneration.from_pretrained(f"openai/whisper-{MODEL_SIZE}")
-            gen_model.to(device)
-            gen_model.eval()
-            print("Validation set ready.")
+            if val_cached:
+                val_loader = build_loader_from_rows(
+                    val_cached,
+                    VAL_BATCH_SIZE,
+                    num_workers=EVAL_NUM_WORKERS,
+                    persistent_workers=EVAL_PERSISTENT_WORKERS,
+                    prefetch_factor=EVAL_PREFETCH_FACTOR,
+                )
+                forced_decoder_ids = processor.get_decoder_prompt_ids(language=EVAL_LANGUAGE, task=EVAL_TASK)
+                gen_model = WhisperForConditionalGeneration.from_pretrained(f"openai/whisper-{MODEL_SIZE}")
+                gen_model.to(device)
+                gen_model.eval()
+                print("Validation set ready.")
+            else:
+                print("Validation cache is empty; skipping validation.")
+                val_loader = None
     if start_pointer >= len(manifest_rows):
         print("All files already trained.")
         raise SystemExit(0)
