@@ -2,8 +2,10 @@ import json
 import os
 import random
 import time
+import multiprocessing as mp
 from dataclasses import dataclass
 from typing import List, Sequence
+from pathlib import Path
 
 import tkinter as tk
 from tkinter import filedialog
@@ -18,6 +20,39 @@ try:
     import evaluate
 except ImportError:  # pragma: no cover - helper hint
     raise SystemExit("Please install the 'evaluate' package: pip install evaluate")
+
+
+
+
+
+
+
+
+
+
+
+DEFAULT_MANIFEST = r"i:\P2GPT_google_drive\My Drive\Record_chunks\pairs_manifest.jsonl"
+DEFAULT_EXCLUDE = r"i:\P2GPT_google_drive\My Drive\Record_chunks\trained_files.jsonl"
+DEFAULT_CHECKPOINTS = [
+    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000001",
+    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000006",
+    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000007",
+]
+DEFAULT_SAMPLE_SIZE = 32
+DEFAULT_SEED = 17
+DEFAULT_DEVICE = "cuda"
+DEFAULT_CER = True
+DEFAULT_BATCH_SIZE = 16
+DEFAULT_DEVICES = ["cuda"]  # e.g., ["cuda:0", "cuda:1"] to spread checkpoints across GPUs
+USE_MULTIPROCESS = False  # set True to parallelize checkpoints across devices
+USE_TORCH_COMPILE = False  # set True to use torch.compile for faster inference (requires PyTorch 2.x)
+USE_SDPA = True  # use scaled dot product attention (flash attention) if available
+USE_SELECTION_GUI = True  # if True, choose audio files and transcription folder at runtime
+PAIRS_MANIFEST = DEFAULT_MANIFEST  # exclude anything listed in pairs_manifest.jsonl
+DEFAULT_AUDIO_DIR = r"I:\Record_wav"
+DEFAULT_TRANSCRIPT_DIR = r"I:\P2GPT_google_drive\My Drive\Transcriptions"
+PROCESSOR_SOURCE = r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000001"
+
 
 
 @dataclass
@@ -104,7 +139,9 @@ def load_exclude_set(path: str | None) -> set[str]:
             audio = normalize_path(row.get("audio_path") or row.get("audio"))
             if audio:
                 exclude.add(audio)
-                exclude.add(os.path.basename(audio))
+                base = os.path.basename(audio)
+                exclude.add(base)
+                exclude.add(Path(base).stem.lower())
     return exclude
 
 
@@ -181,7 +218,9 @@ def load_pairs_exclude(path: str | None) -> set[str]:
                 val = normalize_path(row.get(key))
                 if val:
                     ex.add(val)
-                    ex.add(os.path.basename(val))
+                    base = os.path.basename(val)
+                    ex.add(base)
+                    ex.add(Path(base).stem.lower())
     return ex
 
 
@@ -223,11 +262,18 @@ def pick_audio_files_and_transcript_dir() -> tuple[List[str], str]:
 def build_samples_from_selection(audio_files: List[str], transcript_dir: str, exclude: set[str]) -> List[Sample]:
     samples: List[Sample] = []
     for audio in audio_files:
-        base = os.path.splitext(os.path.basename(audio))[0]
-        if audio in exclude or base in exclude:
+        base_full = os.path.basename(audio)
+        base_stem = Path(base_full).stem
+        base_stem_lower = base_stem.lower()
+        if (
+            audio in exclude
+            or base_full in exclude
+            or base_stem in exclude
+            or base_stem_lower in exclude
+        ):
             print(f"Skip (excluded training/pairs): {audio}")
             continue
-        json_path = os.path.join(transcript_dir, base + ".json")
+        json_path = os.path.join(transcript_dir, base_stem + ".json")
         if not os.path.isfile(json_path):
             print(f"No transcript for {audio}; skipping")
             continue
@@ -245,12 +291,18 @@ def evaluate_checkpoint(
     samples: Sequence[Sample],
     device: str,
     do_cer: bool,
+    batch_size: int = 4,
 ):
     processor = WhisperProcessor.from_pretrained(ckpt_path)
-    model = WhisperForConditionalGeneration.from_pretrained(ckpt_path).to(device)
-    if device.startswith("cuda"):
-        model = model.half()
+    attn_impl = "sdpa" if USE_SDPA else None
+    model = WhisperForConditionalGeneration.from_pretrained(
+        ckpt_path,
+        attn_implementation=attn_impl,
+        torch_dtype=torch.float16 if device.startswith("cuda") else torch.float32,
+    ).to(device)
     model.eval()
+    if USE_TORCH_COMPILE:
+        model = torch.compile(model, mode="reduce-overhead")
 
     wer_metric = evaluate.load("wer")
     cer_metric = evaluate.load("cer") if do_cer else None
@@ -262,42 +314,59 @@ def evaluate_checkpoint(
     skipped = 0
     audio_cache: dict[str, tuple[np.ndarray, int]] = {}
 
-    for sample in tqdm(samples, desc=f"Evaluating {os.path.basename(ckpt_path)}", unit="utt"):
-        try:
-            if sample.audio_path in audio_cache:
-                full_wav, sr = audio_cache[sample.audio_path]
-            else:
-                full_wav, sr = load_audio(
-                    sample.audio_path,
-                    target_sr=processor.feature_extractor.sampling_rate,
-                    start=None,
-                    end=None,
-                )
-                audio_cache[sample.audio_path] = (full_wav, sr)
-            wav = full_wav
-            if sample.start is not None or sample.end is not None:
-                s_idx = int(sr * sample.start) if sample.start is not None else 0
-                e_idx = int(sr * sample.end) if sample.end is not None else len(wav)
-                s_idx = max(0, s_idx)
-                e_idx = min(len(wav), e_idx)
-                wav = wav[s_idx:e_idx]
-        except Exception as e:
-            print(f"Skip {sample.audio_path}: {e}")
-            skipped += 1
+    for b_start in tqdm(range(0, len(samples), max(1, batch_size)), desc=f"Evaluating {os.path.basename(ckpt_path)}", unit="batch"):
+        b_end = min(len(samples), b_start + max(1, batch_size))
+        batch = samples[b_start:b_end]
+        wavs = []
+        batch_refs = []
+        batch_lengths = []
+        sr = processor.feature_extractor.sampling_rate
+
+        for sample in batch:
+            try:
+                if sample.audio_path in audio_cache:
+                    full_wav, sr_loaded = audio_cache[sample.audio_path]
+                else:
+                    full_wav, sr_loaded = load_audio(
+                        sample.audio_path,
+                        target_sr=sr,
+                        start=None,
+                        end=None,
+                    )
+                    audio_cache[sample.audio_path] = (full_wav, sr_loaded)
+                wav = full_wav
+                if sample.start is not None or sample.end is not None:
+                    s_idx = int(sr_loaded * sample.start) if sample.start is not None else 0
+                    e_idx = int(sr_loaded * sample.end) if sample.end is not None else len(wav)
+                    s_idx = max(0, s_idx)
+                    e_idx = min(len(wav), e_idx)
+                    wav = wav[s_idx:e_idx]
+                wavs.append(wav)
+                batch_refs.append(sample.text)
+                batch_lengths.append(len(wav) / sr_loaded)
+            except Exception as e:
+                print(f"Skip {sample.audio_path}: {e}")
+                skipped += 1
+
+        if not wavs:
             continue
 
         t0 = time.time()
-        inputs = processor(wav, sampling_rate=sr, return_tensors="pt").to(device)
-        autocast_ctx = torch.cuda.amp.autocast if device.startswith("cuda") else torch.cpu.amp.autocast
-        with torch.no_grad(), autocast_ctx():
-            generated = model.generate(**inputs)
+        inputs = processor(wavs, sampling_rate=sr, return_tensors="pt", padding=True).to(device)
+        with torch.no_grad(), torch.amp.autocast(device_type="cuda" if device.startswith("cuda") else "cpu"):
+            generated = model.generate(
+                **inputs,
+                num_beams=1,
+                do_sample=False,
+                max_new_tokens=256,
+            )
         t1 = time.time()
-        text = processor.batch_decode(generated, skip_special_tokens=True)[0]
+        texts = processor.batch_decode(generated, skip_special_tokens=True)
 
-        preds.append(safe_normalize(normalize, text))
-        refs.append(safe_normalize(normalize, sample.text))
-
-        t_audio += len(wav) / sr
+        for text, ref, dur in zip(texts, batch_refs, batch_lengths):
+            preds.append(safe_normalize(normalize, text))
+            refs.append(safe_normalize(normalize, ref))
+            t_audio += dur
         t_wall += t1 - t0
 
     wer = wer_metric.compute(predictions=preds, references=refs) if preds else float("nan")
@@ -315,22 +384,48 @@ def evaluate_checkpoint(
     }
 
 
-DEFAULT_MANIFEST = r"i:\P2GPT_google_drive\My Drive\Record_chunks\pairs_manifest.jsonl"
-DEFAULT_EXCLUDE = r"i:\P2GPT_google_drive\My Drive\Record_chunks\trained_files.jsonl"
-DEFAULT_CHECKPOINTS = [
-    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000001",
-    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000006",
-    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000007",
-]
-DEFAULT_SAMPLE_SIZE = 64
-DEFAULT_SEED = 17
-DEFAULT_DEVICE = "cuda"
-DEFAULT_CER = True
-USE_SELECTION_GUI = True  # if True, choose audio files and transcription folder at runtime
-PAIRS_MANIFEST = DEFAULT_MANIFEST  # exclude anything listed in pairs_manifest.jsonl
-DEFAULT_AUDIO_DIR = r"I:\Record"
-DEFAULT_TRANSCRIPT_DIR = r"I:\P2GPT_google_drive\My Drive\Transcriptions"
-PROCESSOR_SOURCE = r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000001"
+
+def run_checkpoint_loop(ckpt_dirs: Sequence[str], subset: Sequence[Sample], device: str, do_cer: bool, batch_size: int):
+    for ckpt in tqdm(ckpt_dirs, desc="Checkpoints", unit="ckpt"):
+        if not os.path.isdir(ckpt):
+            print(f"Skip (not a directory): {ckpt}")
+            continue
+        created_files = ensure_processor_files(ckpt, PROCESSOR_SOURCE)
+        preproc = os.path.join(ckpt, "preprocessor_config.json")
+        if not os.path.isfile(preproc):
+            print(f"Skip (no preprocessor_config.json): {ckpt}")
+            for f in created_files:
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
+            continue
+        print(f"\n>>> Evaluating: {ckpt} on {device}")
+        try:
+            stats = evaluate_checkpoint(ckpt, subset, device, do_cer, batch_size=batch_size)
+        except OSError as e:
+            print(f"Skip (failed to load): {ckpt} | err: {e}")
+            for f in created_files:
+                try:
+                    os.remove(f)
+                except Exception:
+                    pass
+            continue
+        for f in created_files:
+            try:
+                os.remove(f)
+            except Exception:
+                pass
+        print(
+            "WER: {wer:.4f} | CER: {cer} | RTF: {rtf:.3f} | samples: {n} | skipped: {sk} | wall: {wall:.1f}s".format(
+                wer=stats["wer"],
+                cer=f"{stats['cer']:.4f}" if stats["cer"] is not None else "-",
+                rtf=stats["rtf"],
+                n=stats["samples"],
+                sk=stats["skipped"],
+                wall=stats["wall_time_sec"],
+            )
+        )
 
 
 def main():
@@ -375,46 +470,31 @@ def main():
         subset = pick_subset(all_samples, sample_size, seed)
         print(f"Loaded {len(all_samples)} total rows; evaluating {len(subset)} samples")
 
-    for ckpt in tqdm(ckpt_dirs, desc="Checkpoints", unit="ckpt"):
-        if not os.path.isdir(ckpt):
-            print(f"Skip (not a directory): {ckpt}")
-            continue
-        created_files = ensure_processor_files(ckpt, PROCESSOR_SOURCE)
-        preproc = os.path.join(ckpt, "preprocessor_config.json")
-        if not os.path.isfile(preproc):
-            print(f"Skip (no preprocessor_config.json): {ckpt}")
-            for f in created_files:
-                try:
-                    os.remove(f)
-                except Exception:
-                    pass
-            continue
-        print(f"\n>>> Evaluating: {ckpt}")
-        try:
-            stats = evaluate_checkpoint(ckpt, subset, device, do_cer)
-        except OSError as e:
-            print(f"Skip (failed to load): {ckpt} | err: {e}")
-            for f in created_files:
-                try:
-                    os.remove(f)
-                except Exception:
-                    pass
-            continue
-        for f in created_files:
-            try:
-                os.remove(f)
-            except Exception:
-                pass
-        print(
-            "WER: {wer:.4f} | CER: {cer} | RTF: {rtf:.3f} | samples: {n} | skipped: {sk} | wall: {wall:.1f}s".format(
-                wer=stats["wer"],
-                cer=f"{stats['cer']:.4f}" if stats["cer"] is not None else "-",
-                rtf=stats["rtf"],
-                n=stats["samples"],
-                sk=stats["skipped"],
-                wall=stats["wall_time_sec"],
+    if USE_MULTIPROCESS and len(DEFAULT_DEVICES) > 1:
+        # chunk checkpoints across devices and spawn separate processes
+        print(f"Launching multiprocess evaluation across devices: {DEFAULT_DEVICES}")
+
+        def _chunks(seq, n):
+            k, m = divmod(len(seq), n)
+            for i in range(n):
+                start = i * k + min(i, m)
+                end = (i + 1) * k + min(i + 1, m)
+                yield seq[start:end]
+
+        procs = []
+        for dev, ckpt_subset in zip(DEFAULT_DEVICES, _chunks(ckpt_dirs, len(DEFAULT_DEVICES))):
+            if not ckpt_subset:
+                continue
+            p = mp.Process(
+                target=run_checkpoint_loop,
+                args=(ckpt_subset, subset, dev, do_cer, DEFAULT_BATCH_SIZE),
             )
-        )
+            p.start()
+            procs.append(p)
+        for p in procs:
+            p.join()
+    else:
+        run_checkpoint_loop(ckpt_dirs, subset, device, do_cer, DEFAULT_BATCH_SIZE)
 
 
 if __name__ == "__main__":

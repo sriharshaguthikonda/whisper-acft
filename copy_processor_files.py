@@ -4,9 +4,7 @@ from transformers import WhisperProcessor
 
 TMP_DIR = r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\processor_tmp"
 TARGETS = [
-    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000001",
-    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000006",
-    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000007",
+    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000051",
 ]
 FILES = [
     "preprocessor_config.json",
