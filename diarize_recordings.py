@@ -4,7 +4,9 @@ import os
 import time
 from collections import defaultdict
 from pathlib import Path
+from typing import Optional
 
+import torch
 from pyannote.audio import Audio, Pipeline
 
 
@@ -32,6 +34,13 @@ def parse_args() -> argparse.Namespace:
         "If omitted, falls back to HUGGINGFACE_TOKEN / HF_TOKEN env vars.",
     )
     parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Force device string understood by torch (e.g., 'cuda', 'cuda:0', 'cpu'). "
+        "Defaults to torch's choice.",
+    )
+    parser.add_argument(
         "--limit",
         type=int,
         default=None,
@@ -46,15 +55,19 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def build_pipeline(hf_token: str) -> Pipeline:
+def build_pipeline(hf_token: str, device: Optional[str]) -> Pipeline:
     if not hf_token:
         raise ValueError(
             "Hugging Face token is required. Set --hf-token or HUGGINGFACE_TOKEN / HF_TOKEN."
         )
-    return Pipeline.from_pretrained(
+    torch_device = torch.device(device) if device else None
+    pipeline = Pipeline.from_pretrained(
         "pyannote/speaker-diarization-3.1",
         use_auth_token=hf_token,
     )
+    if torch_device:
+        pipeline.to(torch_device)
+    return pipeline
 
 
 def list_audio_files(input_dir: Path, min_bytes: int, limit: int | None) -> list[Path]:
@@ -122,40 +135,57 @@ def main() -> None:
     if not files:
         raise SystemExit(f"No .wav files found in {audio_dir} meeting size >= {args.min_bytes} bytes.")
 
-    pipeline = build_pipeline(args.hf_token)
+    pipeline = build_pipeline(args.hf_token, device=args.device)
     audio = Audio(sample_rate=16000, mono=True)
+    if args.device:
+        device_str = args.device
+    elif hasattr(pipeline, "device"):
+        device_str = str(pipeline.device)
+    elif torch.cuda.is_available():
+        device_str = torch.cuda.get_device_name(0)
+    else:
+        device_str = "cpu"
+    print(f"Using device: {device_str} | files to process: {len(files)}", flush=True)
 
     dataset_aggregate: dict[str, float] = defaultdict(float)
     file_summaries = []
 
     start_time = time.time()
     for idx, wav_path in enumerate(files, start=1):
+        tick = time.time()
         print(f"[{idx}/{len(files)}] Diarizing {wav_path.name} ...", flush=True)
         summary = diarize_file(wav_path, pipeline, audio)
         file_summaries.append(summary)
         for speaker, details in summary["speakers"].items():
             dataset_aggregate[speaker] += details["total_speech"]
+        took = time.time() - tick
+        avg = (time.time() - start_time) / idx
+        eta = avg * (len(files) - idx) / 60
+        print(f"    done in {took/60:.2f} min | avg {avg/60:.2f} min/file | ETA {eta:.1f} min", flush=True)
 
-    overall = {
-        "total_files": len(files),
-        "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "total_speech_seconds_by_file_local_speaker": {
-            speaker: round(seconds, 3) for speaker, seconds in dataset_aggregate.items()
-        },
-        "notes": (
-            "Speaker labels are local to each file; they do not guarantee the same real person across files. "
-            "To obtain global speakers across the dataset, add a cross-file clustering/enrollment step."
-        ),
-    }
+        overall = {
+            "total_files": len(files),
+            "generated_at": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "total_speech_seconds_by_file_local_speaker": {
+                speaker: round(seconds, 3) for speaker, seconds in dataset_aggregate.items()
+            },
+            "notes": (
+                "Speaker labels are local to each file; they do not guarantee the same real person across files. "
+                "To obtain global speakers across the dataset, add a cross-file clustering/enrollment step."
+            ),
+        }
 
-    output = {
-        "overall": overall,
-        "files": file_summaries,
-    }
+        output = {
+            "overall": overall,
+            "files": file_summaries,
+        }
 
-    args.output_json.parent.mkdir(parents=True, exist_ok=True)
-    with args.output_json.open("w", encoding="utf-8") as f:
-        json.dump(output, f, indent=2)
+        # Incremental write: write after each file via temp then replace for safety.
+        args.output_json.parent.mkdir(parents=True, exist_ok=True)
+        tmp_path = args.output_json.with_suffix(".tmp")
+        with tmp_path.open("w", encoding="utf-8") as f:
+            json.dump(output, f, indent=2)
+        tmp_path.replace(args.output_json)
 
     elapsed = time.time() - start_time
     print(f"Diarization finished in {elapsed/60:.1f} minutes. Wrote {args.output_json}")

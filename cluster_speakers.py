@@ -42,6 +42,13 @@ def parse_args() -> argparse.Namespace:
         help="Hugging Face token with access to pyannote/embedding.",
     )
     parser.add_argument(
+        "--device",
+        type=str,
+        default=None,
+        help="Force device string understood by torch (e.g., 'cuda', 'cuda:0', 'cpu'). "
+        "Defaults to torch's choice.",
+    )
+    parser.add_argument(
         "--distance-threshold",
         type=float,
         default=0.25,
@@ -199,6 +206,9 @@ def main() -> None:
         raise SystemExit("No files found in summary JSON.")
 
     model = Model.from_pretrained("pyannote/embedding", use_auth_token=args.hf_token)
+    if args.device:
+        model.to(args.device)
+    print(f"Using device: {getattr(model, 'device', 'default')} | files in summary: {len(files)}", flush=True)
     inference = Inference(model, window="whole")
 
     embeddings, keys, speech_durations = compute_local_embeddings(
