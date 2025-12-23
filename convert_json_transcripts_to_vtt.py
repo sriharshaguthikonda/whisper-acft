@@ -1,5 +1,7 @@
 import argparse
 import json
+import os
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Iterable, List, Mapping, MutableMapping, Sequence
 
@@ -50,7 +52,6 @@ def segments_to_vtt_lines(segments: Iterable[Mapping]) -> List[str]:
 
 
 def process_file(json_path: Path, output_dir: Path, overwrite: bool) -> Path | None:
-    output_dir.mkdir(parents=True, exist_ok=True)
     vtt_path = output_dir / (json_path.stem + ".vtt")
     if vtt_path.exists() and not overwrite:
         return None  # resumable: skip already-created file
@@ -64,22 +65,36 @@ def process_file(json_path: Path, output_dir: Path, overwrite: bool) -> Path | N
     return vtt_path
 
 
-def convert_all(input_dir: Path, output_dir: Path, overwrite: bool) -> None:
+def convert_all(input_dir: Path, output_dir: Path, overwrite: bool, workers: int) -> None:
     json_files = sorted(input_dir.glob("*.json"))
     if not json_files:
         raise FileNotFoundError(f"No .json files found in {input_dir}")
 
+    if output_dir.exists():
+        if not output_dir.is_dir():
+            raise ValueError(f"Output path exists and is not a directory: {output_dir}")
+    else:
+        output_dir.mkdir(parents=True, exist_ok=True)
+
     successes, skipped, failures = 0, 0, 0
-    for json_file in tqdm(json_files, desc="Converting JSON to VTT", unit="file"):
-        try:
-            result = process_file(json_file, output_dir, overwrite)
-            if result is None:
-                skipped += 1
-            else:
-                successes += 1
-        except Exception as exc:  # noqa: BLE001
-            failures += 1
-            tqdm.write(f"[ERROR] {json_file.name}: {exc}")
+    with ThreadPoolExecutor(max_workers=workers) as executor:
+        future_map = {
+            executor.submit(process_file, json_file, output_dir, overwrite): json_file
+            for json_file in json_files
+        }
+        with tqdm(total=len(json_files), desc="Converting JSON to VTT", unit="file") as bar:
+            for future in as_completed(future_map):
+                json_file = future_map[future]
+                try:
+                    result = future.result()
+                    if result is None:
+                        skipped += 1
+                    else:
+                        successes += 1
+                except Exception as exc:  # noqa: BLE001
+                    failures += 1
+                    bar.write(f"[ERROR] {json_file.name}: {exc}")
+                bar.update(1)
 
     tqdm.write(
         f"Done. Created: {successes}, skipped: {skipped} (already present), failures: {failures}"
@@ -107,13 +122,19 @@ def parse_args() -> argparse.Namespace:
         action="store_true",
         help="Regenerate VTT even if it already exists (otherwise skipped for resumability).",
     )
+    parser.add_argument(
+        "--workers",
+        type=int,
+        default=max(4, (os.cpu_count() or 4)),
+        help="Number of worker threads (I/O bound; defaults to CPU count).",
+    )
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     output_dir = args.output_dir or args.input_dir
-    convert_all(args.input_dir, output_dir, overwrite=args.overwrite)
+    convert_all(args.input_dir, output_dir, overwrite=args.overwrite, workers=args.workers)
 
 
 if __name__ == "__main__":
