@@ -52,6 +52,18 @@ def parse_args() -> argparse.Namespace:
         default=1024,
         help="Skip files smaller than this many bytes (helps avoid empty placeholders).",
     )
+    parser.add_argument(
+        "--resume",
+        action="store_true",
+        default=True,
+        help="Resume from existing output JSON if present (skip already processed files).",
+    )
+    parser.add_argument(
+        "--no-resume",
+        action="store_false",
+        dest="resume",
+        help="Disable resume; reprocess all files.",
+    )
     return parser.parse_args()
 
 
@@ -135,6 +147,22 @@ def main() -> None:
     if not files:
         raise SystemExit(f"No .wav files found in {audio_dir} meeting size >= {args.min_bytes} bytes.")
 
+    # Resume support: load existing summaries and skip processed files
+    processed: dict[str, dict] = {}
+    if args.resume and args.output_json.exists():
+        try:
+            with args.output_json.open("r", encoding="utf-8") as f:
+                existing = json.load(f)
+            for entry in existing.get("files", []):
+                processed[entry.get("file_name")] = entry
+            dataset_aggregate = defaultdict(float, existing.get("overall", {}).get("total_speech_seconds_by_file_local_speaker", {}))
+            print(f"Resume enabled: found {len(processed)} completed files in {args.output_json}", flush=True)
+        except Exception as exc:
+            print(f"Resume ignored (failed to read existing JSON): {exc}", flush=True)
+            dataset_aggregate = defaultdict(float)
+    else:
+        dataset_aggregate = defaultdict(float)
+
     pipeline = build_pipeline(args.hf_token, device=args.device)
     audio = Audio(sample_rate=16000, mono=True)
     if args.device:
@@ -145,23 +173,35 @@ def main() -> None:
         device_str = torch.cuda.get_device_name(0)
     else:
         device_str = "cpu"
-    print(f"Using device: {device_str} | files to process: {len(files)}", flush=True)
+    print(
+        f"Using device: {device_str} | total files: {len(files)} | already done: {len(processed)} | to process: {len(files) - len(processed)}",
+        flush=True,
+    )
 
-    dataset_aggregate: dict[str, float] = defaultdict(float)
-    file_summaries = []
+    file_summaries = list(processed.values()) if processed else []
 
     start_time = time.time()
-    for idx, wav_path in enumerate(files, start=1):
+    remaining_files = [p for p in files if p.name not in processed]
+    print(f"Total files: {len(files)} | Already done: {len(processed)} | To process: {len(remaining_files)}", flush=True)
+
+    for idx, wav_path in enumerate(remaining_files, start=1):
         tick = time.time()
-        print(f"[{idx}/{len(files)}] Diarizing {wav_path.name} ...", flush=True)
+        global_idx = len(processed) + idx
+        print(
+            f"[{global_idx}/{len(files)} | {idx}/{len(remaining_files)}] Diarizing {wav_path.name} ...",
+            flush=True,
+        )
         summary = diarize_file(wav_path, pipeline, audio)
         file_summaries.append(summary)
         for speaker, details in summary["speakers"].items():
             dataset_aggregate[speaker] += details["total_speech"]
         took = time.time() - tick
-        avg = (time.time() - start_time) / idx
-        eta = avg * (len(files) - idx) / 60
-        print(f"    done in {took/60:.2f} min | avg {avg/60:.2f} min/file | ETA {eta:.1f} min", flush=True)
+        avg = (time.time() - start_time) / (len(processed) + idx)
+        eta = avg * (len(files) - (len(processed) + idx)) / 60
+        print(
+            f"    done in {took/60:.2f} min | avg {avg/60:.2f} min/file | ETA {eta:.1f} min",
+            flush=True,
+        )
 
         overall = {
             "total_files": len(files),
