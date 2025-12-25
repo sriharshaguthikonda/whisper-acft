@@ -115,7 +115,37 @@ def run_ffmpeg_cut(in_path: str, out_path: str, start_s: float, end_s: float, sr
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
-def process_single_json(json_path: Path, chunks_dir: Path, manifest_dir: Path | None, overwrite: bool) -> int:
+def resolve_audio_path(audio_path: str, audio_root: Path) -> Path:
+    original = Path(audio_path)
+    if original.exists():
+        return original
+
+    # Handle Colab-style prefix
+    colab_prefix = Path("/content/drive/My Drive")
+    if str(original).startswith(str(colab_prefix)):
+        candidate = audio_root / original.name
+        if candidate.exists():
+            return candidate
+        # Try .wav instead of original suffix
+        candidate_wav = candidate.with_suffix(".wav")
+        if candidate_wav.exists():
+            return candidate_wav
+
+    # Fallback: try audio_root + filename with wav
+    fallback = audio_root / original.name
+    if fallback.exists():
+        return fallback
+    fallback_wav = fallback.with_suffix(".wav")
+    if fallback_wav.exists():
+        return fallback_wav
+
+    # Last resort return original (will fail downstream and get logged)
+    return original
+
+
+def process_single_json(
+    json_path: Path, chunks_dir: Path, audio_root: Path, overwrite: bool
+) -> tuple[int, int, List[str]]:
     with json_path.open("r", encoding="utf-8") as f:
         payload = json.load(f)
 
@@ -123,23 +153,31 @@ def process_single_json(json_path: Path, chunks_dir: Path, manifest_dir: Path | 
     chunks = build_sentence_chunks(segments)
 
     audio_path = payload["input_file"]["path"]
-    base = Path(audio_path).stem
+    resolved_audio = resolve_audio_path(audio_path, audio_root)
+    base = Path(resolved_audio).stem
 
     manifest_records: List[str] = []
     created = 0
+    skipped = 0
 
-    for idx, ch in enumerate(chunks):
+    # Pre-compute outputs to allow a fast skip when everything already exists
+    outputs = [chunks_dir / f"{base}_sent{idx:04d}.wav" for idx in range(len(chunks))]
+    if not overwrite and all(p.exists() for p in outputs):
+        # All chunks already present; return quickly without rebuilding manifest records
+        return 0, len(outputs), []
+
+    for idx, (ch, out_wav) in enumerate(zip(chunks, outputs)):
         start = max(0.0, ch.start - PAD_SECONDS)
         end = ch.end + PAD_SECONDS
-        out_wav = chunks_dir / f"{base}_sent{idx:04d}.wav"
         if out_wav.exists() and not overwrite:
-            continue
-        run_ffmpeg_cut(audio_path, str(out_wav), start, end)
-        created += 1
+            skipped += 1
+        else:
+            run_ffmpeg_cut(str(resolved_audio), str(out_wav), start, end)
+            created += 1
         record = {
             "audio_path": str(out_wav),
             "raw_transcription": ch.text,
-            "source_audio": audio_path,
+            "source_audio": str(resolved_audio),
             "chunk_index": idx,
             "chunk_start": start,
             "chunk_end": end,
@@ -147,19 +185,14 @@ def process_single_json(json_path: Path, chunks_dir: Path, manifest_dir: Path | 
         }
         manifest_records.append(json.dumps(record, ensure_ascii=False))
 
-    if manifest_dir and manifest_records:
-        manifest_dir.mkdir(parents=True, exist_ok=True)
-        manifest_path = manifest_dir / f"{json_path.stem}.jsonl"
-        with manifest_path.open("w", encoding="utf-8") as mf:
-            mf.write("\n".join(manifest_records) + "\n")
-
-    return created
+    return created, skipped, manifest_records
 
 
 def convert_all(
     input_dir: Path,
     output_dir: Path,
-    manifest_dir: Path | None,
+    manifest_path: Path,
+    audio_root: Path,
     overwrite: bool,
     workers: int,
 ) -> None:
@@ -170,20 +203,64 @@ def convert_all(
     output_dir.mkdir(parents=True, exist_ok=True)
 
     total_created = 0
+    total_skipped = 0
+    existing_audio: set[str] = set()
+    if manifest_path.exists() and not overwrite:
+        with manifest_path.open("r", encoding="utf-8") as mf:
+            for line in mf:
+                try:
+                    rec = json.loads(line)
+                    ap = rec.get("audio_path")
+                    if ap:
+                        existing_audio.add(ap)
+                except Exception:
+                    continue
+        tqdm.write(f"Loaded {len(existing_audio)} existing manifest entries from {manifest_path}")
+
+    manifest_path.parent.mkdir(parents=True, exist_ok=True)
+    write_mode = "w" if overwrite else "a"
+    manifest_file = manifest_path.open(write_mode, encoding="utf-8")
+
     with ProcessPoolExecutor(max_workers=workers) as executor:
-        futures = {
-            executor.submit(process_single_json, jf, output_dir, manifest_dir, overwrite): jf
-            for jf in json_files
-        }
-        for fut in tqdm(as_completed(futures), total=len(futures), desc="Chunking transcripts", unit="file"):
+        submit_pbar = tqdm(total=len(json_files), desc="Queueing files", unit="file")
+        futures = {}
+        for jf in json_files:
+            fut = executor.submit(process_single_json, jf, output_dir, audio_root, overwrite)
+            futures[fut] = jf
+            submit_pbar.update(1)
+        submit_pbar.close()
+
+        process_pbar = tqdm(total=len(futures), desc="Processing files", unit="file")
+        for fut in as_completed(futures):
             jf = futures[fut]
             try:
-                created = fut.result()
+                created, skipped, manifest_records = fut.result()
                 total_created += created
+                total_skipped += skipped
+                new_lines = 0
+                for line in manifest_records:
+                    try:
+                        rec = json.loads(line)
+                        ap = rec.get("audio_path")
+                    except Exception:
+                        ap = None
+                    if ap and ap in existing_audio:
+                        continue
+                    if ap:
+                        existing_audio.add(ap)
+                    manifest_file.write(line + "\n")
+                    new_lines += 1
+                tqdm.write(f"[{jf.name}] created={created} skipped={skipped}")
             except Exception as exc:  # noqa: BLE001
                 tqdm.write(f"[ERROR] {jf.name}: {exc}")
+            finally:
+                process_pbar.update(1)
+        process_pbar.close()
 
-    tqdm.write(f"Done. Created {total_created} chunks across {len(json_files)} files.")
+    manifest_file.close()
+    tqdm.write(
+        f"Done. Created {total_created} chunks, skipped {total_skipped} existing files across {len(json_files)} JSONs."
+    )
 
 
 def parse_args() -> argparse.Namespace:
@@ -199,14 +276,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(r"i:\P2GPT_google_drive\My Drive\Record_chunks_sentence"),
+        default=Path(r"i:\P2GPT_google_drive\My Drive\Record_chunks"),
         help="Where to write chunked WAV files.",
     )
     parser.add_argument(
-        "--manifest-dir",
+        "--manifest-path",
         type=Path,
-        default=Path(r"i:\P2GPT_google_drive\My Drive\Record_chunks_sentence\manifests"),
-        help="Directory to write per-JSON manifest .jsonl files (one line per chunk).",
+        default=Path(r"i:\P2GPT_google_drive\My Drive\Record_chunks\pairs_manifest_sentence.jsonl"),
+        help="Path to aggregated manifest JSONL (appends unless --overwrite).",
+    )
+    parser.add_argument(
+        "--audio-root",
+        type=Path,
+        default=Path(r"I:\Record_wav"),
+        help="Directory containing full-length source audio files (used to remap Colab paths).",
     )
     parser.add_argument(
         "--overwrite",
@@ -227,7 +310,8 @@ def main() -> None:
     convert_all(
         input_dir=args.input_dir,
         output_dir=args.output_dir,
-        manifest_dir=args.manifest_dir,
+        manifest_path=args.manifest_path,
+        audio_root=args.audio_root,
         overwrite=args.overwrite,
         workers=args.workers,
     )
