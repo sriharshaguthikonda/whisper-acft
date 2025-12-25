@@ -2,9 +2,12 @@ import os
 import shutil
 from transformers import WhisperProcessor
 
-TMP_DIR = r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\processor_tmp"
+BASE_DIR = r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx"
+TMP_DIR = os.path.join(BASE_DIR, "processor_tmp")
 TARGETS = [
-    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000051",
+    os.path.join(BASE_DIR, d)
+    for d in os.listdir(BASE_DIR)
+    if os.path.isdir(os.path.join(BASE_DIR, d)) and d.startswith("model_epoch_")
 ]
 FILES = [
     "preprocessor_config.json",
@@ -16,6 +19,7 @@ FILES = [
     "merges.txt",
 ]
 
+
 def main():
     os.makedirs(TMP_DIR, exist_ok=True)
     proc = WhisperProcessor.from_pretrained("openai/whisper-tiny")
@@ -26,11 +30,18 @@ def main():
         for fname in FILES:
             src = os.path.join(TMP_DIR, fname)
             dst = os.path.join(tgt, fname)
+
+            # skip if target already has the file
+            if os.path.exists(dst):
+                print(f"Skip (exists): {fname} in {tgt}")
+                continue
+
             if os.path.exists(src):
-                shutil.copy(src, dst)
+                shutil.copy2(src, dst)
                 print(f"Copied {fname} -> {tgt}")
             else:
                 print(f"Missing in source: {fname}")
+
 
 if __name__ == "__main__":
     main()
