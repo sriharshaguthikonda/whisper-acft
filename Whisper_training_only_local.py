@@ -9,6 +9,7 @@ import time
 import shutil
 import hashlib
 import gc
+import tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -89,6 +90,43 @@ def cleanup_memory(aggressive: bool = False):
     if aggressive:
         gc.collect()
         gc.collect()
+
+
+def ensure_processor_files(target_dir: str, processor: WhisperProcessor):
+    """Copy needed processor/tokenizer files into checkpoint dir if missing. Returns list of created file paths."""
+    needed = [
+        "preprocessor_config.json",
+        "feature_extractor.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt",
+        "special_tokens_map.json",
+        "added_tokens.json",
+    ]
+    created = []
+    with tempfile.TemporaryDirectory() as tmp:
+        processor.save_pretrained(tmp)
+        for name in needed:
+            src = os.path.join(tmp, name)
+            dst = os.path.join(target_dir, name)
+            if not os.path.isfile(src) or os.path.isfile(dst):
+                continue
+            try:
+                shutil.copy2(src, dst)
+                created.append(dst)
+            except Exception:
+                pass
+    return created
+
+
+def remove_files(paths):
+    for p in paths or []:
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+        except Exception:
+            pass
 
 
 def read_jsonl(path: str):
@@ -636,6 +674,18 @@ if __name__ == "__main__":
         loader = build_loader_from_rows(selected)
         avg_loss = train_one_epoch_on_loader(epoch_num, loader)
         print(f"Epoch {epoch_num} avg loss: {avg_loss:.6f}")
+        now = time.time()
+        trained_append = []
+        for r in selected:
+            ap = r["audio_path_original"]
+            if ap not in trained_set:
+                trained_set.add(ap)
+                trained_append.append({"audio_path": ap, "epoch": epoch_num, "trained_at": now})
+        if trained_append:
+            append_jsonl(TRAINED_JSONL_PATH, trained_append)
+            print("Appended trained records:", len(trained_append))
+        model_dir, state_path, ckpt_ok = save_checkpoint(epoch_num, subset_start_idx=subset_start_idx, subset_count=len(selected))
+        created_proc_files = ensure_processor_files(model_dir, processor)
         if EVAL_EVERY_EPOCH and val_loader is not None:
             distill_val = wer_val = None
             try:
@@ -652,17 +702,7 @@ if __name__ == "__main__":
                 print(f"Eval (val) distill_loss: {distill_val:.6f}")
             elif wer_val is not None:
                 print(f"Eval (val) WER: {wer_val:.4f}")
-        now = time.time()
-        trained_append = []
-        for r in selected:
-            ap = r["audio_path_original"]
-            if ap not in trained_set:
-                trained_set.add(ap)
-                trained_append.append({"audio_path": ap, "epoch": epoch_num, "trained_at": now})
-        if trained_append:
-            append_jsonl(TRAINED_JSONL_PATH, trained_append)
-            print("Appended trained records:", len(trained_append))
-        model_dir, state_path, ckpt_ok = save_checkpoint(epoch_num, subset_start_idx=subset_start_idx, subset_count=len(selected))
+        remove_files(created_proc_files)
         if DELETE_TRAINED_FROM_DRIVE and ckpt_ok:
             drive_paths = [r.get("audio_path_original") for r in selected if r.get("audio_path_original")]
             cleanup_trained_drive_audio(drive_paths, mode=DRIVE_CLEANUP_MODE, allowed_prefix=DRIVE_ALLOWED_PREFIX, archive_dir=DRIVE_ARCHIVE_DIR)
