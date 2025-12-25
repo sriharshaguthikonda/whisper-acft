@@ -34,11 +34,14 @@ except ImportError:  # pragma: no cover - helper hint
 DEFAULT_MANIFEST = r"i:\P2GPT_google_drive\My Drive\Record_chunks\pairs_manifest.jsonl"
 DEFAULT_EXCLUDE = r"i:\P2GPT_google_drive\My Drive\Record_chunks\trained_files.jsonl"
 DEFAULT_CHECKPOINTS = [
-    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000001",
-    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000006",
-    r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000007",
+    os.path.join(
+        r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx", d
+    )
+    for d in os.listdir(r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx")
+    if os.path.isdir(os.path.join(r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx", d))
+    and d.startswith("model_epoch_")
 ]
-DEFAULT_SAMPLE_SIZE = 32
+DEFAULT_SAMPLE_SIZE = 64
 DEFAULT_SEED = 17
 DEFAULT_DEVICE = "cuda"
 DEFAULT_CER = True
@@ -47,9 +50,11 @@ DEFAULT_DEVICES = ["cuda"]  # e.g., ["cuda:0", "cuda:1"] to spread checkpoints a
 USE_MULTIPROCESS = False  # set True to parallelize checkpoints across devices
 USE_TORCH_COMPILE = False  # set True to use torch.compile for faster inference (requires PyTorch 2.x)
 USE_SDPA = True  # use scaled dot product attention (flash attention) if available
-USE_SELECTION_GUI = True  # if True, choose audio files and transcription folder at runtime
+USE_SELECTION_GUI = False  # if True, choose audio files and transcription folder at runtime
+EVAL_BASELINE = True  # also evaluate a baseline hub model
+BASELINE_MODEL = "openai/whisper-tiny"
 PAIRS_MANIFEST = DEFAULT_MANIFEST  # exclude anything listed in pairs_manifest.jsonl
-DEFAULT_AUDIO_DIR = r"I:\Record_wav"
+DEFAULT_AUDIO_DIR = r"I:\Record"
 DEFAULT_TRANSCRIPT_DIR = r"I:\P2GPT_google_drive\My Drive\Transcriptions"
 PROCESSOR_SOURCE = r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx\model_epoch_000001"
 
@@ -298,7 +303,7 @@ def evaluate_checkpoint(
     model = WhisperForConditionalGeneration.from_pretrained(
         ckpt_path,
         attn_implementation=attn_impl,
-        torch_dtype=torch.float16 if device.startswith("cuda") else torch.float32,
+        dtype=torch.float16 if device.startswith("cuda") else torch.float32,
     ).to(device)
     model.eval()
     if USE_TORCH_COMPILE:
@@ -321,6 +326,7 @@ def evaluate_checkpoint(
         batch_refs = []
         batch_lengths = []
         sr = processor.feature_extractor.sampling_rate
+        target_len = int(sr * 30)  # pad/extend short clips to 30s to reach expected mel length
 
         for sample in batch:
             try:
@@ -341,6 +347,8 @@ def evaluate_checkpoint(
                     s_idx = max(0, s_idx)
                     e_idx = min(len(wav), e_idx)
                     wav = wav[s_idx:e_idx]
+                if len(wav) < target_len:
+                    wav = np.pad(wav, (0, target_len - len(wav)), mode="constant")
                 wavs.append(wav)
                 batch_refs.append(sample.text)
                 batch_lengths.append(len(wav) / sr_loaded)
@@ -352,7 +360,13 @@ def evaluate_checkpoint(
             continue
 
         t0 = time.time()
-        inputs = processor(wavs, sampling_rate=sr, return_tensors="pt", padding=True).to(device)
+        inputs = processor(
+            wavs,
+            sampling_rate=sr,
+            return_tensors="pt",
+            padding="max_length",
+            return_attention_mask=True,
+        ).to(device)
         with torch.no_grad(), torch.amp.autocast(device_type="cuda" if device.startswith("cuda") else "cpu"):
             generated = model.generate(
                 **inputs,
@@ -469,6 +483,23 @@ def main():
 
         subset = pick_subset(all_samples, sample_size, seed)
         print(f"Loaded {len(all_samples)} total rows; evaluating {len(subset)} samples")
+
+    if EVAL_BASELINE:
+        print(f"\n>>> Evaluating baseline: {BASELINE_MODEL} on {DEFAULT_DEVICE}")
+        try:
+            stats = evaluate_checkpoint(BASELINE_MODEL, subset, DEFAULT_DEVICE, do_cer, batch_size=DEFAULT_BATCH_SIZE)
+            print(
+                "Baseline WER: {wer:.4f} | CER: {cer} | RTF: {rtf:.3f} | samples: {n} | skipped: {sk} | wall: {wall:.1f}s".format(
+                    wer=stats["wer"],
+                    cer=f"{stats['cer']:.4f}" if stats["cer"] is not None else "-",
+                    rtf=stats["rtf"],
+                    n=stats["samples"],
+                    sk=stats["skipped"],
+                    wall=stats["wall_time_sec"],
+                )
+            )
+        except Exception as e:
+            print(f"Baseline eval failed: {e}")
 
     if USE_MULTIPROCESS and len(DEFAULT_DEVICES) > 1:
         # chunk checkpoints across devices and spawn separate processes
