@@ -17,10 +17,10 @@ SYSTEM_PROMPT = (
     "You are renaming audio files that contain FAKE medical consultations. "
     "Generate a concise, human-readable filename stem for the conversation AND provide a corrected transcript. "
     "Rules for filename: return only the filename stem (no extension); use underscores instead of spaces; "
-    "keep filename short and specific to the main topic.\n\n"
+    "keep filename descriptive but specific to the main topic.\n\n"
     "Transcript rule: DO NOT paraphrase or summarize. Fix possible voice-recognition errors by going through the whole transcript and coming back to correct it, obvious typos, capitalization errors and basic grammar/punctuation. "
     "Keep the original wording, order, and detail intact."
-    "Do not add or remove content like hesitations etc.\n\n"
+    "keep the hesitations, repetitions, etc.\n\n"
     "Respond ONLY as compact JSON with two keys: "
     '{"filename_stem": "<stem_with_underscores>", "corrected_transcript": "<corrected text>"}'
 )
@@ -58,7 +58,7 @@ def load_env(env_path: Path) -> Dict[str, str]:
 def parse_args() -> argparse.Namespace:
     env = load_env(Path(".env"))
     default_keys = env.get("GROQ_API_KEYS", "")
-    default_models = env.get("GROQ_MODEL", "llama-3.1-8b-instant")
+    default_models = env.get("GROQ_MODEL", "meta-llama/llama-4-maverick-17b-128e-instruct")
     default_transcripts = env.get("TRANSCRIPTS_DIR", "")
     default_audio = env.get("AUDIO_DIR", "")
 

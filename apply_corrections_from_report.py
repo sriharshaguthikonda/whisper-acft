@@ -95,7 +95,7 @@ def align_corrected_to_segments(corrected_text: str, segments: List[Dict]) -> Li
         return [corrected_text]
 
     orig_parts = [seg.get("text", "") for seg in segments]
-    sep = " "
+    sep = "\u241f"  # unlikely sentinel to keep boundaries distinct
     orig_text = sep.join(orig_parts)
 
     # Precompute original segment char ranges in the joined string
@@ -108,55 +108,42 @@ def align_corrected_to_segments(corrected_text: str, segments: List[Dict]) -> Li
         cursor = end + (len(sep) if i < len(orig_parts) - 1 else 0)
 
     sm = difflib.SequenceMatcher(None, orig_text, corrected_text, autojunk=False)
-    builders = [""] * len(ranges)
 
+    # Map each original character index to slices of corrected text
+    char_to_spans: List[List[tuple[float, float]]] = [[] for _ in orig_text]
     for tag, i1, i2, j1, j2 in sm.get_opcodes():
         if tag == "insert":
-            # Assign insertion to the segment that ends at i1 (previous), otherwise next
-            seg_idx = None
-            for idx, (s, e) in enumerate(ranges):
-                if e == i1:
-                    seg_idx = idx
-                    break
-                if s <= i1 < e:
-                    seg_idx = idx
-                    break
-                if i1 < s:
-                    seg_idx = max(idx - 1, 0)
-                    break
-            if seg_idx is None:
-                seg_idx = len(ranges) - 1
-            builders[seg_idx] += corrected_text[j1:j2]
+            # attach insertion to previous char if possible, else next char, else first
+            attach_idx = i1 - 1 if i1 > 0 else (i1 if i1 < len(char_to_spans) else len(char_to_spans) - 1)
+            if 0 <= attach_idx < len(char_to_spans):
+                char_to_spans[attach_idx].append((j1, j2))
             continue
-
         if tag == "delete":
-            # nothing to add from corrected text
             continue
 
-        # tag in {"equal", "replace"}
-        o_len = i2 - i1
+        # equal or replace: distribute proportionally across the original slice
+        o_len = max(1, i2 - i1)
         c_len = j2 - j1
-        if o_len == 0:
-            continue
+        for k in range(i1, i2):
+            rel_start = (k - i1) / o_len
+            rel_end = (k - i1 + 1) / o_len
+            c_start = j1 + rel_start * c_len
+            c_end = j1 + rel_end * c_len
+            char_to_spans[k].append((c_start, c_end))
 
-        # map portions proportionally to overlapping segments
-        o_cursor = i1
-        c_cursor = j1
-        while o_cursor < i2:
-            # find segment containing this origin position
-            seg_idx = next((idx for idx, (s, e) in enumerate(ranges) if s <= o_cursor < e), len(ranges) - 1)
-            seg_start, seg_end = ranges[seg_idx]
-            take = min(i2, seg_end) - o_cursor
-            # proportional slice of corrected span
-            proportion = take / o_len
-            c_take = max(1, int(round(c_len * proportion))) if (o_cursor + take) >= i2 else int(c_len * proportion)
-            c_take = min(c_take, j2 - c_cursor)
-            builders[seg_idx] += corrected_text[c_cursor : c_cursor + c_take]
-            o_cursor += take
-            c_cursor += c_take
+    results: List[str] = []
+    for seg_start, seg_end in ranges:
+        spans = []
+        for idx in range(seg_start, seg_end):
+            spans.extend(char_to_spans[idx])
+        if spans:
+            c_start = int(min(s for s, _ in spans))
+            c_end = int(max(e for _, e in spans))
+            results.append(corrected_text[c_start:c_end].strip())
+        else:
+            results.append("")
 
-    # Fallback: ensure each piece stripped
-    return [b.strip() for b in builders]
+    return results
 
 
 def apply_correction(transcript_path: Path, corrected_text: str) -> Dict:
@@ -166,8 +153,14 @@ def apply_correction(transcript_path: Path, corrected_text: str) -> Dict:
 
     if segments:
         new_texts = align_corrected_to_segments(corrected_text, segments)
+        # If any non-empty original segment became empty, fallback to proportional split for that slot
+        lengths = [len(seg.get("text", "")) for seg in segments]
+        fallback = proportional_split(corrected_text, lengths)
         for seg, new_text in zip(segments, new_texts):
-            seg["text"] = new_text
+            if not new_text and seg.get("text"):
+                seg["text"] = fallback[segments.index(seg)]
+            else:
+                seg["text"] = new_text
         groq["segments"] = segments
     else:
         groq["segments"] = [{"text": corrected_text, "start": None, "end": None}]
