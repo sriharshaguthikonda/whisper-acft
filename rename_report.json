@@ -138,5 +138,495 @@
     "proposed": "cough_and_breathlessness_assessment.m4a",
     "action": "would_rename",
     "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\bells palsy.json",
+    "original": "bells palsy.m4a",
+    "proposed": "bell_palsy_consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\bladder cancer treatment refusal.json",
+    "original": "bladder cancer treatment refusal.m4a",
+    "proposed": "terminal_bladder_cancer_patient_refuses_treatment.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\bloating case.json",
+    "original": "bloating case.m4a",
+    "proposed": "bloating_consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Breaking bad news aorto femoral bypass Bleeding post surgery..json",
+    "original": "Breaking bad news aorto femoral bypass Bleeding post surgery..m4a",
+    "proposed": "Bleeding_Complication_After_Vascular_Surgery.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Breaking Bad News Intracerbral Bleed Telephone.json",
+    "original": "Breaking Bad News Intracerbral Bleed Telephone.m4a",
+    "proposed": "Intracerebral_Bleed_Breaking_Bad_News.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Breaking bad news, second stroke, palliative.json",
+    "original": "Breaking bad news, second stroke, palliative.m4a",
+    "proposed": "Breaking_Bad_News_Second_Stroke_Palliative_Care.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\C. difficile diarrhoea.json",
+    "original": "C. difficile diarrhoea.m4a",
+    "proposed": "C_difficile_diarrhea_due_to_antibiotics.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\cannabis insomia.json",
+    "original": "cannabis insomia.m4a",
+    "proposed": "sleep_disturbance_consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\captopril pregnancy .json",
+    "original": "captopril pregnancy .m4a",
+    "proposed": "Hypertension_and_Pregnancy_Concerns.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Carbon monoxide poisoning headache.json",
+    "original": "Carbon monoxide poisoning headache.m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\cataract.json",
+    "original": "cataract.m4a",
+    "proposed": "cataract_consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Cerebral palsy discrimination ankle injury.json",
+    "original": "Cerebral palsy discrimination ankle injury.m4a",
+    "proposed": "Cerebral_Palsy_Discrimination_Ankle_Injury_becomes.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Changing records.json",
+    "original": "Changing records.m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Cherry angiomas.json",
+    "original": "Cherry angiomas.m4a",
+    "proposed": "Cherry_Angioma_Consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Chicken pox..json",
+    "original": "Chicken pox..m4a",
+    "proposed": "Chicken_Pox_Consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Child abuse.json",
+    "original": "Child abuse.m4a",
+    "proposed": "Spiral_Fracture_Investigation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Child Holidays Sick Note Demand.json",
+    "original": "Child Holidays Sick Note Demand.m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\citalopram induced hyponatremia.json",
+    "original": "citalopram induced hyponatremia.m4a",
+    "proposed": "citalopram_induced_hyponatremia.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\clostridium difficile associated the diarrhoea concerned son.json",
+    "original": "clostridium difficile associated the diarrhoea concerned son.m4a",
+    "proposed": "Clostridium_Difficile_Infection_Concerns.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\cocaine colleague.json",
+    "original": "cocaine colleague.m4a",
+    "proposed": "medical_student_cocaine_use_concern.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\colleague coming late to the hospital..json",
+    "original": "colleague coming late to the hospital..m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\colon cancer.json",
+    "original": "colon cancer.m4a",
+    "proposed": "Bleeding_Symptoms_Consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Constipation post orthopedic surgery, talk to nurse..json",
+    "original": "Constipation post orthopedic surgery, talk to nurse..m4a",
+    "proposed": "Constipation_post_orthopedic_surgery_discussion.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Cradle cap.json",
+    "original": "Cradle cap.m4a",
+    "proposed": "infant.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\demanding tonsillectomy.json",
+    "original": "demanding tonsillectomy.m4a",
+    "proposed": "recurrent_tonsillitis_consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Diabetic Keto Acidosis Patient wants to leave.json",
+    "original": "Diabetic Keto Acidosis Patient wants to leave.m4a",
+    "proposed": "Diabetic_Ketoacidosis_Patient_Refuses_Hospital_Stay.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\diabetic retinopathy counseling optician referral.json",
+    "original": "diabetic retinopathy counseling optician referral.m4a",
+    "proposed": "diabetic_retinopathy_consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\diabetic review learning disability.json",
+    "original": "diabetic review learning disability.m4a",
+    "proposed": "diabetic_review.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Discussing Suspected Elder Abuse and Safeguarding Concerns.json",
+    "original": "Discussing Suspected Elder Abuse and Safeguarding Concerns.m4a",
+    "proposed": "Elder_Abuse_Concerns_Discussion.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\domestic violence homosexual.json",
+    "original": "domestic violence homosexual.m4a",
+    "proposed": "domestic_abuse_assessment.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Dysphagia suspected esophageal cancer..json",
+    "original": "Dysphagia suspected esophageal cancer..m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Elderly Abuse.json",
+    "original": "Elderly Abuse.m4a",
+    "proposed": "Elderly_Patient_Safeguarding_Concerns.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Essential tremor.json",
+    "original": "Essential tremor.m4a",
+    "proposed": "Essential_Tremor_Consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Facebook post colleague.json",
+    "original": "Facebook post colleague.m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\fall.json",
+    "original": "fall.m4a",
+    "proposed": "patient_after_fall_assessment.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Fibrile convulsions.json",
+    "original": "Fibrile convulsions.m4a",
+    "proposed": "Febrile_Seizures_In_Child.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Gastric carcinoma suspected..json",
+    "original": "Gastric carcinoma suspected..m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\gender dysphoria.json",
+    "original": "gender dysphoria.m4a",
+    "proposed": "gender_dysphoria_consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\General Anxiety Disorder.json",
+    "original": "General Anxiety Disorder.m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Generalized anxiety disorder.json",
+    "original": "Generalized anxiety disorder.m4a",
+    "proposed": "Medical_Student_Anxiety_Consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Genital herpes.json",
+    "original": "Genital herpes.m4a",
+    "proposed": "Pregnant_Patient_With_Genital_Herpes_Symptoms.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Genital warts.json",
+    "original": "Genital warts.m4a",
+    "proposed": "genital_w.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Heberden nodules osteoarthritis .json",
+    "original": "Heberden nodules osteoarthritis .m4a",
+    "proposed": "Heberden_nodules_osteoarthritis_consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\herpetic whitlow.json",
+    "original": "herpetic whitlow.m4a",
+    "proposed": "herpetic_whitlow_consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Huntington Disease Inheritance Counselling.json",
+    "original": "Huntington Disease Inheritance Counselling.m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Indigestion gastroesophageal reflex disease..json",
+    "original": "Indigestion gastroesophageal reflex disease..m4a",
+    "proposed": "Gastroesophageal_Reflux_Disease_Consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\infected hernia.json",
+    "original": "infected hernia.m4a",
+    "proposed": "infected_hernia_consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Infectious Mononucleosis.json",
+    "original": "Infectious Mononucleosis.m4a",
+    "proposed": "Sore_Throat_Assessment.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Infective endocarditis..json",
+    "original": "Infective endocarditis..m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Intervertebral disk collapse.json",
+    "original": "Intervertebral disk collapse.m4a",
+    "proposed": "Lower_Back_Pain_Diagnosis.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Intesusseption.json",
+    "original": "Intesusseption.m4a",
+    "proposed": "Pediatric_Intussusception_Consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Jehovah Witness, Hip Arthroplasty, Bleeding.json",
+    "original": "Jehovah Witness, Hip Arthroplasty, Bleeding.m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Jehovah's Witness post hip surgery.json",
+    "original": "Jehovah's Witness post hip surgery.m4a",
+    "proposed": "Post_Hip_Surgery_Dizziness.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\lesbian discrimination.json",
+    "original": "lesbian discrimination.m4a",
+    "proposed": "workplace_harassment_due_to_sexual_orientation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Lesbian Fertility Counselling.json",
+    "original": "Lesbian Fertility Counselling.m4a",
+    "proposed": "Lesbian_Couple_Fertility_Options.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\levothyryoxine dose adjustment LPA .json",
+    "original": "levothyryoxine dose adjustment LPA .m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Lithium toxicity..json",
+    "original": "Lithium toxicity..m4a",
+    "proposed": "Lithium_Toxicity_Consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Low Vitamin D test results disclosure .json",
+    "original": "Low Vitamin D test results disclosure .m4a",
+    "proposed": "Low_Vitamin_D_Diagnosis_and_Treatment.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\malaria.json",
+    "original": "malaria.m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\medical error hairline fracture.json",
+    "original": "medical error hairline fracture.m4a",
+    "proposed": "missed_hairline_fracture_diagnosis.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\medical error pencillin allergy.json",
+    "original": "medical error pencillin allergy.m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\medication overuse headache.json",
+    "original": "medication overuse headache.m4a",
+    "proposed": "medication_overuse_headache_assessment.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Meningitis Prophylaxis .json",
+    "original": "Meningitis Prophylaxis .m4a",
+    "proposed": "Meningitis_Concerns_AND_Prophylaxis.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Michael Lewis's Gender Dysphoria Consultation.json",
+    "original": "Michael Lewis's Gender Dysphoria Consultation.m4a",
+    "proposed": "Gender_Dysphoria_Consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\Minor emergency contraception..json",
+    "original": "Minor emergency contraception..m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\missed myocardial infarction.json",
+    "original": "missed myocardial infarction.m4a",
+    "proposed": "missed_myocardial_infarction_diagnosis.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\missing blood sample.json",
+    "original": "missing blood sample.m4a",
+    "proposed": "missing_blood_sample_issue.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\molluscum contagiosum.json",
+    "original": "molluscum contagiosum.m4a",
+    "proposed": "molluscum_contagiosum_consultation.m4a",
+    "action": "would_rename",
+    "detail": ""
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\musculoskeletal chest pain costochondritis.json",
+    "original": "musculoskeletal chest pain costochondritis.m4a",
+    "proposed": "",
+    "action": "error",
+    "detail": "HTTPError: 429 Client Error: Too Many Requests for url: https://api.groq.com/openai/v1/chat/completions"
+  },
+  {
+    "transcript": "I:\\P2GPT_google_drive\\My Drive\\Transcriptions\\musculoskeletal chest pain.json",
+    "original": "musculoskeletal chest pain.m4a",
+    "proposed": "musculoskeletal_chest_pain_assessment.m4a",
+    "action": "would_rename",
+    "detail": ""
   }
 ]

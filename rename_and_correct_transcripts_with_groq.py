@@ -3,25 +3,43 @@ from __future__ import annotations
 import argparse
 import json
 import re
+import sys
 import time
+import random
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+from itertools import cycle, product
 
 import requests
 
 
 SYSTEM_PROMPT = (
     "You are renaming audio files that contain FAKE medical consultations. "
-    "Generate a concise, human-readable title for the conversation. "
-    "Return only the filename stem (no extension). Use underscores instead of spaces. "
-    "Avoid unsafe or identifying details. Keep it short and specific to the main topic."
+    "Generate a concise, human-readable filename stem for the conversation AND provide a corrected transcript. "
+    "Rules for filename: return only the filename stem (no extension); use underscores instead of spaces; "
+    "keep filename short and specific to the main topic.\n\n"
+    "Transcript rule: DO NOT paraphrase or summarize. Fix possible voice-recognition errors by going through the whole transcript and coming back to correct it, obvious typos, capitalization errors and basic grammar/punctuation. "
+    "Keep the original wording, order, and detail intact."
+    "Do not add or remove content like hesitations etc.\n\n"
+    "Respond ONLY as compact JSON with two keys: "
+    '{"filename_stem": "<stem_with_underscores>", "corrected_transcript": "<corrected text>"}'
 )
+
+RESPONSE_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "filename_stem": {"type": "string"},
+        "corrected_transcript": {"type": "string"},
+    },
+    "required": ["filename_stem", "corrected_transcript"],
+    "additionalProperties": False,
+}
 
 
 """
-use : 
+use :
 
-python rename_audio_with_groq.py --transcripts-dir "i:\P2GPT_google_drive\My Drive\Transcriptions" --audio-dir "i:\Record" --report rename_report.json --retry-backoff-base 2
+python rename_and_correct_transcripts_with_groq.py --transcripts-dir "i:\P2GPT_google_drive\My Drive\Transcriptions" --audio-dir "i:\Record" --report rename_and_corrected_transcript_report.json --retry-backoff-base 2
 """
 
 def load_env(env_path: Path) -> Dict[str, str]:
@@ -45,7 +63,7 @@ def parse_args() -> argparse.Namespace:
     default_audio = env.get("AUDIO_DIR", "")
 
     parser = argparse.ArgumentParser(
-        description="Rename audio files using Groq chat model suggestions based on transcript JSON files."
+        description="Rename audio files and correct transcripts using Groq chat model suggestions based on transcript JSON files."
     )
     parser.add_argument(
         "--transcripts-dir",
@@ -81,8 +99,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--report",
         type=Path,
-        default=Path("rename_report.json"),
-        help="Path to write the dry-run/apply report (defaults to rename_report.json).",
+        default=Path("rename_and_corrected_transcript_report.json"),
+        help="Path to write the dry-run/apply report (defaults to rename_and_corrected_transcript_report.json).",
     )
     parser.add_argument(
         "--max-retries",
@@ -114,6 +132,17 @@ def parse_args() -> argparse.Namespace:
         default=1.5,
         help="Base seconds for exponential backoff on API errors (attempt^backoff_base).",
     )
+    parser.add_argument(
+        "--per-request-delay",
+        type=float,
+        default=0.0,
+        help="Optional fixed sleep seconds between API calls to reduce rate limits.",
+    )
+    parser.add_argument(
+        "--strict-output",
+        action="store_true",
+        help="Force strict structured output (only works on supported models like openai/gpt-oss-20b, openai/gpt-oss-120b).",
+    )
     return parser.parse_args()
 
 
@@ -135,6 +164,33 @@ def sanitize_filename(stem: str, max_len: int = 80) -> str:
     return stem
 
 
+def clean_text(text: str) -> str:
+    """Normalize punctuation, remove hard newlines, and collapse whitespace."""
+    replacements = {
+        "\u2011": "-",
+        "\u2013": "-",
+        "\u2014": "-",
+        "\u2018": "'",
+        "\u2019": "'",
+        "\u201c": '"',
+        "\u201d": '"',
+    }
+    for src, tgt in replacements.items():
+        text = text.replace(src, tgt)
+    text = text.replace("\r", " ").replace("\n", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def strip_speaker_labels(text: str) -> str:
+    """Remove simple speaker tags like 'Doctor:' or 'Patient:'."""
+    pattern = re.compile(
+        r"\b(?:doctor|dr|patient|nurse|speaker|interviewer|interviewee|caller|agent|user|customer|client|mr|mrs|ms|miss|sir|madam)\s*:\s*",
+        re.IGNORECASE,
+    )
+    return pattern.sub("", text).strip()
+
+
 def rotate(values: List[str]):
     while True:
         for v in values:
@@ -148,14 +204,45 @@ def rotate_pairs(keys: List[str], models: List[str]):
             yield pair
 
 
+def extract_response(content: str) -> Tuple[str, str]:
+    """Parse model JSON output safely."""
+    content = content.strip()
+    # strip code fences if present
+    if content.startswith("```"):
+        content = content.strip("`")
+        if "\n" in content:
+            content = content.split("\n", 1)[1]
+    try:
+        data = json.loads(content)
+    except json.JSONDecodeError:
+        # try to salvage JSON if model adds prose
+        if "{" in content and "}" in content:
+            snippet = content[content.find("{") : content.rfind("}") + 1]
+            data = json.loads(snippet)
+        else:
+            raise ValueError("Model did not return JSON.")
+    filename_stem = data.get("filename_stem") or data.get("new_filename_stem")
+    corrected_transcript = data.get("corrected_transcript") or data.get("transcript") or ""
+    if not filename_stem or not corrected_transcript:
+        raise ValueError("Missing filename_stem or corrected_transcript in model response.")
+    return str(filename_stem).strip(), str(corrected_transcript).strip()
+
+
 def call_groq_chat(
     api_key: str,
     model: str,
     transcript_text: str,
     original_name: str,
-) -> str:
+    per_request_delay: float = 0.0,
+    strict_output: bool = False,
+) -> Tuple[str, str]:
+    if per_request_delay > 0:
+        time.sleep(per_request_delay)
     url = "https://api.groq.com/openai/v1/chat/completions"
-    headers = {"Authorization": f"Bearer {api_key}"}
+    headers = {
+        "Authorization": f"Bearer {api_key}",
+        "Content-Type": "application/json",
+    }
     messages = [
         {"role": "system", "content": SYSTEM_PROMPT},
         {
@@ -174,7 +261,17 @@ def call_groq_chat(
             "model": model,
             "messages": messages,
             "temperature": 0.2,
-            "max_tokens": 64,
+            # Allow ample room for corrected transcript and filename JSON
+            "max_tokens": 4096,
+            "response_format": {
+                "type": "json_schema",
+                "json_schema": {
+                    "name": "rename_and_correct_transcript",
+                    # strict=True only on supported models; otherwise best-effort
+                    "strict": strict_output,
+                    "schema": RESPONSE_SCHEMA,
+                },
+            },
         },
         timeout=60,
     )
@@ -184,30 +281,58 @@ def call_groq_chat(
     if not choices or not choices[0].get("message", {}).get("content"):
         raise ValueError("Empty response from model")
     choice = choices[0]["message"]["content"].strip()
-    # Ensure single line
-    return choice.splitlines()[0].strip()
+    return extract_response(choice)
 
 
-def propose_name(
+def propose_name_and_correction(
     keys: List[str],
     models: List[str],
     transcript_text: str,
     original_name: str,
     max_retries: int,
     backoff_base: float,
-) -> Tuple[Optional[str], Optional[str]]:
-    pair_rotator = rotate_pairs(keys, models)
+    per_request_delay: float,
+) -> Tuple[Optional[str], Optional[str], Optional[str]]:
+    pairs: List[Tuple[str, str]] = [(k, m) for k, m in product(keys, models)]
+    if not pairs:
+        return None, None, "No key/model pairs to use."
+    pair_rotator = cycle(pairs)
+    total_attempts = max_retries * len(pairs)
     last_error: Optional[str] = None
-    for attempt in range(max_retries):
+    for attempt in range(total_attempts):
         api_key, model = next(pair_rotator)
         try:
-            stem = call_groq_chat(api_key, model, transcript_text, original_name)
-            print(transcript_text)
-            return stem, None
+            stem, corrected_transcript = call_groq_chat(
+                api_key=api_key,
+                model=model,
+                transcript_text=transcript_text,
+                original_name=original_name,
+                per_request_delay=per_request_delay,
+                strict_output=False,
+            )
+            corrected_transcript = strip_speaker_labels(clean_text(corrected_transcript))
+            return stem, corrected_transcript, None
         except requests.exceptions.HTTPError as exc:
-            last_error = f"HTTPError: {exc}"
+            body = ""
+            if exc.response is not None:
+                try:
+                    body = exc.response.text
+                except Exception:
+                    body = ""
+            last_error = (
+                f"HTTPError {exc.response.status_code if exc.response else ''}: "
+                f"{body or exc}"
+            )
             # Backoff on rate limits and rotate
-            sleep_s = max(1.0, backoff_base ** (attempt + 1))
+            retry_after = 0.0
+            if exc.response is not None:
+                try:
+                    retry_after = float(exc.response.headers.get("Retry-After", "0"))
+                except Exception:
+                    retry_after = 0.0
+            base = max(1.0, backoff_base ** (attempt + 1))
+            jitter = random.uniform(0.0, 0.5 * base)
+            sleep_s = base + retry_after + jitter
             time.sleep(sleep_s)
             continue
         except Exception as exc:  # broad to log any API issue
@@ -215,7 +340,7 @@ def propose_name(
             sleep_s = max(1.0, backoff_base ** (attempt + 1))
             time.sleep(sleep_s)
             continue
-    return None, last_error
+    return None, None, last_error
 
 
 def flush_report(report: List[Dict[str, str]], path: Path) -> None:
@@ -286,15 +411,31 @@ def main() -> None:
     transcripts = sorted(args.transcripts_dir.glob("*.json"))
     total = len(transcripts)
     print(f"Found {total} transcript files. Starting {'apply' if args.apply else 'dry run'}...")
+    if total > 0:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
 
     processed_set = {
         normalize_path(Path(item.get("transcript"))) for item in report if item.get("transcript")
     }
 
+    bar_width = 30
+    def render_progress(current: int, total_items: int) -> None:
+        if total_items == 0:
+            return
+        fraction = min(1.0, current / total_items)
+        filled = int(bar_width * fraction)
+        bar = "#" * filled + "-" * (bar_width - filled)
+        sys.stdout.write(f"\r[{bar}] {current}/{total_items}")
+        sys.stdout.flush()
+
+    render_progress(0, total)
+
     for idx, json_file in enumerate(transcripts, start=1):
         transcript_key = normalize_path(json_file)
         if args.resume and transcript_key in processed_set:
             print(f"[{idx}/{total}] Skipping {json_file.name} (already in report).")
+            render_progress(idx, total)
             continue
         print(f"[{idx}/{total}] Processing {json_file.name}...")
         try:
@@ -305,10 +446,13 @@ def main() -> None:
                     "transcript": str(json_file.resolve()),
                     "original": "",
                     "proposed": "",
+                    "corrected_transcript": "",
                     "action": "error",
                     "detail": f"failed to load transcript: {exc}",
                 }
             )
+            flush_report(report, args.report)
+            render_progress(idx, total)
             continue
 
         original_audio = args.audio_dir / input_name
@@ -319,19 +463,23 @@ def main() -> None:
                     "transcript": str(json_file.resolve()),
                     "original": input_name,
                     "proposed": "",
+                    "corrected_transcript": "",
                     "action": "missing_audio",
                     "detail": "audio file not found",
                 }
             )
+            flush_report(report, args.report)
+            render_progress(idx, total)
             continue
 
-        stem, error = propose_name(
+        stem, corrected_transcript, error = propose_name_and_correction(
             keys=keys,
             models=models,
             transcript_text=transcript_text,
             original_name=input_name,
             max_retries=args.max_retries,
             backoff_base=args.retry_backoff_base,
+            per_request_delay=args.per_request_delay,
         )
         if stem is None:
             print(f"  ❌ Model error: {error}")
@@ -340,10 +488,13 @@ def main() -> None:
                     "transcript": str(json_file.resolve()),
                     "original": input_name,
                     "proposed": "",
+                    "corrected_transcript": "",
                     "action": "error",
                     "detail": error or "unknown error",
                 }
             )
+            flush_report(report, args.report)
+            render_progress(idx, total)
             continue
 
         sanitized_stem = sanitize_filename(stem)
@@ -370,16 +521,19 @@ def main() -> None:
                 "transcript": str(json_file.resolve()),
                 "original": input_name,
                 "proposed": target_path.name,
+                "corrected_transcript": corrected_transcript or "",
                 "action": action,
                 "detail": detail,
             }
         )
-
-        if idx % args.flush_interval == 0:
-            flush_report(report, args.report)
-            print(f"  💾 Report checkpoint saved after {idx} items.")
+        flush_report(report, args.report)
+        print(f"  💾 Report checkpoint saved after {idx} items.")
+        render_progress(idx, total)
 
     flush_report(report, args.report)
+    if total > 0:
+        sys.stdout.write("\n")
+        sys.stdout.flush()
     print(f"Report written to {args.report} ({len(report)} items).")
     if not args.apply:
         print("Dry run complete. Re-run with --apply to perform renames.")
