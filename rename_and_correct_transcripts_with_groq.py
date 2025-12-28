@@ -18,9 +18,7 @@ SYSTEM_PROMPT = (
     "Generate a concise, human-readable filename stem for the conversation AND provide a corrected transcript. "
     "Rules for filename: return only the filename stem (no extension); use underscores instead of spaces; "
     "keep filename descriptive but specific to the main topic.\n\n"
-    "Transcript rule: DO NOT paraphrase or summarize. Fix possible voice-recognition errors by going through the whole transcript and coming back to correct it, obvious typos, capitalization errors and basic grammar/punctuation. "
-    "Keep the original wording, order, and detail intact."
-    "keep the hesitations, repetitions, etc.\n\n"
+    "Transcript correction rule: Correct only and only the punctuation! do not change anything else!"
     "Respond ONLY as compact JSON with two keys: "
     '{"filename_stem": "<stem_with_underscores>", "corrected_transcript": "<corrected text>"}'
 )
@@ -447,6 +445,7 @@ def main() -> None:
                     "original": "",
                     "proposed": "",
                     "corrected_transcript": "",
+                    "original_transcript": "",
                     "action": "error",
                     "detail": f"failed to load transcript: {exc}",
                 }
@@ -463,6 +462,7 @@ def main() -> None:
                     "transcript": str(json_file.resolve()),
                     "original": input_name,
                     "proposed": "",
+                    "original_transcript": transcript_text,
                     "corrected_transcript": "",
                     "action": "missing_audio",
                     "detail": "audio file not found",
@@ -488,6 +488,7 @@ def main() -> None:
                     "transcript": str(json_file.resolve()),
                     "original": input_name,
                     "proposed": "",
+                    "original_transcript": transcript_text,
                     "corrected_transcript": "",
                     "action": "error",
                     "detail": error or "unknown error",
@@ -521,6 +522,7 @@ def main() -> None:
                 "transcript": str(json_file.resolve()),
                 "original": input_name,
                 "proposed": target_path.name,
+                "original_transcript": transcript_text,
                 "corrected_transcript": corrected_transcript or "",
                 "action": action,
                 "detail": detail,

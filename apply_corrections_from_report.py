@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-import difflib
 from pathlib import Path
 from typing import Dict, List
 
@@ -20,18 +19,19 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--report",
         type=Path,
-        required=True,
-        help="Path to rename_and_corrected_transcript_report.json",
+        default=Path("rename_and_corrected_transcript_report.json"),
+        help="Path to rename_and_corrected_transcript_report.json (default: rename_and_corrected_transcript_report.json)",
     )
     parser.add_argument(
         "--transcripts-dir",
         type=Path,
-        required=True,
-        help="Directory containing the original transcript JSON files",
+        default=Path(r"I:\P2GPT_google_drive\My Drive\Transcriptions"),
+        help="Directory containing the original transcript JSON files (default: I:\\P2GPT_google_drive\\My Drive\\Transcriptions)",
     )
     parser.add_argument(
         "--output-dir",
         type=Path,
+        default=Path(r"I:\P2GPT_google_drive\My Drive\Transcriptions_corrected"),
         help="Directory to write corrected transcript JSON files (defaults to in-place overwrite)",
     )
     parser.add_argument(
@@ -85,11 +85,126 @@ def proportional_split(text: str, counts: List[int]) -> List[str]:
     return pieces
 
 
+def _smith_waterman_affine(orig: str, corr: str, match: int = 2, mismatch: int = -1, gap_open: int = -2, gap_extend: int = -1):
+    """Local alignment (Smith–Waterman) with affine gaps. Returns aligned index pairs."""
+    n, m = len(orig), len(corr)
+    M = [[0] * (m + 1) for _ in range(n + 1)]
+    Ix = [[0] * (m + 1) for _ in range(n + 1)]  # gap in corr (deletion from corr)
+    Iy = [[0] * (m + 1) for _ in range(n + 1)]  # gap in orig (insertion into corr)
+
+    trace_M = [[0] * (m + 1) for _ in range(n + 1)]
+    trace_Ix = [[0] * (m + 1) for _ in range(n + 1)]
+    trace_Iy = [[0] * (m + 1) for _ in range(n + 1)]
+
+    best_score = 0
+    best_pos = (0, 0, "M")
+
+    for i in range(1, n + 1):
+        for j in range(1, m + 1):
+            # Ix: gap in corr (orig consumes a char)
+            op1 = M[i - 1][j] + gap_open
+            op2 = Ix[i - 1][j] + gap_extend
+            if op1 >= op2 and op1 > 0:
+                Ix[i][j] = op1
+                trace_Ix[i][j] = 1  # from M
+            elif op2 > 0:
+                Ix[i][j] = op2
+                trace_Ix[i][j] = 2  # from Ix
+            else:
+                Ix[i][j] = 0
+                trace_Ix[i][j] = 0
+
+            # Iy: gap in orig (corr consumes a char)
+            op1 = M[i][j - 1] + gap_open
+            op2 = Iy[i][j - 1] + gap_extend
+            if op1 >= op2 and op1 > 0:
+                Iy[i][j] = op1
+                trace_Iy[i][j] = 1  # from M
+            elif op2 > 0:
+                Iy[i][j] = op2
+                trace_Iy[i][j] = 2  # from Iy
+            else:
+                Iy[i][j] = 0
+                trace_Iy[i][j] = 0
+
+            score = match if orig[i - 1] == corr[j - 1] else mismatch
+            diag_M = M[i - 1][j - 1] + score
+            diag_Ix = Ix[i - 1][j - 1] + score
+            diag_Iy = Iy[i - 1][j - 1] + score
+            best_diag = diag_M
+            source = 1
+            if diag_Ix > best_diag:
+                best_diag = diag_Ix
+                source = 2
+            if diag_Iy > best_diag:
+                best_diag = diag_Iy
+                source = 3
+
+            if best_diag > 0:
+                M[i][j] = best_diag
+                trace_M[i][j] = source
+            else:
+                M[i][j] = 0
+                trace_M[i][j] = 0
+
+            # track best over all matrices
+            if M[i][j] > best_score:
+                best_score = M[i][j]
+                best_pos = (i, j, "M")
+            if Ix[i][j] > best_score:
+                best_score = Ix[i][j]
+                best_pos = (i, j, "Ix")
+            if Iy[i][j] > best_score:
+                best_score = Iy[i][j]
+                best_pos = (i, j, "Iy")
+
+    # Traceback
+    i, j, state = best_pos
+    alignment = []
+    while i > 0 and j > 0:
+        if state == "M":
+            if M[i][j] == 0:
+                break
+            source = trace_M[i][j]
+            alignment.append((i - 1, j - 1))
+            i -= 1
+            j -= 1
+            if source == 1:
+                state = "M"
+            elif source == 2:
+                state = "Ix"
+            else:
+                state = "Iy"
+        elif state == "Ix":
+            if Ix[i][j] == 0:
+                break
+            source = trace_Ix[i][j]
+            alignment.append((i - 1, None))  # orig char aligned to gap in corr
+            i -= 1
+            if source == 1:
+                state = "M"
+            else:
+                state = "Ix"
+        else:  # Iy
+            if Iy[i][j] == 0:
+                break
+            source = trace_Iy[i][j]
+            alignment.append((None, j - 1))  # corr char aligned to gap in orig
+            j -= 1
+            if source == 1:
+                state = "M"
+            else:
+                state = "Iy"
+
+    alignment.reverse()
+    return alignment
+
+
 def align_corrected_to_segments(corrected_text: str, segments: List[Dict]) -> List[str]:
     """
-    Slice corrected_text back into segment-sized pieces using a character-level alignment
-    against the original concatenated segment text. This prevents words drifting across
-    segment boundaries.
+    Align corrected_text to the concatenated original segment text using Smith–Waterman
+    with affine gaps, then slice corrected_text back into per-segment pieces while
+    preserving segment order.
     """
     if not segments:
         return [corrected_text]
@@ -97,6 +212,33 @@ def align_corrected_to_segments(corrected_text: str, segments: List[Dict]) -> Li
     orig_parts = [seg.get("text", "") for seg in segments]
     sep = "\u241f"  # unlikely sentinel to keep boundaries distinct
     orig_text = sep.join(orig_parts)
+
+    alignment = _smith_waterman_affine(orig_text, corrected_text)
+
+    spans: List[List[int]] = [[] for _ in orig_text]
+    pending_ins: List[int] = []
+    last_orig = None
+
+    for o_idx, c_idx in alignment:
+        if o_idx is not None and c_idx is not None:
+            if pending_ins:
+                spans[o_idx].extend(pending_ins)
+                pending_ins = []
+            spans[o_idx].append(c_idx)
+            last_orig = o_idx
+        elif o_idx is None and c_idx is not None:
+            if last_orig is not None:
+                spans[last_orig].append(c_idx)
+            else:
+                pending_ins.append(c_idx)
+        elif o_idx is not None:
+            if pending_ins and last_orig is not None:
+                spans[last_orig].extend(pending_ins)
+                pending_ins = []
+            last_orig = o_idx
+
+    if pending_ins and last_orig is not None:
+        spans[last_orig].extend(pending_ins)
 
     # Precompute original segment char ranges in the joined string
     ranges: List[tuple[int, int]] = []
@@ -107,38 +249,14 @@ def align_corrected_to_segments(corrected_text: str, segments: List[Dict]) -> Li
         ranges.append((start, end))
         cursor = end + (len(sep) if i < len(orig_parts) - 1 else 0)
 
-    sm = difflib.SequenceMatcher(None, orig_text, corrected_text, autojunk=False)
-
-    # Map each original character index to slices of corrected text
-    char_to_spans: List[List[tuple[float, float]]] = [[] for _ in orig_text]
-    for tag, i1, i2, j1, j2 in sm.get_opcodes():
-        if tag == "insert":
-            # attach insertion to previous char if possible, else next char, else first
-            attach_idx = i1 - 1 if i1 > 0 else (i1 if i1 < len(char_to_spans) else len(char_to_spans) - 1)
-            if 0 <= attach_idx < len(char_to_spans):
-                char_to_spans[attach_idx].append((j1, j2))
-            continue
-        if tag == "delete":
-            continue
-
-        # equal or replace: distribute proportionally across the original slice
-        o_len = max(1, i2 - i1)
-        c_len = j2 - j1
-        for k in range(i1, i2):
-            rel_start = (k - i1) / o_len
-            rel_end = (k - i1 + 1) / o_len
-            c_start = j1 + rel_start * c_len
-            c_end = j1 + rel_end * c_len
-            char_to_spans[k].append((c_start, c_end))
-
     results: List[str] = []
     for seg_start, seg_end in ranges:
-        spans = []
+        seg_indices: List[int] = []
         for idx in range(seg_start, seg_end):
-            spans.extend(char_to_spans[idx])
-        if spans:
-            c_start = int(min(s for s, _ in spans))
-            c_end = int(max(e for _, e in spans))
+            seg_indices.extend(spans[idx])
+        if seg_indices:
+            c_start = min(seg_indices)
+            c_end = max(seg_indices) + 1
             results.append(corrected_text[c_start:c_end].strip())
         else:
             results.append("")
