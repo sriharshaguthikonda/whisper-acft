@@ -175,7 +175,34 @@ Using the manifest, the notebook will:
 
 ---
 
-## 10. Train the Whisper Model
+## 10. If training for a particular speaker, filter by speaker
+
+Using the script `sort_audio_files_by_speaker.py`, we can filter the audio files by speaker.
+
+Usage:
+```bash
+python sort_audio_files_by_speaker.py ^
+  --in "I:\Record_chunks" ^
+  --ref "I:\Record_harsha\CRISPR Data analysis final (slow paced) - Dr Sri Harsha Guthikonda.mp3" ^
+  --target_out "I:\Record_chunks_harsha" ^
+  --other_out "I:\Record_chunks_other" ^
+  --dry_run ^
+  --state_file "scoring_chunks_for_harsha_voice_state.json"
+```
+
+The script will:
+
+- Compare each chunk in `I:\Record_chunks` against the reference voice file.
+- Write chunks that match the reference speaker into `I:\Record_chunks_harsha`.
+- Write non-matching chunks into `I:\Record_chunks_other`.
+
+Remove `--dry_run` once you are happy with the selection and want the files to actually be copied/moved.
+
+the scores and file names will be in this file after dryrun = (speaker_sort_scores.csv)
+
+---
+
+## 11. Train the Whisper Model
 
 Once chunks and manifest are ready, run the training notebook.
 
@@ -189,7 +216,7 @@ Once chunks and manifest are ready, run the training notebook.
 
 ---
 
-## 11. Evaluate the Trained Model
+## 12. Evaluate the Trained Model
 
 Finally, evaluate checkpoints from training.
 

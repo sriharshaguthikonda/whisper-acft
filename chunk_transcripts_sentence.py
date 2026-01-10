@@ -3,6 +3,7 @@ import json
 import os
 import re
 import subprocess
+import sys
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass
 from pathlib import Path
@@ -95,23 +96,71 @@ def build_sentence_chunks(segments: Iterable[Mapping]) -> List[SentenceChunk]:
     return clipped
 
 
-def run_ffmpeg_cut(in_path: str, out_path: str, start_s: float, end_s: float, sr: int = 16000) -> None:
+def is_wav_mono_16k(audio_path: Path) -> bool:
+    if audio_path.suffix.lower() != ".wav":
+        return False
+    try:
+        result = subprocess.run(
+            [
+                "ffprobe",
+                "-v",
+                "error",
+                "-select_streams",
+                "a:0",
+                "-show_entries",
+                "stream=channels,sample_rate",
+                "-of",
+                "csv=p=0",
+                str(audio_path),
+            ],
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        parts = result.stdout.strip().split(",")
+        if len(parts) != 2:
+            return False
+        channels = int(parts[0])
+        sample_rate = int(parts[1])
+        return channels == 1 and sample_rate == 16000
+    except Exception:
+        return False
+
+
+def run_ffmpeg_cut(
+    in_path: str, out_path: str, start_s: float, end_s: float, sr: int = 16000, copy_if_wav: bool = False
+) -> None:
     Path(out_path).parent.mkdir(parents=True, exist_ok=True)
-    cmd = [
-        "ffmpeg",
-        "-y",
-        "-ss",
-        f"{start_s:.3f}",
-        "-to",
-        f"{end_s:.3f}",
-        "-i",
-        in_path,
-        "-ac",
-        "1",
-        "-ar",
-        str(sr),
-        out_path,
-    ]
+    if copy_if_wav:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            f"{start_s:.3f}",
+            "-to",
+            f"{end_s:.3f}",
+            "-i",
+            in_path,
+            "-c",
+            "copy",
+            out_path,
+        ]
+    else:
+        cmd = [
+            "ffmpeg",
+            "-y",
+            "-ss",
+            f"{start_s:.3f}",
+            "-to",
+            f"{end_s:.3f}",
+            "-i",
+            in_path,
+            "-ac",
+            "1",
+            "-ar",
+            str(sr),
+            out_path,
+        ]
     subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
 
 
@@ -159,6 +208,7 @@ def process_single_json(
     manifest_records: List[str] = []
     created = 0
     skipped = 0
+    copy_ok = is_wav_mono_16k(resolved_audio)
 
     # Pre-compute outputs to allow a fast skip when everything already exists
     outputs = [chunks_dir / f"{base}_sent{idx:04d}.wav" for idx in range(len(chunks))]
@@ -172,7 +222,7 @@ def process_single_json(
         if out_wav.exists() and not overwrite:
             skipped += 1
         else:
-            run_ffmpeg_cut(str(resolved_audio), str(out_wav), start, end)
+            run_ffmpeg_cut(str(resolved_audio), str(out_wav), start, end, copy_if_wav=copy_ok)
             created += 1
         record = {
             "audio_path": str(out_wav),
@@ -315,6 +365,16 @@ def main() -> None:
         overwrite=args.overwrite,
         workers=args.workers,
     )
+    # Beep to signal completion (cross-platform best effort)
+    try:
+        if sys.platform.startswith("win"):
+            import winsound
+
+            winsound.Beep(1000, 600)
+        else:
+            print("\a", end="", flush=True)
+    except Exception:
+        pass
 
 
 if __name__ == "__main__":

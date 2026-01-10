@@ -40,7 +40,7 @@ DRIVE_ALLOWED_PREFIX = r"i:\P2GPT_google_drive\My Drive\Record_chunks\\"
 DRIVE_ARCHIVE_DIR = r"i:\P2GPT_google_drive\My Drive\Record_chunks\_trained_archive"
 
 TARGET_SR = 16000
-MODEL_SIZE = "tiny"
+MODEL_ID = "futo-org/acft-whisper-tiny"  # using Futo ACFT tiny checkpoint by default
 N_SAMPLES_PER_EPOCH = 500
 
 VAL_SIZE = 200
@@ -155,23 +155,17 @@ def stable_local_name(src_path: str) -> str:
 
 
 def copy_epoch_subset_to_local(selected_rows, epoch_dir: str, show_progress: bool = True):
-    os.makedirs(epoch_dir, exist_ok=True)
-    it = tqdm(selected_rows, desc=f"Copying -> {epoch_dir}", unit="file") if show_progress else selected_rows
+    """
+    Local-only mode: do NOT copy; just point to existing local files.
+    Keeps compatibility by setting audio_path_local = audio_path for files that exist.
+    """
+    it = tqdm(selected_rows, desc="Using local files", unit="file") if show_progress else selected_rows
     kept = []
     for row in it:
-        src = row["audio_path"]
-        if not os.path.exists(src):
+        src = row.get("audio_path")
+        if not src or not os.path.exists(src):
             continue
-        dst = os.path.join(epoch_dir, stable_local_name(src))
-        try:
-            if os.path.exists(dst) and os.path.getsize(dst) == os.path.getsize(src):
-                row["audio_path_local"] = dst
-                kept.append(row)
-                continue
-        except OSError:
-            pass
-        shutil.copy2(src, dst)
-        row["audio_path_local"] = dst
+        row["audio_path_local"] = src
         kept.append(row)
     return kept
 
@@ -414,7 +408,7 @@ def save_checkpoint(epoch_num: int, subset_start_idx: int, subset_count: int):
         "optimizer": optimizer.state_dict(),
         "scaler": scaler.state_dict() if use_grad_scaler else None,
         "timestamp": time.time(),
-        "model_size": MODEL_SIZE,
+        "model_id": MODEL_ID,
         "lr": LR,
         "batch_size": BATCH_SIZE,
         "grad_accum_steps": GRAD_ACCUM_STEPS,
@@ -570,15 +564,24 @@ if __name__ == "__main__":
     ckpt_based_epoch = (latest_ckpt_epoch + 1) if latest_ckpt_epoch is not None else 0
     epoch_num_start = max(trained_based_epoch, ckpt_based_epoch)
 
-    processor = WhisperProcessor.from_pretrained(f"openai/whisper-{MODEL_SIZE}")
+    try:
+        processor = WhisperProcessor.from_pretrained(MODEL_ID)
+    except Exception as e:
+        raise RuntimeError(f"Failed to load processor for MODEL_ID='{MODEL_ID}'. Ensure the HF repo exists and you have access.") from e
     if latest_ckpt_epoch is not None and latest_model_dir and os.path.isdir(latest_model_dir):
         print(f"Resuming model_train from: {latest_model_dir}")
         model_train = WhisperModel.from_pretrained(latest_model_dir)
     else:
-        model_train = WhisperModel.from_pretrained(f"openai/whisper-{MODEL_SIZE}")
+        try:
+            model_train = WhisperModel.from_pretrained(MODEL_ID)
+        except Exception as e:
+            raise RuntimeError(f"Failed to load model for MODEL_ID='{MODEL_ID}'. Ensure the HF repo exists and you have access.") from e
     model_train.to(device)
     model_train.train()
-    model_base = WhisperModel.from_pretrained(f"openai/whisper-{MODEL_SIZE}")
+    try:
+        model_base = WhisperModel.from_pretrained(MODEL_ID)
+    except Exception as e:
+        raise RuntimeError(f"Failed to load reference model for MODEL_ID='{MODEL_ID}'. Ensure the HF repo exists and you have access.") from e
     model_base.to(device)
     model_base.eval()
     optimizer = torch.optim.Adam(model_train.parameters(), lr=LR)
@@ -622,7 +625,7 @@ if __name__ == "__main__":
                     prefetch_factor=EVAL_PREFETCH_FACTOR,
                 )
                 forced_decoder_ids = processor.get_decoder_prompt_ids(language=EVAL_LANGUAGE, task=EVAL_TASK)
-                gen_model = WhisperForConditionalGeneration.from_pretrained(f"openai/whisper-{MODEL_SIZE}")
+                gen_model = WhisperForConditionalGeneration.from_pretrained(MODEL_ID)
                 gen_model.to(device)
                 gen_model.eval()
                 print("Validation set ready.")
