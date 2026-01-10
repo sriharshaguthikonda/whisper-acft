@@ -1,6 +1,15 @@
 """
 Local runnable training script converted from non_collab_Local_Whisper_training_only.ipynb.
 Adjust paths below to your local files (no Colab mounts).
+
+Usage (PowerShell example)
+--------------------------
+1) Adjust CONFIG paths below (manifest, trained jsonl, checkpoints, local cache, score CSV).
+2) (Optional but recommended) ensure `SCORE_CSV_PATH` points to speaker_sort_scores.csv so high-score files train first.
+3) Run:
+   python c:\Windows_software\whisper-acft\Whisper_Futo_finetuned_model_training_only_local.py
+4) Training resumes from the latest checkpoint/trained list. Each epoch trains the next slice (high score → lower).
+5) Outputs: checkpoints under CHECKPOINT_DIR, trained_files.jsonl append log, optional validation logs per epoch.
 """
 
 import os
@@ -10,6 +19,7 @@ import shutil
 import hashlib
 import gc
 import tempfile
+import csv
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -30,9 +40,10 @@ except Exception:
 # CONFIG: update these for local paths
 # ----------------------------------
 MANIFEST_PATH = r"i:\P2GPT_google_drive\My Drive\Record_chunks\pairs_manifest.jsonl"
-TRAINED_JSONL_PATH = r"i:\P2GPT_google_drive\My Drive\Record_chunks\trained_files.jsonl"
-CHECKPOINT_DIR = r"i:\P2GPT_google_drive\My Drive\checkpoints_partialctx"
-LOCAL_EPOCH_CACHE_ROOT = r"c:\temp\epoch_cache"  # fast local disk
+TRAINED_JSONL_PATH = r"i:\Record_chunks\trained_files.jsonl"
+CHECKPOINT_DIR = r"i:\\checkpoints_partialctx"
+LOCAL_EPOCH_CACHE_ROOT = r"i:\epoch_cache"  # fast local disk
+SCORE_CSV_PATH = r"c:\Windows_software\whisper-acft\speaker_sort_scores.csv"  # optional: speaker score CSV
 
 DELETE_TRAINED_FROM_DRIVE = False  # set True to delete/archive originals after checkpoint
 DRIVE_CLEANUP_MODE = "archive"    # "archive" | "delete"
@@ -41,24 +52,24 @@ DRIVE_ARCHIVE_DIR = r"i:\P2GPT_google_drive\My Drive\Record_chunks\_trained_arch
 
 TARGET_SR = 16000
 MODEL_ID = "futo-org/acft-whisper-tiny"  # using Futo ACFT tiny checkpoint by default
-N_SAMPLES_PER_EPOCH = 500
+N_SAMPLES_PER_EPOCH = 600
 
 VAL_SIZE = 200
 VAL_BATCH_SIZE = 4
-VAL_MAX_BATCHES = None
+VAL_MAX_BATCHES = 50  # cap eval time; set to None to run full val
 EVAL_EVERY_EPOCH = True
 EVAL_LANGUAGE = "en"
 EVAL_TASK = "transcribe"
 MAX_NEW_TOKENS = 128
 
-BATCH_SIZE = 4
-GRAD_ACCUM_STEPS = 2
-NUM_WORKERS = 0  # safer on Windows
+BATCH_SIZE = 8
+GRAD_ACCUM_STEPS = 1
+NUM_WORKERS = 2
 PREFETCH_FACTOR = 2
-PERSISTENT_WORKERS = False
+PERSISTENT_WORKERS = True
 
-EVAL_NUM_WORKERS = 0
-EVAL_PERSISTENT_WORKERS = False
+EVAL_NUM_WORKERS = 2
+EVAL_PERSISTENT_WORKERS = True
 EVAL_PREFETCH_FACTOR = 2
 
 MAX_AUDIO_SECONDS = 29.0
@@ -152,6 +163,59 @@ def stable_local_name(src_path: str) -> str:
     h = hashlib.sha1(src_path.encode("utf-8")).hexdigest()[:10]
     base = os.path.basename(src_path)
     return f"{h}_{base}"
+
+
+def _norm_path(p: str) -> str:
+    try:
+        return os.path.normcase(os.path.abspath(p))
+    except Exception:
+        return p
+
+
+def load_scores_csv(path: str):
+    """
+    Load speaker scores CSV (file,score,decision,reason).
+    Returns dict mapping normalized file path -> float score (highest if duplicates).
+    """
+    scores = {}
+    if not path or not os.path.isfile(path):
+        return scores
+    try:
+        with open(path, "r", encoding="utf-8") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                fp = row.get("file")
+                if not fp:
+                    continue
+                fp_norm = _norm_path(fp)
+                score_raw = row.get("score")
+                try:
+                    score_val = float(score_raw)
+                except Exception:
+                    continue
+                prev = scores.get(fp_norm)
+                if prev is None or score_val > prev:
+                    scores[fp_norm] = score_val
+    except Exception as e:
+        print(f"WARNING: failed to read scores CSV {path}: {e}")
+    return scores
+
+
+def reorder_manifest_by_score(manifest_rows, score_map):
+    """
+    Sort manifest rows descending by score; unknown scores go last.
+    """
+    enriched = []
+    matched = 0
+    for idx, r in enumerate(manifest_rows):
+        ap = r.get("audio_path") or r.get("audio_path_original")
+        score = score_map.get(_norm_path(ap)) if ap else None
+        if score is not None:
+            matched += 1
+        enriched.append((score, idx, r))
+    enriched.sort(key=lambda x: (-x[0], x[1]) if x[0] is not None else (float("inf"), x[1]))
+    sorted_rows = [r for _, _, r in enriched]
+    return sorted_rows, matched
 
 
 def copy_epoch_subset_to_local(selected_rows, epoch_dir: str, show_progress: bool = True):
@@ -548,6 +612,10 @@ if __name__ == "__main__":
     manifest_rows = read_jsonl(MANIFEST_PATH)
     if not manifest_rows:
         raise RuntimeError("Manifest is empty or not found")
+    score_map = load_scores_csv(SCORE_CSV_PATH)
+    if score_map:
+        manifest_rows, matched_scores = reorder_manifest_by_score(manifest_rows, score_map)
+        print(f"Reordered manifest by speaker scores: matched {matched_scores} of {len(manifest_rows)} rows")
     trained_rows = read_jsonl(TRAINED_JSONL_PATH)
     trained_set = {r.get("audio_path") for r in trained_rows if r.get("audio_path")}
     print("Manifest rows:", len(manifest_rows))
