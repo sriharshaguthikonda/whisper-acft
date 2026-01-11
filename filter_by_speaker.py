@@ -13,11 +13,11 @@ Features:
 
 """
 usage:
-python c:\Windows_software\whisper-acft\filter_by_speaker.py `
+python i:\whisper-acft\filter_by_speaker.py `
   --reference "c:\path\to\reference_voice.wav" `
   --input-dir "i:\P2GPT_google_drive\My Drive\Transcriptions" `
-  --state-file "c:\Windows_software\whisper-acft\speaker_filter_state.json" `
-  --report-json "c:\Windows_software\whisper-acft\speaker_filter_report.json" `
+  --state-file "i:\whisper-acft\speaker_filter_state.json" `
+  --report-json "i:\whisper-acft\speaker_filter_report.json" `
   --threshold 0.80 `
   --workers 0
 """

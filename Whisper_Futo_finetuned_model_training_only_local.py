@@ -67,7 +67,7 @@ EVAL_LANGUAGE = "en"
 EVAL_TASK = "transcribe"
 MAX_NEW_TOKENS = 128
 
-BATCH_SIZE = 32
+BATCH_SIZE = 25
 GRAD_ACCUM_STEPS = 1
 NUM_WORKERS = 2
 PERSISTENT_WORKERS = True
@@ -112,8 +112,8 @@ if HF_CACHE_DIR:
     os.makedirs(HF_CACHE_DIR, exist_ok=True)
     # These are respected by HF/Transformers
     os.environ.setdefault("HF_HOME", HF_CACHE_DIR)
-    os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(HF_CACHE_DIR, "transformers"))
     os.environ.setdefault("HF_DATASETS_CACHE", os.path.join(HF_CACHE_DIR, "datasets"))
+# Transformers v5+ treats caching as a huggingface_hub concern; HF_HOME is the supported knob.
 
 import numpy as np
 import torch
@@ -227,12 +227,13 @@ def reorder_manifest_by_score(manifest_rows: List[dict], score_map: Dict[str, fl
     return [r for _, _, r in enriched], matched
 
 
-def map_colab_path_to_local(path_in: str) -> str:
-    """Convert Colab paths or P2GPT drive paths into your local i:\Record_chunks\... paths."""
-    if not path_in:
-        return path_in
+def map_colab_path_to_local(colab_path: str) -> str:
+    r"""Convert Colab paths or P2GPT drive paths into your local i:\Record_chunks\... paths."""
+    
+    if not colab_path:
+        return colab_path
 
-    p = path_in
+    p = colab_path
     if "P2GPT_google_drive" in p:
         p = p.replace("i:\\P2GPT_google_drive\\My Drive\\Record_chunks\\", "i:\\Record_chunks\\")
     elif p.startswith("/content/drive/"):

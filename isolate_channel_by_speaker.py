@@ -36,11 +36,11 @@ Usage (PowerShell)
 ------------------
 # Run this in PowerShell (note the line-continuation ` at the end of each line):
 
-python "c:\Windows_software\whisper-acft\isolate_channel_by_speaker.py" `
+python "i:\whisper-acft\isolate_channel_by_speaker.py" `
   --reference "I:\My_voice\CRISPR Data analysis final (slow paced) - Dr Sri Harsha Guthikonda.mp3" `
   --input-dir "I:\Record" `
   --output-dir "I:\Record_Channel_selected" `
-  --state-file "c:\Windows_software\whisper-acft\channel_isolation_state.json" `
+  --state-file "i:\whisper-acft\channel_isolation_state.json" `
   --report-json "c:\Windows_software\whisper-acft\channel_isolation_report.json" `
   --threshold 0.80 `
   --margin 0.05 `

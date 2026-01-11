@@ -66,12 +66,12 @@ def convert_hf_to_gguf(model_dir: str, output_dir: str, whisper_cpp_path: str = 
     else:
         # Common locations
         converter_candidates = [
-            r"C:\Windows_software\whisper-acft\whisper.cpp\models\convert-h5-to-ggml.py",
+            r"i:\whisper-acft\whisper.cpp\models\convert-h5-to-ggml.py",
             r"whisper.cpp\models\convert-h5-to-ggml.py",
             os.path.expanduser("~/whisper.cpp/models/convert-h5-to-ggml.py"),
         ]
         whisper_repo_candidates = [
-            r"C:\Windows_software\whisper-acft\whisper",
+            r"i:\whisper-acft\whisper",
             r"whisper",
             os.path.expanduser("~/whisper"),
         ]
@@ -141,7 +141,7 @@ def quantize_ggml(ggml_file: str, qtype: str, whisper_cpp_path: str = None):
         ]
     else:
         quantize_candidates = [
-            r"C:\Windows_software\whisper-acft\whisper.cpp\build\bin\Release\quantize.exe",
+            r"i:\whisper-acft\whisper.cpp\build\bin\Release\quantize.exe",
             r"whisper.cpp\build\bin\Release\quantize.exe",
             r"whisper.cpp\build\bin\quantize.exe",
         ]

@@ -33,7 +33,7 @@ If the audio/transcript names are poor or inconsistent, use:
 - Usage: 
 
 ```bash
-python C:\Windows_software\whisper-acft\rename_and_correct_transcripts_with_groq.py --transcripts-dir "i:\P2GPT_google_drive\My Drive\Transcriptions" --audio-dir "i:\Record" --report rename_and_corrected_transcript_report.json --retry-backoff-base 2
+python i:\whisper-acft\rename_and_correct_transcripts_with_groq.py --transcripts-dir "i:\P2GPT_google_drive\My Drive\Transcriptions" --audio-dir "i:\Record" --report rename_and_corrected_transcript_report.json --retry-backoff-base 2
 ```
 
 This will:
@@ -49,7 +49,7 @@ This will:
 Run the script to generate a detailed corrections report:
 
 ```bash
-python C:\Windows_software\whisper-acft\rename_and_correct_transcripts_with_groq.py --transcripts-dir "i:\P2GPT_google_drive\My Drive\Transcriptions" --audio-dir "i:\Record" --report rename_and_corrected_transcript_report.json --retry-backoff-base 2
+python i:\whisper-acft\rename_and_correct_transcripts_with_groq.py --transcripts-dir "i:\P2GPT_google_drive\My Drive\Transcriptions" --audio-dir "i:\Record" --report rename_and_corrected_transcript_report.json --retry-backoff-base 2
 ```
 
 **What this report includes:**
@@ -70,8 +70,8 @@ Use the report to update the actual JSON transcripts.
 Example (adjust paths as needed):
 
 ```bash
-python "C:\Windows_software\whisper-acft\apply_corrections_from_report.py" ^
-  --report "C:\Windows_software\whisper-acft\rename_and_corrected_transcript_report.json" ^
+python "i:\whisper-acft\apply_corrections_from_report.py" ^
+  --report "i:\whisper-acft\rename_and_corrected_transcript_report.json" ^
   --transcripts-dir "I:\P2GPT_google_drive\My Drive\Transcriptions" ^
   --output-dir "I:\P2GPT_google_drive\My Drive\Transcriptions_corrected"
 ```
@@ -93,7 +93,7 @@ We now convert corrected JSON transcripts into subtitle formats for manual editi
 Example:
 
 ```bash
-python "C:\Windows_software\whisper-acft\convert_json_transcripts_to_vtt_and_ass.py" ^
+python "i:\whisper-acft\convert_json_transcripts_to_vtt_and_ass.py" ^
   --input-dir "I:\P2GPT_google_drive\My Drive\Transcriptions_corrected" ^
   --output-dir "I:\P2GPT_google_drive\My Drive\Transcriptions_corrected" ^
   --overwrite ^
@@ -222,7 +222,7 @@ Finally, evaluate checkpoints from training.
 
 - Script: `local_eval.py`  
   Example path:  
-  `C:\Windows_software\whisper-acft\local_eval.py`
+  `i:\whisper-acft\local_eval.py`
 
 You can:
 

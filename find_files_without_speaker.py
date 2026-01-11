@@ -42,7 +42,7 @@ Recommended usage:
 
 
 
-  python c:\Windows_software\whisper-acft\find_files_without_speaker.py `
+  python i:\whisper-acft\find_files_without_speaker.py `
   --reference "I:\My_voice\CRISPR Data analysis final (slow paced) - Dr Sri Harsha Guthikonda.mp3" `
   --input-dir "I:\Record" `
   --move-nonmajority-to "I:\Record_others" `
