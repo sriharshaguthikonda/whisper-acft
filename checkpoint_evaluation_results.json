@@ -1,0 +1,218 @@
+[
+  {
+    "checkpoint": "base_model",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.9045062065124512
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " For an empty GPU surgery, Mrs. Victoria Smith 33 has made an adjourned appointment.",
+        "processing_time": 0.3674142360687256
+      }
+    ],
+    "avg_processing_time": 0.6359602212905884,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.21244335174560547
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.3704509735107422
+      }
+    ],
+    "avg_processing_time": 0.29144716262817383,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.31339001655578613
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.5028858184814453
+      }
+    ],
+    "avg_processing_time": 0.4081379175186157,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.17071294784545898
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.32834529876708984
+      }
+    ],
+    "avg_processing_time": 0.24952912330627441,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.16700410842895508
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery, Mrs. Victoria Smith, 33, has made an adjourned appointment.",
+        "processing_time": 0.5920166969299316
+      }
+    ],
+    "avg_processing_time": 0.37951040267944336,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.235152006149292
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.37765026092529297
+      }
+    ],
+    "avg_processing_time": 0.3064011335372925,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.18772578239440918
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.3091390132904053
+      }
+    ],
+    "avg_processing_time": 0.24843239784240723,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.16080713272094727
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.3408536911010742
+      }
+    ],
+    "avg_processing_time": 0.25083041191101074,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.19144272804260254
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few GPs, Mr. Victoria Smith, 33 has made an adjourned appointment.",
+        "processing_time": 0.4301643371582031
+      }
+    ],
+    "avg_processing_time": 0.31080353260040283,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000011",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.20562291145324707
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.40574026107788086
+      }
+    ],
+    "avg_processing_time": 0.30568158626556396,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000012",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.28261637687683105
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few GPs, Mr. Victoria Smith, 33 has made an adjourned appointment.",
+        "processing_time": 0.6086833477020264
+      }
+    ],
+    "avg_processing_time": 0.4456498622894287,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000013",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.1879112720489502
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few GPs, Mr. Victoria Smith, 33 has made an adjourned appointment.",
+        "processing_time": 0.4242582321166992
+      }
+    ],
+    "avg_processing_time": 0.3060847520828247,
+    "total_files": 2,
+    "status": "success"
+  }
+]

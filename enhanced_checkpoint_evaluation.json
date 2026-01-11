@@ -1,0 +1,453 @@
+[
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 1.0936393737792969,
+        "audio_duration": 2.08,
+        "rtfx": 1.901906652109763,
+        "avg_confidence": 0.0,
+        "memory_before": 770.60546875,
+        "memory_after": 1316.453125,
+        "memory_peak": 545.84765625
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.4639279842376709,
+        "audio_duration": 5.32,
+        "rtfx": 11.467297039090786,
+        "avg_confidence": 0.0,
+        "memory_before": 1316.859375,
+        "memory_after": 1322.61328125,
+        "memory_peak": 5.75390625
+      }
+    ],
+    "metrics": {
+      "avg_processing_time": 0.7787836790084839,
+      "avg_rtfx": 4.750998383415908,
+      "avg_confidence": 0.0,
+      "total_processing_time": 1.5575673580169678,
+      "total_audio_duration": 7.4,
+      "memory_usage": {
+        "before_load": 618.828125,
+        "after_load": 701.19140625,
+        "final": 1322.6328125,
+        "peak_model_memory": 82.36328125
+      }
+    },
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.2527024745941162,
+        "audio_duration": 2.08,
+        "rtfx": 8.231023472725541,
+        "avg_confidence": 0.0,
+        "memory_before": 1322.6953125,
+        "memory_after": 1323.97265625,
+        "memory_peak": 1.27734375
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.3879706859588623,
+        "audio_duration": 5.32,
+        "rtfx": 13.712376198865952,
+        "avg_confidence": 0.0,
+        "memory_before": 1323.98828125,
+        "memory_after": 1328.85546875,
+        "memory_peak": 4.8671875
+      }
+    ],
+    "metrics": {
+      "avg_processing_time": 0.32033658027648926,
+      "avg_rtfx": 11.550351186263061,
+      "avg_confidence": 0.0,
+      "total_processing_time": 0.6406731605529785,
+      "total_audio_duration": 7.4,
+      "memory_usage": {
+        "before_load": 1322.6328125,
+        "after_load": 1322.6953125,
+        "final": 1328.85546875,
+        "peak_model_memory": 0.0625
+      }
+    },
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.21133852005004883,
+        "audio_duration": 2.08,
+        "rtfx": 9.842029742175814,
+        "avg_confidence": 0.0,
+        "memory_before": 1328.9453125,
+        "memory_after": 1331.22265625,
+        "memory_peak": 2.27734375
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.4091217517852783,
+        "audio_duration": 5.32,
+        "rtfx": 13.003464070989132,
+        "avg_confidence": 0.0,
+        "memory_before": 1331.22265625,
+        "memory_after": 1322.91796875,
+        "memory_peak": -8.3046875
+      }
+    ],
+    "metrics": {
+      "avg_processing_time": 0.3102301359176636,
+      "avg_rtfx": 11.926629851917404,
+      "avg_confidence": 0.0,
+      "total_processing_time": 0.6204602718353271,
+      "total_audio_duration": 7.4,
+      "memory_usage": {
+        "before_load": 1328.85546875,
+        "after_load": 1328.87109375,
+        "final": 1322.91796875,
+        "peak_model_memory": 0.015625
+      }
+    },
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.25751471519470215,
+        "audio_duration": 2.08,
+        "rtfx": 8.077208319638551,
+        "avg_confidence": 0.0,
+        "memory_before": 1322.93359375,
+        "memory_after": 1324.2109375,
+        "memory_peak": 1.27734375
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery, Mrs. Victoria Smith, 33, has made an adjourned appointment.",
+        "processing_time": 0.609710693359375,
+        "audio_duration": 5.32,
+        "rtfx": 8.72544972220832,
+        "avg_confidence": 0.0,
+        "memory_before": 1324.2109375,
+        "memory_after": 1322.99609375,
+        "memory_peak": -1.21484375
+      }
+    ],
+    "metrics": {
+      "avg_processing_time": 0.4336127042770386,
+      "avg_rtfx": 8.53296032036008,
+      "avg_confidence": 0.0,
+      "total_processing_time": 0.8672254085540771,
+      "total_audio_duration": 7.4,
+      "memory_usage": {
+        "before_load": 1322.91796875,
+        "after_load": 1322.93359375,
+        "final": 1322.99609375,
+        "peak_model_memory": 0.015625
+      }
+    },
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.2617182731628418,
+        "audio_duration": 2.08,
+        "rtfx": 7.947477166433154,
+        "avg_confidence": 0.0,
+        "memory_before": 1322.515625,
+        "memory_after": 1319.6171875,
+        "memory_peak": -2.8984375
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.4000725746154785,
+        "audio_duration": 5.32,
+        "rtfx": 13.29758733178151,
+        "avg_confidence": 0.0,
+        "memory_before": 1319.6171875,
+        "memory_after": 1325.43359375,
+        "memory_peak": 5.81640625
+      }
+    ],
+    "metrics": {
+      "avg_processing_time": 0.33089542388916016,
+      "avg_rtfx": 11.181780504886603,
+      "avg_confidence": 0.0,
+      "total_processing_time": 0.6617908477783203,
+      "total_audio_duration": 7.4,
+      "memory_usage": {
+        "before_load": 1322.99609375,
+        "after_load": 1322.515625,
+        "final": 1325.43359375,
+        "peak_model_memory": -0.48046875
+      }
+    },
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.3651237487792969,
+        "audio_duration": 2.08,
+        "rtfx": 5.696698741054171,
+        "avg_confidence": 0.0,
+        "memory_before": 1325.4453125,
+        "memory_after": 1317.37890625,
+        "memory_peak": -8.06640625
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.6253044605255127,
+        "audio_duration": 5.32,
+        "rtfx": 8.507855510144633,
+        "avg_confidence": 0.0,
+        "memory_before": 1317.37890625,
+        "memory_after": 1321.57421875,
+        "memory_peak": 4.1953125
+      }
+    ],
+    "metrics": {
+      "avg_processing_time": 0.4952141046524048,
+      "avg_rtfx": 7.471515785272439,
+      "avg_confidence": 0.0,
+      "total_processing_time": 0.9904282093048096,
+      "total_audio_duration": 7.4,
+      "memory_usage": {
+        "before_load": 1325.43359375,
+        "after_load": 1325.4453125,
+        "final": 1321.57421875,
+        "peak_model_memory": 0.01171875
+      }
+    },
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.5770034790039062,
+        "audio_duration": 2.08,
+        "rtfx": 3.6048309510901904,
+        "avg_confidence": 0.0,
+        "memory_before": 1284.4375,
+        "memory_after": 1317.37890625,
+        "memory_peak": 32.94140625
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.6608479022979736,
+        "audio_duration": 5.32,
+        "rtfx": 8.050263882961126,
+        "avg_confidence": 0.0,
+        "memory_before": 1317.37890625,
+        "memory_after": 1321.57421875,
+        "memory_peak": 4.1953125
+      }
+    ],
+    "metrics": {
+      "avg_processing_time": 0.6189256906509399,
+      "avg_rtfx": 5.97810053111322,
+      "avg_confidence": 0.0,
+      "total_processing_time": 1.2378513813018799,
+      "total_audio_duration": 7.4,
+      "memory_usage": {
+        "before_load": 1321.57421875,
+        "after_load": 1284.4375,
+        "final": 1321.57421875,
+        "peak_model_memory": -37.13671875
+      }
+    },
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.259002685546875,
+        "audio_duration": 2.08,
+        "rtfx": 8.030804760221516,
+        "avg_confidence": 0.0,
+        "memory_before": 1284.93359375,
+        "memory_after": 1324.22265625,
+        "memory_peak": 39.2890625
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few GPs, Mr. Victoria Smith, 33 has made an adjourned appointment.",
+        "processing_time": 0.5050678253173828,
+        "audio_duration": 5.32,
+        "rtfx": 10.533238771756904,
+        "avg_confidence": 0.0,
+        "memory_before": 1324.22265625,
+        "memory_after": 1322.015625,
+        "memory_peak": -2.20703125
+      }
+    ],
+    "metrics": {
+      "avg_processing_time": 0.3820352554321289,
+      "avg_rtfx": 9.684970031927667,
+      "avg_confidence": 0.0,
+      "total_processing_time": 0.7640705108642578,
+      "total_audio_duration": 7.4,
+      "memory_usage": {
+        "before_load": 1321.57421875,
+        "after_load": 1284.93359375,
+        "final": 1322.015625,
+        "peak_model_memory": -36.640625
+      }
+    },
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000011",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.262509822845459,
+        "audio_duration": 2.08,
+        "rtfx": 7.9235130230707895,
+        "avg_confidence": 0.0,
+        "memory_before": 1321.46484375,
+        "memory_after": 1319.62109375,
+        "memory_peak": -1.84375
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
+        "processing_time": 0.5366599559783936,
+        "audio_duration": 5.32,
+        "rtfx": 9.91316743635366,
+        "avg_confidence": 0.0,
+        "memory_before": 1319.62109375,
+        "memory_after": 1323.01953125,
+        "memory_peak": 3.3984375
+      }
+    ],
+    "metrics": {
+      "avg_processing_time": 0.39958488941192627,
+      "avg_rtfx": 9.259609404763362,
+      "avg_confidence": 0.0,
+      "total_processing_time": 0.7991697788238525,
+      "total_audio_duration": 7.4,
+      "memory_usage": {
+        "before_load": 1322.015625,
+        "after_load": 1321.46484375,
+        "final": 1323.01953125,
+        "peak_model_memory": -0.55078125
+      }
+    },
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000012",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.2641277313232422,
+        "audio_duration": 2.08,
+        "rtfx": 7.874977722253916,
+        "avg_confidence": 0.0,
+        "memory_before": 1284.93359375,
+        "memory_after": 1324.32421875,
+        "memory_peak": 39.390625
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few GPs, Mr. Victoria Smith, 33 has made an adjourned appointment.",
+        "processing_time": 0.7523078918457031,
+        "audio_duration": 5.32,
+        "rtfx": 7.071572766501195,
+        "avg_confidence": 0.0,
+        "memory_before": 1324.32421875,
+        "memory_after": 1322.015625,
+        "memory_peak": -2.30859375
+      }
+    ],
+    "metrics": {
+      "avg_processing_time": 0.5082178115844727,
+      "avg_rtfx": 7.280343025492349,
+      "avg_confidence": 0.0,
+      "total_processing_time": 1.0164356231689453,
+      "total_audio_duration": 7.4,
+      "memory_usage": {
+        "before_load": 1323.01953125,
+        "after_load": 1284.93359375,
+        "final": 1322.015625,
+        "peak_model_memory": -38.0859375
+      }
+    },
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000013",
+    "results": [
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
+        "transcription": " I'll hold it.",
+        "processing_time": 0.34293460845947266,
+        "audio_duration": 2.08,
+        "rtfx": 6.065296265500163,
+        "avg_confidence": 0.0,
+        "memory_before": 1288.48046875,
+        "memory_after": 1319.62109375,
+        "memory_peak": 31.140625
+      },
+      {
+        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
+        "transcription": " But in a few GPs, Mr. Victoria Smith, 33 has made an adjourned appointment.",
+        "processing_time": 0.8092548847198486,
+        "audio_duration": 5.32,
+        "rtfx": 6.573948579676107,
+        "avg_confidence": 0.0,
+        "memory_before": 1319.62109375,
+        "memory_after": 1322.015625,
+        "memory_peak": 2.39453125
+      }
+    ],
+    "metrics": {
+      "avg_processing_time": 0.5760947465896606,
+      "avg_rtfx": 6.422554661196081,
+      "avg_confidence": 0.0,
+      "total_processing_time": 1.1521894931793213,
+      "total_audio_duration": 7.4,
+      "memory_usage": {
+        "before_load": 1322.015625,
+        "after_load": 1288.48046875,
+        "final": 1322.015625,
+        "peak_model_memory": -33.53515625
+      }
+    },
+    "status": "success"
+  }
+]

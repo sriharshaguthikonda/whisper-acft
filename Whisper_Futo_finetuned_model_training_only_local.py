@@ -1,16 +1,17 @@
-"""
-Local runnable training script converted from non_collab_Local_Whisper_training_only.ipynb.
-Adjust paths below to your local files (no Colab mounts).
+r"""
+Local runnable training script (Windows spawn-safe) for FUTO ACFT Whisper.
 
-Usage (PowerShell example)
---------------------------
-1) Adjust CONFIG paths below (manifest, trained jsonl, checkpoints, local cache, score CSV).
-2) (Optional but recommended) ensure `SCORE_CSV_PATH` points to speaker_sort_scores.csv so high-score files train first.
-3) Run:
-   python c:\Windows_software\whisper-acft\Whisper_Futo_finetuned_model_training_only_local.py
-4) Training resumes from the latest checkpoint/trained list. Each epoch trains the next slice (high score → lower).
-5) Outputs: checkpoints under CHECKPOINT_DIR, trained_files.jsonl append log, optional validation logs per epoch.
+Fixes your crash:
+- Removes collate_fn closures (not picklable on Windows spawn)
+- Uses top-level collate_fn + worker_init_fn so DataLoader workers can start
+
+Run (PowerShell)
+--------------
+I:\Whisper-training-env\Scripts\python.exe I:\whisper-acft\Whisper_Futo_finetuned_model_training_only_local_WIN_SAFE.py
+
 """
+
+from __future__ import annotations
 
 import os
 import json
@@ -20,77 +21,127 @@ import hashlib
 import gc
 import tempfile
 import csv
-from concurrent.futures import ThreadPoolExecutor
+import re
+from dataclasses import dataclass
+from typing import Any, Dict, List, Optional, Tuple
+
+# -----------------------------
+# CONFIG
+# -----------------------------
+
+# If True, force HF/Transformers to run offline (local cache only)
+OFFLINE_MODE = False
+
+MANIFEST_PATH = r"i:\P2GPT_google_drive\My Drive\Record_chunks\pairs_manifest_sentence.jsonl"
+TRAINED_JSONL_PATH = r"i:\Record_chunks\trained_files.jsonl"
+CHECKPOINT_DIR = r"i:\checkpoints_partialctx"
+LOCAL_EPOCH_CACHE_ROOT = r"i:\epoch_cache"  # fast local disk
+SCORE_CSV_PATH = r"i:\whisper-acft\speaker_sort_scores.csv"  # optional: speaker score CSV
+
+# Hugging Face model + processor
+MODEL_ID = "futo-org/acft-whisper-tiny.en"
+# Best default: use the matching OpenAI processor for tiny.en
+PROCESSOR_ID = "openai/whisper-tiny.en"
+
+# Optional: set a HF cache dir (recommended if your system drive is tight)
+HF_CACHE_DIR = r"i:\hf_cache"  # set to None to use default
+
+# Cleanup options (careful)
+DELETE_TRAINED_FROM_DRIVE = False
+DRIVE_CLEANUP_MODE = "archive"  # "archive" | "delete"
+DRIVE_ALLOWED_PREFIX = r"i:\Record_chunks\\"
+DRIVE_ARCHIVE_DIR = r"i:\Record_chunks\_trained_archive"
+
+# Validation/testing files management
+MOVE_VALIDATION_FILES_TO_TESTING_FOLDER = True
+TESTING_FOLDER_PATH = r"i:\Record_chunks\testing_audio_data"
+
+# Audio / training
+TARGET_SR = 16000
+N_SAMPLES_PER_EPOCH = 5000
+VAL_SIZE = 200
+VAL_BATCH_SIZE = 16
+VAL_MAX_BATCHES = 50  # set to None to run full val
+EVAL_EVERY_EPOCH = True
+EVAL_LANGUAGE = "en"
+EVAL_TASK = "transcribe"
+MAX_NEW_TOKENS = 128
+
+BATCH_SIZE = 32
+GRAD_ACCUM_STEPS = 1
+NUM_WORKERS = 2
+PERSISTENT_WORKERS = True
+
+EVAL_NUM_WORKERS = 2
+EVAL_PERSISTENT_WORKERS = True
+
+MAX_AUDIO_SECONDS = 29.0
+LR = 1e-6
+MAX_EPOCHS = 999999
+
+# Distillation context
+FULL_ENCODER_CONTEXT_LENGTH = 1500
+
+# Threading
+os.environ["OMP_NUM_THREADS"] = "4"
+os.environ["MKL_NUM_THREADS"] = "4"
+os.environ["DATASETS_AUDIO_USE_TORCHCODEC"] = "false"
+
+# -----------------------------
+# Environment switches
+# -----------------------------
+
+def _set_env_flag(name: str, value: Optional[str]):
+    if value is None:
+        os.environ.pop(name, None)
+    else:
+        os.environ[name] = value
+
+# Keep this BEFORE importing transformers
+if OFFLINE_MODE:
+    _set_env_flag("TRANSFORMERS_OFFLINE", "1")
+    _set_env_flag("HF_HUB_OFFLINE", "1")
+else:
+    _set_env_flag("TRANSFORMERS_OFFLINE", None)
+    _set_env_flag("HF_HUB_OFFLINE", None)
+
+# Sometimes Windows + MKL throws duplicate lib warnings
+os.environ["KMP_DUPLICATE_LIB_OK"] = "True"
+
+if HF_CACHE_DIR:
+    os.makedirs(HF_CACHE_DIR, exist_ok=True)
+    # These are respected by HF/Transformers
+    os.environ.setdefault("HF_HOME", HF_CACHE_DIR)
+    os.environ.setdefault("TRANSFORMERS_CACHE", os.path.join(HF_CACHE_DIR, "transformers"))
+    os.environ.setdefault("HF_DATASETS_CACHE", os.path.join(HF_CACHE_DIR, "datasets"))
 
 import numpy as np
 import torch
 from torch import nn
-from torch.utils.data import DataLoader
+from torch.utils.data import DataLoader, Dataset
 from tqdm.auto import tqdm
 
-from datasets import Dataset, Audio
-from transformers import WhisperProcessor, WhisperModel, WhisperForConditionalGeneration
+import librosa
+
+try:
+    from transformers import WhisperProcessor, WhisperModel, WhisperForConditionalGeneration
+    TRANSFORMERS_AVAILABLE = True
+except Exception as e:
+    print(f"❌ ERROR: transformers import failed: {e}")
+    TRANSFORMERS_AVAILABLE = False
 
 try:
     from jiwer import wer as jiwer_wer
 except Exception:
     jiwer_wer = None
 
-# ----------------------------------
-# CONFIG: update these for local paths
-# ----------------------------------
-MANIFEST_PATH = r"i:\P2GPT_google_drive\My Drive\Record_chunks\pairs_manifest.jsonl"
-TRAINED_JSONL_PATH = r"i:\Record_chunks\trained_files.jsonl"
-CHECKPOINT_DIR = r"i:\\checkpoints_partialctx"
-LOCAL_EPOCH_CACHE_ROOT = r"i:\epoch_cache"  # fast local disk
-SCORE_CSV_PATH = r"c:\Windows_software\whisper-acft\speaker_sort_scores.csv"  # optional: speaker score CSV
+# -----------------------------
+# Globals used by DataLoader workers
+# (must be top-level for Windows spawn)
+# -----------------------------
 
-DELETE_TRAINED_FROM_DRIVE = False  # set True to delete/archive originals after checkpoint
-DRIVE_CLEANUP_MODE = "archive"    # "archive" | "delete"
-DRIVE_ALLOWED_PREFIX = r"i:\P2GPT_google_drive\My Drive\Record_chunks\\"
-DRIVE_ARCHIVE_DIR = r"i:\P2GPT_google_drive\My Drive\Record_chunks\_trained_archive"
+global_processor: Optional[WhisperProcessor] = None
 
-TARGET_SR = 16000
-MODEL_ID = "futo-org/acft-whisper-tiny"  # using Futo ACFT tiny checkpoint by default
-N_SAMPLES_PER_EPOCH = 600
-
-VAL_SIZE = 200
-VAL_BATCH_SIZE = 4
-VAL_MAX_BATCHES = 50  # cap eval time; set to None to run full val
-EVAL_EVERY_EPOCH = True
-EVAL_LANGUAGE = "en"
-EVAL_TASK = "transcribe"
-MAX_NEW_TOKENS = 128
-
-BATCH_SIZE = 8
-GRAD_ACCUM_STEPS = 1
-NUM_WORKERS = 2
-PREFETCH_FACTOR = 2
-PERSISTENT_WORKERS = True
-
-EVAL_NUM_WORKERS = 2
-EVAL_PERSISTENT_WORKERS = True
-EVAL_PREFETCH_FACTOR = 2
-
-MAX_AUDIO_SECONDS = 29.0
-LR = 1e-6
-MAX_EPOCHS = 999999
-
-os.environ["OMP_NUM_THREADS"] = "1"
-os.environ["MKL_NUM_THREADS"] = "1"
-torch.set_num_threads(1)
-
-device = "cuda" if torch.cuda.is_available() else "cpu"
-use_amp = device == "cuda"
-amp_dtype = torch.float16
-use_grad_scaler = use_amp
-scaler = torch.amp.GradScaler("cuda", enabled=use_grad_scaler)
-
-FULL_ENCODER_CONTEXT_LENGTH = 1500
-
-# ----------------------------------
-# helpers
-# ----------------------------------
 
 def cleanup_memory(aggressive: bool = False):
     gc.collect()
@@ -103,45 +154,8 @@ def cleanup_memory(aggressive: bool = False):
         gc.collect()
 
 
-def ensure_processor_files(target_dir: str, processor: WhisperProcessor):
-    """Copy needed processor/tokenizer files into checkpoint dir if missing. Returns list of created file paths."""
-    needed = [
-        "preprocessor_config.json",
-        "feature_extractor.json",
-        "tokenizer.json",
-        "tokenizer_config.json",
-        "vocab.json",
-        "merges.txt",
-        "special_tokens_map.json",
-        "added_tokens.json",
-    ]
-    created = []
-    with tempfile.TemporaryDirectory() as tmp:
-        processor.save_pretrained(tmp)
-        for name in needed:
-            src = os.path.join(tmp, name)
-            dst = os.path.join(target_dir, name)
-            if not os.path.isfile(src) or os.path.isfile(dst):
-                continue
-            try:
-                shutil.copy2(src, dst)
-                created.append(dst)
-            except Exception:
-                pass
-    return created
-
-
-def remove_files(paths):
-    for p in paths or []:
-        try:
-            if os.path.isfile(p):
-                os.remove(p)
-        except Exception:
-            pass
-
-
-def read_jsonl(path: str):
-    rows = []
+def read_jsonl(path: str) -> List[dict]:
+    rows: List[dict] = []
     if not os.path.exists(path):
         return rows
     with open(path, "r", encoding="utf-8") as f:
@@ -152,17 +166,11 @@ def read_jsonl(path: str):
     return rows
 
 
-def append_jsonl(path: str, rows):
+def append_jsonl(path: str, rows: List[dict]):
     os.makedirs(os.path.dirname(path), exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
-
-
-def stable_local_name(src_path: str) -> str:
-    h = hashlib.sha1(src_path.encode("utf-8")).hexdigest()[:10]
-    base = os.path.basename(src_path)
-    return f"{h}_{base}"
 
 
 def _norm_path(p: str) -> str:
@@ -172,12 +180,9 @@ def _norm_path(p: str) -> str:
         return p
 
 
-def load_scores_csv(path: str):
-    """
-    Load speaker scores CSV (file,score,decision,reason).
-    Returns dict mapping normalized file path -> float score (highest if duplicates).
-    """
-    scores = {}
+def load_scores_csv(path: str) -> Dict[str, float]:
+    """Load speaker scores CSV (file,score,decision,reason)."""
+    scores: Dict[str, float] = {}
     if not path or not os.path.isfile(path):
         return scores
     try:
@@ -188,9 +193,8 @@ def load_scores_csv(path: str):
                 if not fp:
                     continue
                 fp_norm = _norm_path(fp)
-                score_raw = row.get("score")
                 try:
-                    score_val = float(score_raw)
+                    score_val = float(row.get("score"))
                 except Exception:
                     continue
                 prev = scores.get(fp_norm)
@@ -201,11 +205,9 @@ def load_scores_csv(path: str):
     return scores
 
 
-def reorder_manifest_by_score(manifest_rows, score_map):
-    """
-    Sort manifest rows descending by score; unknown scores go last.
-    """
-    enriched = []
+def reorder_manifest_by_score(manifest_rows: List[dict], score_map: Dict[str, float]) -> Tuple[List[dict], int]:
+    """Sort manifest rows descending by score; unknown scores go last."""
+    enriched: List[Tuple[Optional[float], int, dict]] = []
     matched = 0
     for idx, r in enumerate(manifest_rows):
         ap = r.get("audio_path") or r.get("audio_path_original")
@@ -213,47 +215,42 @@ def reorder_manifest_by_score(manifest_rows, score_map):
         if score is not None:
             matched += 1
         enriched.append((score, idx, r))
-    enriched.sort(key=lambda x: (-x[0], x[1]) if x[0] is not None else (float("inf"), x[1]))
-    sorted_rows = [r for _, _, r in enriched]
-    return sorted_rows, matched
+
+    def sort_key(x: Tuple[Optional[float], int, dict]):
+        score, idx, _ = x
+        # Known scores first (descending). Unknown (None) last.
+        if score is None:
+            return (1, idx)
+        return (0, -score, idx)
+
+    enriched.sort(key=sort_key)
+    return [r for _, _, r in enriched], matched
 
 
-def copy_epoch_subset_to_local(selected_rows, epoch_dir: str, show_progress: bool = True):
-    """
-    Local-only mode: do NOT copy; just point to existing local files.
-    Keeps compatibility by setting audio_path_local = audio_path for files that exist.
-    """
-    it = tqdm(selected_rows, desc="Using local files", unit="file") if show_progress else selected_rows
-    kept = []
-    for row in it:
-        src = row.get("audio_path")
-        if not src or not os.path.exists(src):
-            continue
-        row["audio_path_local"] = src
-        kept.append(row)
-    return kept
+def map_colab_path_to_local(path_in: str) -> str:
+    """Convert Colab paths or P2GPT drive paths into your local i:\Record_chunks\... paths."""
+    if not path_in:
+        return path_in
+
+    p = path_in
+    if "P2GPT_google_drive" in p:
+        p = p.replace("i:\\P2GPT_google_drive\\My Drive\\Record_chunks\\", "i:\\Record_chunks\\")
+    elif p.startswith("/content/drive/"):
+        p = p.replace("/content/drive/MyDrive/", "i:\\")
+        p = p.replace("/", "\\")
+        p = re.sub(r"__(\w+)_chunk(\d+)", r"_sent\2", p)
+    else:
+        p = p.replace("/", "\\")
+    return p
 
 
-def cleanup_old_epoch_dirs(root: str, keep_last_k: int = 2):
-    if not os.path.exists(root):
-        return
-    dirs = []
-    for name in os.listdir(root):
-        p = os.path.join(root, name)
-        if os.path.isdir(p) and name.startswith("epoch_"):
-            try:
-                epoch_num = int(name.split("_")[-1])
-                dirs.append((epoch_num, p))
-            except Exception:
-                continue
-    dirs.sort()
-    if len(dirs) <= keep_last_k:
-        return
-    for _, p in dirs[:-keep_last_k]:
-        shutil.rmtree(p, ignore_errors=True)
+def stable_local_name(src_path: str) -> str:
+    h = hashlib.sha1(src_path.encode("utf-8")).hexdigest()[:10]
+    base = os.path.basename(src_path)
+    return f"{h}_{base}"
 
 
-def cleanup_trained_drive_audio(drive_paths, mode: str, allowed_prefix: str, archive_dir: str):
+def cleanup_trained_drive_audio(drive_paths: List[str], mode: str, allowed_prefix: str, archive_dir: str):
     if not drive_paths:
         return
     if mode not in ("archive", "delete"):
@@ -300,41 +297,127 @@ def find_latest_checkpoint_epoch(checkpoint_dir: str):
     return latest_epoch, model_epochs.get(latest_epoch), state_epochs.get(latest_epoch)
 
 
-def to_mono_float32(audio_obj):
-    if hasattr(audio_obj, "get_all_samples"):
-        samples = audio_obj.get_all_samples()
-        wave = samples.data
-        sr = int(samples.sample_rate)
-        if wave.ndim == 2:
-            wave = wave.mean(dim=0)
-        return wave.cpu().numpy().astype(np.float32, copy=False), sr
-    if isinstance(audio_obj, dict) and "array" in audio_obj:
-        sr = int(audio_obj["sampling_rate"])
-        wave = np.asarray(audio_obj["array"])
-        if wave.ndim == 2:
-            wave = wave.mean(axis=-1)
-        return wave.astype(np.float32, copy=False), sr
-    raise TypeError(f"Unsupported audio type: {type(audio_obj)}")
+def ensure_processor_files(target_dir: str, processor: WhisperProcessor) -> List[str]:
+    """Copy needed processor/tokenizer files into checkpoint dir if missing."""
+    needed = [
+        "preprocessor_config.json",
+        "feature_extractor.json",
+        "tokenizer.json",
+        "tokenizer_config.json",
+        "vocab.json",
+        "merges.txt",
+        "special_tokens_map.json",
+        "added_tokens.json",
+        "generation_config.json",
+    ]
+    created: List[str] = []
+    os.makedirs(target_dir, exist_ok=True)
+    with tempfile.TemporaryDirectory() as tmp:
+        processor.save_pretrained(tmp)
+        for name in needed:
+            src = os.path.join(tmp, name)
+            dst = os.path.join(target_dir, name)
+            if not os.path.isfile(src) or os.path.isfile(dst):
+                continue
+            try:
+                shutil.copy2(src, dst)
+                created.append(dst)
+            except Exception:
+                pass
+    return created
 
 
-def collate_batch(examples):
-    waveforms, texts, lengths = [], [], []
-    for ex in examples:
-        txt = ex.get("raw_transcription")
-        if not txt:
-            continue
-        wave_np, sr = to_mono_float32(ex["audio"])
-        if sr != TARGET_SR:
-            continue
-        dur = wave_np.shape[0] / float(sr)
-        if dur > MAX_AUDIO_SECONDS:
-            continue
-        waveforms.append(wave_np)
-        texts.append(txt.lower())
-        lengths.append(dur)
-    if not waveforms:
-        return None
-    feats = processor.feature_extractor(
+def remove_files(paths: List[str] | None):
+    for p in paths or []:
+        try:
+            if os.path.isfile(p):
+                os.remove(p)
+        except Exception:
+            pass
+
+
+def _hf_from_pretrained(cls, model_id: str, token: Optional[str], local_files_only: bool, cache_dir: Optional[str]):
+    """Compatibility wrapper: token vs use_auth_token across transformers versions."""
+    kwargs = {"local_files_only": local_files_only}
+    if cache_dir:
+        kwargs["cache_dir"] = cache_dir
+    try:
+        return cls.from_pretrained(model_id, token=token, **kwargs)
+    except TypeError:
+        # older versions
+        return cls.from_pretrained(model_id, use_auth_token=token, **kwargs)
+
+
+def load_audio_with_librosa(audio_path: str) -> np.ndarray:
+    try:
+        waveform, _sr = librosa.load(audio_path, sr=TARGET_SR, mono=True, dtype=np.float32)
+        if MAX_AUDIO_SECONDS is not None and MAX_AUDIO_SECONDS > 0:
+            max_len = int(MAX_AUDIO_SECONDS * TARGET_SR)
+            if waveform.shape[0] > max_len:
+                waveform = waveform[:max_len]
+        return waveform.astype(np.float32, copy=False)
+    except Exception as e:
+        print(f"Error loading {audio_path}: {e}")
+        return np.zeros(TARGET_SR, dtype=np.float32)
+
+
+class AudioTextDataset(Dataset):
+    def __init__(self, rows: List[dict]):
+        self.rows = rows
+
+    def __len__(self) -> int:
+        return len(self.rows)
+
+    def __getitem__(self, idx: int) -> Dict[str, Any]:
+        r = self.rows[idx]
+        audio_path = map_colab_path_to_local(r["audio_path"])
+        text = r.get("raw_transcription", "") or ""
+        wave = load_audio_with_librosa(audio_path)
+        length_sec = float(wave.shape[0]) / float(TARGET_SR)
+        return {
+            "waveform": wave,
+            "text": text,
+            "length_sec": length_sec,
+        }
+
+
+# -----------------------------
+# Windows spawn-safe collate + worker init
+# -----------------------------
+
+def worker_init_fn(worker_id: int):
+    """Runs in each DataLoader worker process (Windows spawn)."""
+    global global_processor
+    if global_processor is None:
+        hf_token = os.getenv("HF_TOKEN")
+        global_processor = _hf_from_pretrained(
+            WhisperProcessor,
+            PROCESSOR_ID,
+            token=hf_token,
+            local_files_only=OFFLINE_MODE,
+            cache_dir=HF_CACHE_DIR,
+        )
+
+
+def collate_batch(batch: List[Dict[str, Any]]) -> Dict[str, Any]:
+    """Top-level collate_fn so it is picklable on Windows spawn."""
+    global global_processor
+    if global_processor is None:
+        # num_workers=0 path
+        hf_token = os.getenv("HF_TOKEN")
+        global_processor = _hf_from_pretrained(
+            WhisperProcessor,
+            PROCESSOR_ID,
+            token=hf_token,
+            local_files_only=OFFLINE_MODE,
+            cache_dir=HF_CACHE_DIR,
+        )
+
+    waveforms = [item["waveform"] for item in batch]
+    texts = [item.get("text", "") for item in batch]
+    lengths = [float(item.get("length_sec", len(w) / float(TARGET_SR))) for item, w in zip(batch, waveforms)]
+
+    feats = global_processor.feature_extractor(
         waveforms,
         sampling_rate=TARGET_SR,
         return_tensors="pt",
@@ -342,7 +425,8 @@ def collate_batch(examples):
         truncation=True,
         max_length=TARGET_SR * 30,
     )
-    tok = processor.tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
+    tok = global_processor.tokenizer(texts, return_tensors="pt", padding=True, truncation=True)
+
     return {
         "lengths": torch.tensor(lengths, dtype=torch.float32),
         "input_features": feats.input_features,
@@ -352,7 +436,38 @@ def collate_batch(examples):
     }
 
 
-def pick_n_ctx_from_batch(lengths_sec: torch.Tensor, max_embed_positions: int):
+def build_loader_from_rows(
+    rows_for_epoch: List[dict],
+    batch_size: int,
+    num_workers: int,
+    persistent_workers: bool,
+) -> DataLoader:
+    ds = AudioTextDataset(rows_for_epoch)
+    pin_memory = torch.cuda.is_available()
+
+    kwargs: Dict[str, Any] = dict(
+        batch_size=batch_size,
+        shuffle=False,
+        collate_fn=collate_batch,
+        num_workers=num_workers,
+        pin_memory=pin_memory,
+    )
+
+    if num_workers > 0:
+        kwargs["worker_init_fn"] = worker_init_fn
+        kwargs["prefetch_factor"] = 2
+        kwargs["persistent_workers"] = persistent_workers
+        # Explicitly set spawn for clarity (Windows default)
+        kwargs["multiprocessing_context"] = "spawn"
+
+    return DataLoader(ds, **kwargs)
+
+
+# -----------------------------
+# Training core
+# -----------------------------
+
+def pick_n_ctx_from_batch(lengths_sec: torch.Tensor, max_embed_positions: int) -> int:
     max_len = float(lengths_sec.max().item())
     n_ctx = int(round((FULL_ENCODER_CONTEXT_LENGTH / 30.0) * max_len))
     jitter = max(1, min(64, n_ctx // 3))
@@ -361,13 +476,48 @@ def pick_n_ctx_from_batch(lengths_sec: torch.Tensor, max_embed_positions: int):
     return n_ctx
 
 
-def masked_hidden_mse(hs_pred: torch.Tensor, hs_tgt: torch.Tensor, attn_mask: torch.Tensor):
+def masked_hidden_mse(hs_pred: torch.Tensor, hs_tgt: torch.Tensor, attn_mask: torch.Tensor) -> torch.Tensor:
     mask = attn_mask.unsqueeze(0).unsqueeze(-1).to(dtype=hs_pred.dtype)
     diff2 = (hs_pred - hs_tgt).pow(2) * mask
     return diff2.sum() / mask.sum().clamp_min(1.0)
 
 
-def _word_edit_distance(ref_words, hyp_words):
+def compute_partially_encoder(model: WhisperModel, data: torch.Tensor, n_audio_ctx: int) -> torch.Tensor:
+    target_mel_seq_len = 2 * n_audio_ctx
+    diffy = target_mel_seq_len - data.shape[2]
+    if diffy > 0:
+        data = nn.functional.pad(data, [0, diffy, 0, 0, 0, 0], "constant", 0.0)
+    elif diffy < 0:
+        data = data[:, :, :target_mel_seq_len]
+
+    if n_audio_ctx == FULL_ENCODER_CONTEXT_LENGTH:
+        return model.encoder(data).last_hidden_state
+
+    input_embeds = nn.functional.gelu(model.encoder.conv1(data))
+    input_embeds = nn.functional.gelu(model.encoder.conv2(input_embeds))
+    input_embeds = input_embeds.permute(0, 2, 1)
+    embed_pos = model.encoder.embed_positions.weight[: input_embeds.shape[1]]
+    hidden_states = input_embeds + embed_pos
+    hidden_states = nn.functional.dropout(hidden_states, p=model.encoder.dropout, training=model.encoder.training)
+
+    for encoder_layer in model.encoder.layers:
+        to_drop = False
+        if model.encoder.training and torch.rand([]) < model.encoder.layerdrop:
+            to_drop = True
+        if not to_drop:
+            if model.encoder.gradient_checkpointing and model.encoder.training:
+                layer_outputs = model.encoder._gradient_checkpointing_func(
+                    encoder_layer.__call__, hidden_states, None, None, False
+                )
+            else:
+                layer_outputs = encoder_layer(hidden_states, None, layer_head_mask=None, output_attentions=False)
+            hidden_states = layer_outputs[0]
+
+    hidden_states = model.encoder.layer_norm(hidden_states)
+    return hidden_states
+
+
+def _word_edit_distance(ref_words: List[str], hyp_words: List[str]) -> int:
     n, m = len(ref_words), len(hyp_words)
     dp = [[0] * (m + 1) for _ in range(n + 1)]
     for i in range(n + 1):
@@ -381,7 +531,7 @@ def _word_edit_distance(ref_words, hyp_words):
     return dp[n][m]
 
 
-def word_error_rate(refs, hyps):
+def word_error_rate(refs: List[str], hyps: List[str]) -> float:
     total_edits = 0
     total_words = 0
     for r, h in zip(refs, hyps):
@@ -395,13 +545,18 @@ def word_error_rate(refs, hyps):
 
 
 @torch.no_grad()
-def evaluate_distill_loss(loader: DataLoader):
+def evaluate_distill_loss(
+    loader: DataLoader,
+    model_train: WhisperModel,
+    model_base: WhisperModel,
+    device: str,
+    use_amp: bool,
+    amp_dtype: torch.dtype,
+) -> float:
     model_train.eval()
     total = 0.0
     steps = 0
     for i, batch in enumerate(tqdm(loader, desc="Eval distill", leave=False)):
-        if batch is None:
-            continue
         if VAL_MAX_BATCHES is not None and i >= VAL_MAX_BATCHES:
             break
         input_features = batch["input_features"].to(device, non_blocking=True)
@@ -410,6 +565,7 @@ def evaluate_distill_loss(loader: DataLoader):
         lengths = batch["lengths"].to(device, non_blocking=True)
         max_embed_positions = model_train.encoder.embed_positions.weight.shape[0]
         n_ctx = pick_n_ctx_from_batch(lengths, max_embed_positions)
+
         with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
             enc_partial = compute_partially_encoder(model_train, input_features, n_ctx)
             out_partial = model_train.decoder(
@@ -428,49 +584,76 @@ def evaluate_distill_loss(loader: DataLoader):
             hs_p = torch.stack(out_partial.hidden_states, dim=0)
             hs_f = torch.stack(out_full.hidden_states, dim=0)
             loss = masked_hidden_mse(hs_p, hs_f, attn_mask)
+
         total += float(loss.item())
         steps += 1
+
     model_train.train()
     cleanup_memory()
     return total / max(1, steps)
 
 
 @torch.no_grad()
-def evaluate_wer(loader: DataLoader, gen_model: WhisperForConditionalGeneration, forced_decoder_ids):
+def evaluate_wer(
+    loader: DataLoader,
+    model_train: WhisperModel,
+    gen_model: WhisperForConditionalGeneration,
+    processor: WhisperProcessor,
+    forced_decoder_ids,
+    device: str,
+    use_amp: bool,
+    amp_dtype: torch.dtype,
+) -> float:
     gen_model.model.load_state_dict(model_train.state_dict(), strict=True)
     gen_model.eval()
-    refs, hyps = [], []
+
+    refs: List[str] = []
+    hyps: List[str] = []
+
     for i, batch in enumerate(tqdm(loader, desc="Eval WER", leave=False)):
-        if batch is None:
-            continue
         if VAL_MAX_BATCHES is not None and i >= VAL_MAX_BATCHES:
             break
         input_features = batch["input_features"].to(device, non_blocking=True)
         ref_texts = batch.get("texts") or processor.tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
         with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
-            pred_ids = gen_model.generate(inputs=input_features, forced_decoder_ids=forced_decoder_ids, max_new_tokens=MAX_NEW_TOKENS)
+            pred_ids = gen_model.generate(
+                inputs=input_features,
+                forced_decoder_ids=forced_decoder_ids,
+                max_new_tokens=MAX_NEW_TOKENS,
+            )
         pred_texts = processor.tokenizer.batch_decode(pred_ids, skip_special_tokens=True)
         for r, p in zip(ref_texts, pred_texts):
             refs.append((r or "").strip().lower())
             hyps.append((p or "").strip().lower())
+
     cleanup_memory()
     if jiwer_wer is not None:
         return float(jiwer_wer(refs, hyps))
     return float(word_error_rate(refs, hyps))
 
 
-def save_checkpoint(epoch_num: int, subset_start_idx: int, subset_count: int):
+def save_checkpoint(
+    epoch_num: int,
+    model_train: WhisperModel,
+    optimizer: torch.optim.Optimizer,
+    scaler: Optional[torch.amp.GradScaler],
+    subset_start_idx: int,
+    subset_count: int,
+    device: str,
+) -> Tuple[str, str, bool]:
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
     model_dir = os.path.join(CHECKPOINT_DIR, f"model_epoch_{epoch_num:06d}")
     os.makedirs(model_dir, exist_ok=True)
+
     model_train.to("cpu").save_pretrained(model_dir)
     model_train.to(device)
+
     state = {
         "epoch": epoch_num,
         "subset_start_idx": subset_start_idx,
         "subset_count": subset_count,
         "optimizer": optimizer.state_dict(),
-        "scaler": scaler.state_dict() if use_grad_scaler else None,
+        "scaler": scaler.state_dict() if scaler is not None else None,
         "timestamp": time.time(),
         "model_id": MODEL_ID,
         "lr": LR,
@@ -478,10 +661,13 @@ def save_checkpoint(epoch_num: int, subset_start_idx: int, subset_count: int):
         "grad_accum_steps": GRAD_ACCUM_STEPS,
         "n_samples_per_epoch": N_SAMPLES_PER_EPOCH,
     }
+
     state_path = os.path.join(CHECKPOINT_DIR, f"training_state_epoch_{epoch_num:06d}.pt")
     tmp_state_path = state_path + ".tmp"
     torch.save(state, tmp_state_path)
     os.replace(tmp_state_path, state_path)
+
+    # Optionally verify checkpoint before deleting data
     verified_ok = True
     if DELETE_TRAINED_FROM_DRIVE:
         try:
@@ -490,73 +676,38 @@ def save_checkpoint(epoch_num: int, subset_start_idx: int, subset_count: int):
         except Exception:
             verified_ok = False
             print("WARNING: checkpoint verification failed; will NOT delete trained audio for this epoch.")
+
     cleanup_memory(aggressive=True)
     print("Saved checkpoint:", model_dir)
     return model_dir, state_path, verified_ok
 
 
-def build_loader_from_rows(rows_for_epoch, batch_size=BATCH_SIZE, num_workers=NUM_WORKERS, persistent_workers=PERSISTENT_WORKERS, prefetch_factor=PREFETCH_FACTOR):
-    slim = []
-    for r in rows_for_epoch:
-        slim.append({
-            "audio_path": r["audio_path_local"],
-            "raw_transcription": r.get("raw_transcription", ""),
-            "audio_path_original": r.get("audio_path_original", r.get("audio_path")),
-        })
-    ds = Dataset.from_list(slim)
-    ds = ds.rename_column("audio_path", "audio")
-    ds = ds.cast_column("audio", Audio(sampling_rate=TARGET_SR))
-    pin_memory = device == "cuda"
-    kwargs = dict(batch_size=batch_size, shuffle=False, collate_fn=collate_batch, num_workers=num_workers, pin_memory=pin_memory)
-    if num_workers > 0:
-        kwargs.update(persistent_workers=persistent_workers, prefetch_factor=prefetch_factor)
-    return DataLoader(ds, **kwargs)
-
-
-def compute_partially_encoder(model: WhisperModel, data: torch.Tensor, n_audio_ctx: int):
-    target_mel_seq_len = 2 * n_audio_ctx
-    diffy = target_mel_seq_len - data.shape[2]
-    if diffy > 0:
-        data = nn.functional.pad(data, [0, diffy, 0, 0, 0, 0], "constant", 0.0)
-    elif diffy < 0:
-        data = data[:, :, :target_mel_seq_len]
-    if n_audio_ctx == FULL_ENCODER_CONTEXT_LENGTH:
-        return model.encoder(data).last_hidden_state
-    input_embeds = nn.functional.gelu(model.encoder.conv1(data))
-    input_embeds = nn.functional.gelu(model.encoder.conv2(input_embeds))
-    input_embeds = input_embeds.permute(0, 2, 1)
-    embed_pos = model.encoder.embed_positions.weight[: input_embeds.shape[1]]
-    hidden_states = input_embeds + embed_pos
-    hidden_states = nn.functional.dropout(hidden_states, p=model.encoder.dropout, training=model.encoder.training)
-    for encoder_layer in model.encoder.layers:
-        to_drop = False
-        if model.encoder.training and torch.rand([]) < model.encoder.layerdrop:
-            to_drop = True
-        if not to_drop:
-            if model.encoder.gradient_checkpointing and model.encoder.training:
-                layer_outputs = model.encoder._gradient_checkpointing_func(encoder_layer.__call__, hidden_states, None, None, False)
-            else:
-                layer_outputs = encoder_layer(hidden_states, None, layer_head_mask=None, output_attentions=False)
-            hidden_states = layer_outputs[0]
-    hidden_states = model.encoder.layer_norm(hidden_states)
-    return hidden_states
-
-
-def train_one_epoch_on_loader(epoch_num: int, loader: DataLoader):
+def train_one_epoch_on_loader(
+    epoch_num: int,
+    loader: DataLoader,
+    model_train: WhisperModel,
+    model_base: WhisperModel,
+    optimizer: torch.optim.Optimizer,
+    scaler: Optional[torch.amp.GradScaler],
+    device: str,
+    use_amp: bool,
+    amp_dtype: torch.dtype,
+):
     model_train.train()
     optimizer.zero_grad(set_to_none=True)
     running = 0.0
     steps = 0
+
     pbar = tqdm(loader, desc=f"Epoch {epoch_num} (subset)")
     for batch_idx, batch in enumerate(pbar):
-        if batch is None:
-            continue
         input_features = batch["input_features"].to(device, non_blocking=True)
         input_ids = batch["input_ids"].to(device, non_blocking=True)
         attn_mask = batch["attention_mask"].to(device, non_blocking=True)
         lengths = batch["lengths"].to(device, non_blocking=True)
+
         max_embed_positions = model_train.encoder.embed_positions.weight.shape[0]
         n_ctx = pick_n_ctx_from_batch(lengths, max_embed_positions)
+
         with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
             enc_partial = compute_partially_encoder(model_train, input_features, n_ctx)
             out_partial = model_train.decoder(
@@ -577,26 +728,36 @@ def train_one_epoch_on_loader(epoch_num: int, loader: DataLoader):
             hs_f = torch.stack(out_full.hidden_states, dim=0)
             loss = masked_hidden_mse(hs_p, hs_f, attn_mask)
             loss = loss / float(GRAD_ACCUM_STEPS)
-        if use_grad_scaler:
+
+        if scaler is not None:
             scaler.scale(loss).backward()
         else:
             loss.backward()
+
         if (batch_idx + 1) % GRAD_ACCUM_STEPS == 0:
-            if use_grad_scaler:
+            if scaler is not None:
                 scaler.step(optimizer)
                 scaler.update()
             else:
                 optimizer.step()
             optimizer.zero_grad(set_to_none=True)
+
         running += float(loss.item())
         steps += 1
         pbar.set_postfix({"loss": f"{(running / max(1, steps)):.6f}", "n_ctx": int(n_ctx), "bs": int(input_features.shape[0])})
+
     cleanup_memory()
     return running / max(1, steps)
 
 
-def select_next_untrained(manifest_rows, trained_set, pointer: int, n: int, holdout_set=None):
-    selected = []
+def select_next_untrained(
+    manifest_rows: List[dict],
+    trained_set: set,
+    pointer: int,
+    n: int,
+    holdout_set: Optional[set] = None,
+) -> Tuple[List[dict], int, int]:
+    selected: List[dict] = []
     start_idx = pointer
     while pointer < len(manifest_rows) and len(selected) < n:
         r = manifest_rows[pointer]
@@ -607,19 +768,108 @@ def select_next_untrained(manifest_rows, trained_set, pointer: int, n: int, hold
     return selected, start_idx, pointer
 
 
+def move_validation_files_to_testing_folder(val_rows: List[dict]):
+    os.makedirs(TESTING_FOLDER_PATH, exist_ok=True)
+
+    marker = os.path.join(TESTING_FOLDER_PATH, "validation_files_list.json")
+    if os.path.exists(marker):
+        print("✅ Validation files already moved (found validation_files_list.json). Skipping.")
+        return
+
+    moved_count = 0
+    failed_count = 0
+
+    print(f"\n🔄 Moving {len(val_rows)} validation files to testing folder...")
+    print(f"📁 Destination: {TESTING_FOLDER_PATH}")
+
+    for row in tqdm(val_rows, desc="Moving validation files", unit="file"):
+        audio_path = row.get("audio_path", "")
+        if not audio_path:
+            continue
+        local_path = map_colab_path_to_local(audio_path)
+
+        if os.path.exists(local_path):
+            try:
+                filename = os.path.basename(local_path)
+                dest_path = os.path.join(TESTING_FOLDER_PATH, filename)
+                shutil.move(local_path, dest_path)
+                moved_count += 1
+
+                transcript_json = row.get("transcript_json", "")
+                if transcript_json:
+                    local_transcript = map_colab_path_to_local(transcript_json)
+                    if os.path.exists(local_transcript):
+                        transcript_filename = os.path.basename(local_transcript)
+                        dest_transcript = os.path.join(TESTING_FOLDER_PATH, transcript_filename)
+                        shutil.move(local_transcript, dest_transcript)
+
+            except Exception as e:
+                print(f"⚠️  Failed to move {local_path}: {e}")
+                failed_count += 1
+        else:
+            print(f"⚠️  File not found: {local_path}")
+            failed_count += 1
+
+    print(f"✅ Successfully moved: {moved_count} files")
+    if failed_count > 0:
+        print(f"❌ Failed to move: {failed_count} files")
+
+    with open(marker, "w", encoding="utf-8") as f:
+        json.dump(val_rows, f, indent=2, ensure_ascii=False)
+
+    print(f"📋 Saved file list to: {marker}")
+    print("🎯 Validation files are now isolated from training data!")
+
+
+# -----------------------------
+# Main
+# -----------------------------
+
 if __name__ == "__main__":
+    if not TRANSFORMERS_AVAILABLE:
+        raise SystemExit(1)
+
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    use_amp = device == "cuda"
+    amp_dtype = torch.float16
+    scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
+
     print("Device:", device)
+    print("OFFLINE_MODE:", OFFLINE_MODE)
+    print("MODEL_ID:", MODEL_ID)
+    print("PROCESSOR_ID:", PROCESSOR_ID)
+
+    hf_token = os.getenv("HF_TOKEN")
+
+    # Load processor in main process (also used when num_workers=0)
+    processor: WhisperProcessor = _hf_from_pretrained(
+        WhisperProcessor,
+        PROCESSOR_ID,
+        token=hf_token,
+        local_files_only=OFFLINE_MODE,
+        cache_dir=HF_CACHE_DIR,
+    )
+
+    # Set global for single-worker path
+    global_processor = processor
+
     manifest_rows = read_jsonl(MANIFEST_PATH)
     if not manifest_rows:
         raise RuntimeError("Manifest is empty or not found")
+
     score_map = load_scores_csv(SCORE_CSV_PATH)
     if score_map:
         manifest_rows, matched_scores = reorder_manifest_by_score(manifest_rows, score_map)
         print(f"Reordered manifest by speaker scores: matched {matched_scores} of {len(manifest_rows)} rows")
+
     trained_rows = read_jsonl(TRAINED_JSONL_PATH)
     trained_set = {r.get("audio_path") for r in trained_rows if r.get("audio_path")}
     print("Manifest rows:", len(manifest_rows))
     print("Already trained:", len(trained_set))
+
+    # Normalise manifest
+    for r in manifest_rows:
+        r["audio_path_original"] = r.get("audio_path")
 
     latest_ckpt_epoch, latest_model_dir, latest_state_path = find_latest_checkpoint_epoch(CHECKPOINT_DIR)
     latest_state = None
@@ -628,123 +878,148 @@ if __name__ == "__main__":
             latest_state = torch.load(latest_state_path, map_location="cpu")
         except Exception:
             latest_state = None
+
     trained_based_epoch = len(trained_set) // max(1, int(N_SAMPLES_PER_EPOCH))
     ckpt_based_epoch = (latest_ckpt_epoch + 1) if latest_ckpt_epoch is not None else 0
     epoch_num_start = max(trained_based_epoch, ckpt_based_epoch)
 
-    try:
-        processor = WhisperProcessor.from_pretrained(MODEL_ID)
-    except Exception as e:
-        raise RuntimeError(f"Failed to load processor for MODEL_ID='{MODEL_ID}'. Ensure the HF repo exists and you have access.") from e
+    # Resume / start model
     if latest_ckpt_epoch is not None and latest_model_dir and os.path.isdir(latest_model_dir):
         print(f"Resuming model_train from: {latest_model_dir}")
-        model_train = WhisperModel.from_pretrained(latest_model_dir)
+        model_train = _hf_from_pretrained(
+            WhisperModel,
+            latest_model_dir,
+            token=hf_token,
+            local_files_only=True,
+            cache_dir=HF_CACHE_DIR,
+        )
     else:
-        try:
-            model_train = WhisperModel.from_pretrained(MODEL_ID)
-        except Exception as e:
-            raise RuntimeError(f"Failed to load model for MODEL_ID='{MODEL_ID}'. Ensure the HF repo exists and you have access.") from e
+        model_train = _hf_from_pretrained(
+            WhisperModel,
+            MODEL_ID,
+            token=hf_token,
+            local_files_only=OFFLINE_MODE,
+            cache_dir=HF_CACHE_DIR,
+        )
+
     model_train.to(device)
     model_train.train()
-    try:
-        model_base = WhisperModel.from_pretrained(MODEL_ID)
-    except Exception as e:
-        raise RuntimeError(f"Failed to load reference model for MODEL_ID='{MODEL_ID}'. Ensure the HF repo exists and you have access.") from e
+
+    # Teacher/reference model stays fixed
+    model_base = _hf_from_pretrained(
+        WhisperModel,
+        MODEL_ID,
+        token=hf_token,
+        local_files_only=OFFLINE_MODE,
+        cache_dir=HF_CACHE_DIR,
+    )
     model_base.to(device)
     model_base.eval()
+
     optimizer = torch.optim.Adam(model_train.parameters(), lr=LR)
+
     if latest_state is not None:
         try:
             if latest_state.get("optimizer") is not None:
                 optimizer.load_state_dict(latest_state["optimizer"])
-            if use_grad_scaler and latest_state.get("scaler") is not None:
+            if use_amp and latest_state.get("scaler") is not None:
                 scaler.load_state_dict(latest_state["scaler"])
         except Exception:
             pass
 
+    # Validation holdout (first VAL_SIZE untrained rows)
     holdout_set = set()
-    val_loader = None
-    gen_model = None
+    val_loader: Optional[DataLoader] = None
+    gen_model: Optional[WhisperForConditionalGeneration] = None
     forced_decoder_ids = None
-    for r in manifest_rows:
-        r["audio_path_original"] = r.get("audio_path")
+
     start_pointer = 0
     while start_pointer < len(manifest_rows) and manifest_rows[start_pointer]["audio_path_original"] in trained_set:
         start_pointer += 1
+
+    val_rows: List[dict] = []
     if VAL_SIZE and VAL_SIZE > 0:
-        val_drive_rows = []
         for r in manifest_rows:
             ap = r.get("audio_path")
             if not ap or ap in trained_set or ap in holdout_set:
                 continue
-            val_drive_rows.append({"audio_path": ap, "raw_transcription": r.get("raw_transcription", ""), "audio_path_original": ap})
+            val_rows.append({"audio_path": ap, "raw_transcription": r.get("raw_transcription", ""), "audio_path_original": ap})
             holdout_set.add(ap)
-            if len(val_drive_rows) >= int(VAL_SIZE):
+            if len(val_rows) >= int(VAL_SIZE):
                 break
-        if val_drive_rows:
-            local_val_dir = os.path.join(LOCAL_EPOCH_CACHE_ROOT, "_val_cache")
-            val_cached = copy_epoch_subset_to_local(val_drive_rows, local_val_dir, show_progress=True)
-            if val_cached:
-                val_loader = build_loader_from_rows(
-                    val_cached,
-                    VAL_BATCH_SIZE,
-                    num_workers=EVAL_NUM_WORKERS,
-                    persistent_workers=EVAL_PERSISTENT_WORKERS,
-                    prefetch_factor=EVAL_PREFETCH_FACTOR,
-                )
-                forced_decoder_ids = processor.get_decoder_prompt_ids(language=EVAL_LANGUAGE, task=EVAL_TASK)
-                gen_model = WhisperForConditionalGeneration.from_pretrained(MODEL_ID)
-                gen_model.to(device)
-                gen_model.eval()
-                print("Validation set ready.")
-            else:
-                print("Validation cache is empty; skipping validation.")
-                val_loader = None
+
+        # Report missing validation files
+        missing = 0
+        for vr in val_rows:
+            if not os.path.exists(map_colab_path_to_local(vr["audio_path"])):
+                missing += 1
+        if missing:
+            print(f"⚠️  Validation missing locally: {missing} files")
+
+        if val_rows:
+            val_loader = build_loader_from_rows(
+                val_rows,
+                batch_size=VAL_BATCH_SIZE,
+                num_workers=EVAL_NUM_WORKERS,
+                persistent_workers=EVAL_PERSISTENT_WORKERS,
+            )
+            forced_decoder_ids = processor.get_decoder_prompt_ids(language=EVAL_LANGUAGE, task=EVAL_TASK)
+            gen_model = _hf_from_pretrained(
+                WhisperForConditionalGeneration,
+                MODEL_ID,
+                token=hf_token,
+                local_files_only=OFFLINE_MODE,
+                cache_dir=HF_CACHE_DIR,
+            )
+            gen_model.to(device)
+            gen_model.eval()
+            print("Validation set ready.")
+
     if start_pointer >= len(manifest_rows):
         print("All files already trained.")
         raise SystemExit(0)
 
     epoch_num = epoch_num_start
     pointer = start_pointer
-    executor = ThreadPoolExecutor(max_workers=1)
-    prefetch_future = None
-    prefetch_rows = None
-    prefetch_pointer_after = None
-    prefetch_slice = None
 
     os.makedirs(LOCAL_EPOCH_CACHE_ROOT, exist_ok=True)
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
     while epoch_num < MAX_EPOCHS:
-        if prefetch_rows is not None:
-            selected = prefetch_rows
-            subset_start_idx, pointer_after_current = prefetch_slice
-            pointer = prefetch_pointer_after
-            prefetch_rows = prefetch_pointer_after = prefetch_slice = prefetch_future = None
-        else:
-            selected, subset_start_idx, pointer_after_current = select_next_untrained(manifest_rows, trained_set, pointer, N_SAMPLES_PER_EPOCH, holdout_set=holdout_set)
-            pointer = pointer_after_current
-            if not selected:
-                print("No more untrained samples.")
-                break
-            print(f"\n=== Epoch {epoch_num} | {len(selected)} samples | manifest slice [{subset_start_idx}:{pointer_after_current}] ===")
-            epoch_dir = os.path.join(LOCAL_EPOCH_CACHE_ROOT, f"epoch_{epoch_num:06d}")
-            selected = copy_epoch_subset_to_local(selected, epoch_dir, show_progress=True)
-            if not selected:
-                print("All selected samples failed to copy. Stopping.")
-                break
-        next_rows, next_start_idx, pointer_after_next = select_next_untrained(manifest_rows, trained_set, pointer, N_SAMPLES_PER_EPOCH, holdout_set=holdout_set)
-        if next_rows:
-            next_epoch_dir = os.path.join(LOCAL_EPOCH_CACHE_ROOT, f"epoch_{(epoch_num + 1):06d}")
-            print(f"Prefetching next epoch: epoch_{epoch_num+1:06d} slice [{next_start_idx}:{pointer_after_next}] -> {next_epoch_dir}")
-            prefetch_future = executor.submit(copy_epoch_subset_to_local, next_rows, next_epoch_dir, False)
-            prefetch_pointer_after = pointer_after_next
-            prefetch_slice = (next_start_idx, pointer_after_next)
-        else:
-            prefetch_future = prefetch_pointer_after = prefetch_slice = None
-        loader = build_loader_from_rows(selected)
-        avg_loss = train_one_epoch_on_loader(epoch_num, loader)
+        selected, subset_start_idx, pointer_after_current = select_next_untrained(
+            manifest_rows, trained_set, pointer, N_SAMPLES_PER_EPOCH, holdout_set=holdout_set
+        )
+        pointer = pointer_after_current
+
+        if not selected:
+            print("No more untrained samples.")
+            break
+
+        print(f"\n=== Epoch {epoch_num} | {len(selected)} samples | manifest slice [{subset_start_idx}:{pointer_after_current}] ===")
+
+        # Build training loader
+        train_loader = build_loader_from_rows(
+            selected,
+            batch_size=BATCH_SIZE,
+            num_workers=NUM_WORKERS,
+            persistent_workers=PERSISTENT_WORKERS,
+        )
+
+        avg_loss = train_one_epoch_on_loader(
+            epoch_num,
+            train_loader,
+            model_train,
+            model_base,
+            optimizer,
+            scaler if use_amp else None,
+            device,
+            use_amp,
+            amp_dtype,
+        )
+
         print(f"Epoch {epoch_num} avg loss: {avg_loss:.6f}")
+
+        # Mark trained
         now = time.time()
         trained_append = []
         for r in selected:
@@ -755,38 +1030,61 @@ if __name__ == "__main__":
         if trained_append:
             append_jsonl(TRAINED_JSONL_PATH, trained_append)
             print("Appended trained records:", len(trained_append))
-        model_dir, state_path, ckpt_ok = save_checkpoint(epoch_num, subset_start_idx=subset_start_idx, subset_count=len(selected))
+
+        # Save checkpoint
+        model_dir, state_path, ckpt_ok = save_checkpoint(
+            epoch_num,
+            model_train,
+            optimizer,
+            scaler if use_amp else None,
+            subset_start_idx=subset_start_idx,
+            subset_count=len(selected),
+            device=device,
+        )
+
+        # Make checkpoint self-contained
         created_proc_files = ensure_processor_files(model_dir, processor)
-        if EVAL_EVERY_EPOCH and val_loader is not None:
-            distill_val = wer_val = None
+
+        # Evaluate
+        if EVAL_EVERY_EPOCH and val_loader is not None and gen_model is not None:
+            distill_val = None
+            wer_val = None
             try:
-                distill_val = evaluate_distill_loss(val_loader)
+                distill_val = evaluate_distill_loss(val_loader, model_train, model_base, device, use_amp, amp_dtype)
             except Exception as e:
                 print("WARNING: distill eval failed", repr(e))
             try:
-                wer_val = evaluate_wer(val_loader, gen_model, forced_decoder_ids)
+                wer_val = evaluate_wer(val_loader, model_train, gen_model, processor, forced_decoder_ids, device, use_amp, amp_dtype)
             except Exception as e:
                 print("WARNING: WER eval failed", repr(e))
+
             if distill_val is not None and wer_val is not None:
                 print(f"Eval (val) distill_loss: {distill_val:.6f} | WER: {wer_val:.4f}")
             elif distill_val is not None:
                 print(f"Eval (val) distill_loss: {distill_val:.6f}")
             elif wer_val is not None:
                 print(f"Eval (val) WER: {wer_val:.4f}")
+
+            # Move validation files AFTER the first evaluation in this run
+            if MOVE_VALIDATION_FILES_TO_TESTING_FOLDER and val_rows:
+                # only do it once (file presence check inside function)
+                if epoch_num == epoch_num_start:
+                    move_validation_files_to_testing_folder(val_rows)
+
+        # Cleanup temporary processor files we added to the checkpoint dir
         remove_files(created_proc_files)
+
+        # Optional: delete/archive audio once checkpoint is verified
         if DELETE_TRAINED_FROM_DRIVE and ckpt_ok:
             drive_paths = [r.get("audio_path_original") for r in selected if r.get("audio_path_original")]
-            cleanup_trained_drive_audio(drive_paths, mode=DRIVE_CLEANUP_MODE, allowed_prefix=DRIVE_ALLOWED_PREFIX, archive_dir=DRIVE_ARCHIVE_DIR)
-        if prefetch_future is not None:
-            try:
-                prefetch_rows = prefetch_future.result()
-                if not prefetch_rows:
-                    print("WARNING: prefetch produced no usable rows.")
-                    prefetch_rows = None
-            except Exception as e:
-                print("WARNING: background prefetch failed:", repr(e))
-                prefetch_rows = None
-        cleanup_old_epoch_dirs(LOCAL_EPOCH_CACHE_ROOT, keep_last_k=2)
+            cleanup_trained_drive_audio(
+                drive_paths,
+                mode=DRIVE_CLEANUP_MODE,
+                allowed_prefix=DRIVE_ALLOWED_PREFIX,
+                archive_dir=DRIVE_ARCHIVE_DIR,
+            )
+
         epoch_num += 1
+
     print("Training run finished.")
     print("Total trained marked:", len(trained_set))
