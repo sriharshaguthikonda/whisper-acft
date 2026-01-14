@@ -11,8 +11,29 @@ Key changes:
 - State file tracks processed files and results
 - Auto-resumes from where it left off
 
+
+
 Usage (Windows PowerShell)
 -------------------------
+
+
+$refs = @(Get-ChildItem "I:\Record_only_by_harsha" -Recurse -File `
+  -Include *.wav,*.m4a,*.mp3,*.flac,*.aac,*.ogg,*.opus,*.mka,*.mp4 | 
+  ForEach-Object { $_.FullName })
+
+python "i:\whisper-acft\stage_3_sort_audio_files_by_speaker.py" `
+  --in "I:\Record_chunks" `
+  --ref $refs[0] $refs[1] $refs[2] $refs[3] $refs[4] `
+  --target_out "I:\Record_chunks_sorted\target" `
+  --other_out "I:\Record_chunks_sorted\other" `
+  --device cuda `
+  --dry_run `
+  --progress print `
+  --batch_size 32 `
+  --workers 4
+
+
+
   python -u sort_audio_files_by_speaker_v3_resumable.py --in ./audio --ref ./refs/doctor1.m4a --target_out ./keep --other_out ./others --dry_run --progress print
 
 Then actually move:
@@ -42,10 +63,18 @@ import subprocess
 import sys
 import tempfile
 from pathlib import Path
-from typing import Callable, Dict, List, Optional
+from typing import Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 import soundfile as sf
+import torch
+from concurrent.futures import ThreadPoolExecutor, as_completed
+
+try:
+    import librosa
+    HAS_LIBROSA = True
+except ImportError:
+    HAS_LIBROSA = False
 
 
 AUDIO_EXTS = {".wav", ".m4a", ".mp3", ".aac", ".flac", ".ogg", ".opus", ".mka", ".mp4"}
@@ -81,6 +110,33 @@ def ffmpeg_to_wav_16k_mono(src: Path, dst: Path) -> None:
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if p.returncode != 0:
         raise RuntimeError(f"ffmpeg failed for {src}:\n{p.stderr}")
+
+
+def load_audio_direct(audio_path: Path) -> Optional[np.ndarray]:
+    """Load audio directly using librosa if possible, faster than ffmpeg."""
+    if not HAS_LIBROSA:
+        return None
+    
+    try:
+        audio, sr = librosa.load(str(audio_path), sr=16000, mono=True)
+        return audio
+    except Exception:
+        return None
+
+
+def get_duration_fast(audio_path: Path) -> Optional[float]:
+    """Get duration quickly using ffprobe."""
+    try:
+        cmd = [
+            "ffprobe", "-v", "quiet", "-show_entries", 
+            "format=duration", "-of", "csv=p=0", str(audio_path)
+        ]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        if result.returncode == 0 and result.stdout.strip():
+            return float(result.stdout.strip())
+    except Exception:
+        pass
+    return None
 
 
 def iter_audio_files(in_path: Path) -> List[Path]:
@@ -125,6 +181,104 @@ def compute_reference_embedding(ref_files_wav16: List[Path], inference) -> np.nd
         raise ValueError("No reference embeddings computed. Provide at least one reference file.")
     ref = np.mean(np.stack(embs, axis=0), axis=0)
     return l2_normalize(ref.reshape(1, -1))[0]
+
+
+def process_audio_batch(audio_files: List[Path], tmp_dir: Path, batch_size: int = 32) -> List[tuple]:
+    """Process audio files in batches for better GPU utilization."""
+    results = []
+    
+    def convert_file(af: Path) -> tuple:
+        """Convert single file and return (path, audio_array or None, error)"""
+        # Try direct loading first
+        audio = load_audio_direct(af)
+        if audio is not None:
+            return af, audio, None
+        
+        # Fallback to ffmpeg conversion
+        wav_path = tmp_dir / f"in_{af.stem}_{abs(hash(str(af))) % 10_000_000}.wav"
+        try:
+            ffmpeg_to_wav_16k_mono(af, wav_path)
+            audio, _ = sf.read(str(wav_path), dtype='float32')
+            return af, audio, None
+        except Exception as e:
+            return af, None, str(e)
+    
+    # Process in parallel using ThreadPool for I/O bound conversion
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = [executor.submit(convert_file, af) for af in audio_files]
+        for future in as_completed(futures):
+            results.append(future.result())
+    
+    return results
+
+
+def compute_batch_embeddings(audio_arrays: List[np.ndarray], inference, device: torch.device, batch_size: int = 32) -> Tuple[List[np.ndarray], List[str]]:
+    """Compute embeddings for a batch of audio arrays with OOM protection."""
+    if not audio_arrays:
+        return [], []
+    
+    # Convert to tensors and batch
+    tensors = []
+    for audio in audio_arrays:
+        if audio is None:
+            continue
+        tensor = torch.from_numpy(audio).float()
+        if len(tensor.shape) == 1:
+            tensor = tensor.unsqueeze(0)  # Add channel dimension if needed
+        tensors.append(tensor)
+    
+    if not tensors:
+        return [], []
+    
+    # Try processing with current batch size, reduce if OOM
+    current_batch_size = len(tensors)
+    embeddings_list = []
+    error_messages = []
+    
+    while current_batch_size > 0:
+        try:
+            # Process in sub-batches
+            sub_embeddings = []
+            for i in range(0, len(tensors), current_batch_size):
+                sub_batch = tensors[i:i + current_batch_size]
+                
+                # Pad sequences to same length if needed
+                max_len = max(t.shape[-1] for t in sub_batch)
+                padded_tensors = []
+                for t in sub_batch:
+                    if t.shape[-1] < max_len:
+                        padding = torch.zeros(1, max_len - t.shape[-1])
+                        t = torch.cat([t, padding], dim=-1)
+                    padded_tensors.append(t)
+                
+                batch_tensor = torch.stack(padded_tensors).to(device)
+                
+                with torch.no_grad():
+                    embeddings = inference.model(batch_tensor)
+                    if len(embeddings.shape) == 3:
+                        embeddings = embeddings.mean(dim=1)  # Average over time dimension
+                    
+                    sub_embeddings.extend(embeddings.cpu().numpy())
+            
+            embeddings_list = sub_embeddings
+            break  # Success!
+            
+        except torch.cuda.OutOfMemoryError:
+            # Reduce batch size and retry
+            current_batch_size = current_batch_size // 2
+            if current_batch_size == 0:
+                error_messages.append("OOM: Could not process even smallest batch")
+                break
+            print(f"OOM detected, reducing batch size to {current_batch_size}...", flush=True)
+            
+            # Clear GPU cache
+            torch.cuda.empty_cache()
+            
+        except Exception as e:
+            error_messages.append(f"Error computing embeddings: {str(e)}")
+            break
+    
+    return embeddings_list, error_messages
 
 
 def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
@@ -242,6 +396,9 @@ def main() -> None:
         default=os.environ.get("HF_TOKEN", ""),
         help="Optional Hugging Face token (only needed if a model requires it).",
     )
+    ap.add_argument("--batch_size", type=int, default=32, help="Initial batch size for processing (auto-reduced on OOM)")
+    ap.add_argument("--workers", type=int, default=4, help="Number of worker threads for audio conversion (default: 4)")
+    ap.add_argument("--min_batch_size", type=int, default=1, help="Minimum batch size to attempt (default: 1)")
     ap.add_argument(
         "--state_file",
         default="speaker_sort_state.json",
@@ -320,7 +477,6 @@ def main() -> None:
     
     # Initialize state tracking
     current_processed_files = list(processed_files)
-    checkpoint_interval = 10  # Save state every 10 files
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -334,70 +490,121 @@ def main() -> None:
 
         ref_emb = compute_reference_embedding(ref_wavs, inference)
 
-        # Process remaining files
-        for idx, af in enumerate(remaining_files, start=1):
-            # show progress *before* heavy work on each item
-            progress_upd(idx, af.name)
-
-            row_result = {}
-            wav16 = tmp / f"in_{af.stem}_{abs(hash(str(af))) % 10_000_000}.wav"
-            try:
-                ffmpeg_to_wav_16k_mono(af, wav16)
-            except Exception as e:
-                row_result = {
-                    "file": str(af),
-                    "score": "",
-                    "decision": "ERROR_CONVERT",
-                    "reason": str(e),
-                }
-                append_csv_row(csv_path, row_result)
-                current_processed_files.append(str(af))
-                if args.log_every and idx % args.log_every == 0:
-                    print(f"[{idx}/{len(remaining_files)}] ERROR converting: {af}", flush=True)
-                # Save checkpoint
-                if idx % checkpoint_interval == 0:
-                    save_state(state_file, {'processed_files': current_processed_files})
-                continue
-
-            dur = audio_duration_seconds(wav16)
-            if dur < float(args.min_seconds):
-                decision = "OTHER"
-                score = ""
-                reason = f"too_short({dur:.2f}s)"
-            else:
-                emb = inference(str(wav16))
-                emb = np.asarray(emb).reshape(1, -1)
-                emb = l2_normalize(emb)[0]
+        # Process remaining files in batches
+        initial_batch_size = args.batch_size
+        total_batches = (len(remaining_files) + initial_batch_size - 1) // initial_batch_size
+        
+        for batch_idx in range(total_batches):
+            start_idx = batch_idx * initial_batch_size
+            end_idx = min(start_idx + initial_batch_size, len(remaining_files))
+            batch_files = remaining_files[start_idx:end_idx]
+            
+            print(f"Processing batch {batch_idx + 1}/{total_batches} ({len(batch_files)} files)...", flush=True)
+            
+            # Pre-filter by duration to skip short files early
+            filtered_files = []
+            for af in batch_files:
+                duration = get_duration_fast(af)
+                if duration is not None and duration < float(args.min_seconds):
+                    # Short file - add result directly
+                    row_result = {
+                        "file": str(af),
+                        "score": "",
+                        "decision": "OTHER",
+                        "reason": f"too_short({duration:.2f}s)",
+                    }
+                    append_csv_row(csv_path, row_result)
+                    current_processed_files.append(str(af))
+                    progress_upd(start_idx + batch_files.index(af) + 1, af.name)
+                else:
+                    filtered_files.append(af)
+            
+            if not filtered_files:
+                continue  # All files in this batch were too short
+            
+            # Process audio batch
+            batch_results = process_audio_batch(filtered_files, tmp, args.workers)
+            
+            # Separate successful conversions from errors
+            successful = []
+            audio_arrays = []
+            
+            for af, audio, error in batch_results:
+                if error is not None:
+                    # Conversion error
+                    row_result = {
+                        "file": str(af),
+                        "score": "",
+                        "decision": "ERROR_CONVERT",
+                        "reason": error,
+                    }
+                    append_csv_row(csv_path, row_result)
+                    current_processed_files.append(str(af))
+                    progress_upd(start_idx + batch_files.index(af) + 1, af.name)
+                else:
+                    successful.append(af)
+                    audio_arrays.append(audio)
+            
+            if not audio_arrays:
+                continue  # No successful conversions in this batch
+            
+            # Compute embeddings for the entire batch with OOM protection
+            embeddings, error_messages = compute_batch_embeddings(audio_arrays, inference, device, len(filtered_files))
+            
+            if error_messages:
+                # Handle embedding errors
+                for i, af in enumerate(successful):
+                    if i < len(error_messages) and error_messages[i]:
+                        row_result = {
+                            "file": str(af),
+                            "score": "",
+                            "decision": "ERROR_EMBEDDING",
+                            "reason": error_messages[i],
+                        }
+                        append_csv_row(csv_path, row_result)
+                        current_processed_files.append(str(af))
+                        progress_upd(start_idx + batch_files.index(af) + 1, af.name)
+                continue  # Skip to next batch
+            
+            # Process results
+            for i, (af, embedding) in enumerate(zip(successful, embeddings)):
+                if embedding is None:
+                    # Skip if embedding failed
+                    continue
+                    
+                emb = l2_normalize(embedding.reshape(1, -1))[0]
                 s = cosine_sim(ref_emb, emb)
                 score = f"{s:.6f}"
                 decision = "TARGET" if s >= float(args.threshold) else "OTHER"
                 reason = ""
-
-            row_result = {
-                "file": str(af),
-                "score": score,
-                "decision": decision,
-                "reason": reason,
-            }
+                
+                row_result = {
+                    "file": str(af),
+                    "score": score,
+                    "decision": decision,
+                    "reason": reason,
+                }
+                
+                append_csv_row(csv_path, row_result)
+                current_processed_files.append(str(af))
+                
+                # Update progress
+                file_idx = start_idx + batch_files.index(af) + 1
+                progress_upd(file_idx, af.name)
+                
+                if args.log_every and file_idx % args.log_every == 0:
+                    print(f"[{file_idx}/{len(remaining_files)}] {af.name} -> {decision} score={score} {reason}", flush=True)
+                
+                # Handle file moving/copying
+                if not args.dry_run:
+                    rel = af.relative_to(in_path) if in_path.is_dir() else Path(af.name)
+                    dst = (target_out / rel) if decision == "TARGET" else (other_out / rel)
+                    safe_move_or_copy(af, dst, do_move=do_move)
             
-            # Append to CSV immediately
-            append_csv_row(csv_path, row_result)
-            current_processed_files.append(str(af))
-
-            if args.log_every and idx % args.log_every == 0:
-                print(f"[{idx}/{len(remaining_files)}] {af.name} -> {decision} score={score or 'NA'} {reason}", flush=True)
-
-            # Save checkpoint periodically
-            if idx % checkpoint_interval == 0:
-                save_state(state_file, {'processed_files': current_processed_files})
-                print(f"Checkpoint saved: {idx}/{len(remaining_files)} files processed", flush=True)
-
-            if args.dry_run:
-                continue
-
-            rel = af.relative_to(in_path) if in_path.is_dir() else Path(af.name)
-            dst = (target_out / rel) if decision == "TARGET" else (other_out / rel)
-            safe_move_or_copy(af, dst, do_move=do_move)
+            # Save checkpoint after each batch
+            save_state(state_file, {'processed_files': current_processed_files})
+            if batch_idx % 5 == 0:  # Less frequent checkpoint messages
+                print(f"Checkpoint saved: {len(current_processed_files)}/{len(audio_files)} files processed", flush=True)
 
         # Final state save
         save_state(state_file, {'processed_files': current_processed_files})

@@ -3,17 +3,71 @@
     "checkpoint": "base_model",
     "results": [
       {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.9045062065124512
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 1.3703291416168213
       },
       {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " For an empty GPU surgery, Mrs. Victoria Smith 33 has made an adjourned appointment.",
-        "processing_time": 0.3674142360687256
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.6960451602935791
       }
     ],
-    "avg_processing_time": 0.6359602212905884,
+    "avg_processing_time": 1.0331871509552002,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.7482893466949463
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.5896692276000977
+      }
+    ],
+    "avg_processing_time": 0.668979287147522,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.563133716583252
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.5195634365081787
+      }
+    ],
+    "avg_processing_time": 0.5413485765457153,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.5170118808746338
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.544910192489624
+      }
+    ],
+    "avg_processing_time": 0.5309610366821289,
     "total_files": 2,
     "status": "success"
   },
@@ -21,17 +75,17 @@
     "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
     "results": [
       {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.21244335174560547
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.5356795787811279
       },
       {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
-        "processing_time": 0.3704509735107422
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.5683844089508057
       }
     ],
-    "avg_processing_time": 0.29144716262817383,
+    "avg_processing_time": 0.5520319938659668,
     "total_files": 2,
     "status": "success"
   },
@@ -39,17 +93,17 @@
     "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
     "results": [
       {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.31339001655578613
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.570899486541748
       },
       {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
-        "processing_time": 0.5028858184814453
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.548494815826416
       }
     ],
-    "avg_processing_time": 0.4081379175186157,
+    "avg_processing_time": 0.559697151184082,
     "total_files": 2,
     "status": "success"
   },
@@ -57,17 +111,17 @@
     "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
     "results": [
       {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.17071294784545898
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.470339298248291
       },
       {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
-        "processing_time": 0.32834529876708984
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.735936164855957
       }
     ],
-    "avg_processing_time": 0.24952912330627441,
+    "avg_processing_time": 0.603137731552124,
     "total_files": 2,
     "status": "success"
   },
@@ -75,17 +129,17 @@
     "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
     "results": [
       {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.16700410842895508
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.4870188236236572
       },
       {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " But in a few, G.P. surgery, Mrs. Victoria Smith, 33, has made an adjourned appointment.",
-        "processing_time": 0.5920166969299316
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.585756778717041
       }
     ],
-    "avg_processing_time": 0.37951040267944336,
+    "avg_processing_time": 0.5363878011703491,
     "total_files": 2,
     "status": "success"
   },
@@ -93,17 +147,17 @@
     "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
     "results": [
       {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.235152006149292
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.5017449855804443
       },
       {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
-        "processing_time": 0.37765026092529297
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.8046286106109619
       }
     ],
-    "avg_processing_time": 0.3064011335372925,
+    "avg_processing_time": 0.6531867980957031,
     "total_files": 2,
     "status": "success"
   },
@@ -111,17 +165,17 @@
     "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
     "results": [
       {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.18772578239440918
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.5087590217590332
       },
       {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
-        "processing_time": 0.3091390132904053
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.7296645641326904
       }
     ],
-    "avg_processing_time": 0.24843239784240723,
+    "avg_processing_time": 0.6192117929458618,
     "total_files": 2,
     "status": "success"
   },
@@ -129,17 +183,17 @@
     "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
     "results": [
       {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.16080713272094727
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.49193668365478516
       },
       {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
-        "processing_time": 0.3408536911010742
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.5241601467132568
       }
     ],
-    "avg_processing_time": 0.25083041191101074,
+    "avg_processing_time": 0.508048415184021,
     "total_files": 2,
     "status": "success"
   },
@@ -147,71 +201,17 @@
     "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
     "results": [
       {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.19144272804260254
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.4665491580963135
       },
       {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " But in a few GPs, Mr. Victoria Smith, 33 has made an adjourned appointment.",
-        "processing_time": 0.4301643371582031
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.5302627086639404
       }
     ],
-    "avg_processing_time": 0.31080353260040283,
-    "total_files": 2,
-    "status": "success"
-  },
-  {
-    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000011",
-    "results": [
-      {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.20562291145324707
-      },
-      {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " But in a few, G.P. surgery misses Victoria Smith.",
-        "processing_time": 0.40574026107788086
-      }
-    ],
-    "avg_processing_time": 0.30568158626556396,
-    "total_files": 2,
-    "status": "success"
-  },
-  {
-    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000012",
-    "results": [
-      {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.28261637687683105
-      },
-      {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " But in a few GPs, Mr. Victoria Smith, 33 has made an adjourned appointment.",
-        "processing_time": 0.6086833477020264
-      }
-    ],
-    "avg_processing_time": 0.4456498622894287,
-    "total_files": 2,
-    "status": "success"
-  },
-  {
-    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000013",
-    "results": [
-      {
-        "file": "Night terrors __dd2576b3a4_chunk0000.wav",
-        "transcription": " I'll hold it.",
-        "processing_time": 0.1879112720489502
-      },
-      {
-        "file": "Night terrors __dd2576b3a4_chunk0001.wav",
-        "transcription": " But in a few GPs, Mr. Victoria Smith, 33 has made an adjourned appointment.",
-        "processing_time": 0.4242582321166992
-      }
-    ],
-    "avg_processing_time": 0.3060847520828247,
+    "avg_processing_time": 0.49840593338012695,
     "total_files": 2,
     "status": "success"
   }

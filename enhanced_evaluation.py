@@ -22,7 +22,7 @@ from transformers import WhisperProcessor, WhisperForConditionalGeneration
 from jiwer import wer as jiwer_wer
 
 # CONFIG
-TEST_AUDIO_DIR = r"i:\whisper-acft\test_sample"
+TEST_AUDIO_DIR = r"i:\Record_chunks\testing_audio_data"
 CHECKPOINT_DIR = r"i:\checkpoints_partialctx"
 BASE_MODEL_ID = "futo-org/acft-whisper-tiny.en"
 PROCESSOR_ID = "openai/whisper-tiny.en"

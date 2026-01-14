@@ -1,214 +1,189 @@
 #!/usr/bin/env python3
-r"""
-Convert a fine-tuned Whisper HF model to GGUF format for whisper.cpp
+r"""export_merge_and_convert_whispercpp.py
 
-Usage:
-    # Quantized GGUF (default q8_0; change with --qtype q5_1, q4_0, f16, etc.)
-    python convert_to_gguf.py --model_dir ./model_train-tiny3_extracted --output_dir ./gguf_output --qtype q8_0
+What you have:
+- Your training checkpoints are saved as Hugging Face `WhisperModel` (encoder/decoder only).
+- whisper.cpp's `models/convert-h5-to-ggml.py` loads `WhisperForConditionalGeneration`.
 
-    # Legacy GGML path (if you must):
-    mkdir ggml_output; python whisper.cpp/models/convert-pt-to-ggml.py model_train-tiny3.pt r"C:\Users\deletable\AppData\Roaming\Python\Python312\site-packages" ./ggml_output
+So if you point the converter at a `WhisperModel` checkpoint dir, it will either:
+- fail, or
+- silently create a model with a randomly initialised output head (junk transcription).
+
+This script fixes that by creating an EXPORT DIR that contains a *real* WhisperForConditionalGeneration:
+- Start from BASE_MODEL_ID (brings the correct output head)
+- Copy your fine-tuned encoder/decoder weights into it
+- Save the merged model + matching tokenizer/feature-extractor
+Then it calls whisper.cpp conversion + (optional) quantize.
+
+NOTE: whisper.cpp (as of early 2026) primarily uses GGML .bin models, not GGUF.
+
+Usage (Windows):
+  i:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\export_merge_and_convert_whispercpp.py \
+    --checkpoint_dir i:\checkpoints_partialctx\model_epoch_000003 \
+    --export_dir     i:\checkpoints_partialctx\export_epoch_000003_hfseq2seq \
+    --whisper_cpp    i:\whisper-acft\whisper.cpp \
+    --whisper_repo   i:\whisper-acft\whisper \
+    --qtype Q8_0
+
+qtype for whisper.cpp quantize: Q4_0, Q4_1, Q5_0, Q5_1, Q8_0 (or omit for FP16).
 """
 
 import os
 import sys
+import json
 import argparse
 import subprocess
+from pathlib import Path
 
-def download_tokenizer_files(model_dir: str, base_model: str = "openai/whisper-tiny"):
-    """Download missing tokenizer files from base model."""
-    from transformers import WhisperTokenizer, WhisperProcessor, WhisperFeatureExtractor
-    
-    print(f"Downloading tokenizer files from {base_model}...")
-    
-    # Download and save tokenizer
-    tokenizer = WhisperTokenizer.from_pretrained(base_model)
-    tokenizer.save_pretrained(model_dir)
-    
-    # Download and save feature extractor
-    feature_extractor = WhisperFeatureExtractor.from_pretrained(base_model)
-    feature_extractor.save_pretrained(model_dir)
-    
-    # Download and save processor
-    processor = WhisperProcessor.from_pretrained(base_model)
-    processor.save_pretrained(model_dir)
-    
-    print(f"Tokenizer files saved to {model_dir}")
+import torch
 
-def fix_config_for_conversion(model_dir: str):
-    """Fix config.json to have proper architecture for Seq2Seq."""
-    import json
-    
-    config_path = os.path.join(model_dir, "config.json")
-    with open(config_path, "r") as f:
-        config = json.load(f)
-    
-    # Ensure architecture is set correctly for speech-to-text
-    if config.get("architectures") == ["WhisperModel"]:
-        config["architectures"] = ["WhisperForConditionalGeneration"]
-        with open(config_path, "w") as f:
-            json.dump(config, f, indent=2)
-        print("Fixed config.json: Changed architecture to WhisperForConditionalGeneration")
+from transformers import WhisperProcessor, WhisperModel, WhisperForConditionalGeneration
 
-def convert_hf_to_gguf(model_dir: str, output_dir: str, whisper_cpp_path: str = None, qtype: str | None = "q8_0"):
-    """Convert HF model to GGML using whisper.cpp converter (with optional quantization)."""
-    
-    os.makedirs(output_dir, exist_ok=True)
-    
-    # Find whisper.cpp converter (convert-h5-to-ggml.py)
-    if whisper_cpp_path:
-        converter_candidates = [
-            os.path.join(whisper_cpp_path, "models", "convert-h5-to-ggml.py"),
-        ]
-        whisper_repo_candidates = [
-            os.path.join(os.path.dirname(whisper_cpp_path), "whisper"),
-        ]
-    else:
-        # Common locations
-        converter_candidates = [
-            r"i:\whisper-acft\whisper.cpp\models\convert-h5-to-ggml.py",
-            r"whisper.cpp\models\convert-h5-to-ggml.py",
-            os.path.expanduser("~/whisper.cpp/models/convert-h5-to-ggml.py"),
-        ]
-        whisper_repo_candidates = [
-            r"i:\whisper-acft\whisper",
-            r"whisper",
-            os.path.expanduser("~/whisper"),
-        ]
-    
-    converter_path = None
-    for c in converter_candidates:
+
+def ensure_dir(p: str):
+    Path(p).mkdir(parents=True, exist_ok=True)
+
+
+def export_merged_seq2seq(
+    checkpoint_dir: str,
+    export_dir: str,
+    base_model_id: str,
+    processor_id: str,
+    hf_token: str | None = None,
+):
+    """Create a proper HF WhisperForConditionalGeneration directory from a WhisperModel checkpoint."""
+    ensure_dir(export_dir)
+
+    # Load your fine-tuned encoder/decoder
+    ckpt = WhisperModel.from_pretrained(checkpoint_dir, token=hf_token)
+
+    # Load base seq2seq model (brings proj_out / output head)
+    gen = WhisperForConditionalGeneration.from_pretrained(base_model_id, token=hf_token)
+
+    # Copy encoder/decoder weights
+    gen.model.load_state_dict(ckpt.state_dict(), strict=True)
+
+    # Make config explicitly seq2seq
+    cfg = gen.config.to_dict()
+    cfg["architectures"] = ["WhisperForConditionalGeneration"]
+    with open(os.path.join(export_dir, "config.json"), "w", encoding="utf-8") as f:
+        json.dump(cfg, f, indent=2)
+
+    # Save weights
+    # Use safe_serialization=True (safetensors) if available; transformers handles it.
+    gen.save_pretrained(export_dir)
+
+    # Save tokenizer + feature extractor + processor
+    # IMPORTANT: processor_id must match your model family (use whisper-tiny.en for English-only)
+    proc = WhisperProcessor.from_pretrained(processor_id, token=hf_token)
+    proc.save_pretrained(export_dir)
+
+    print(f"✅ Exported merged HF seq2seq model to: {export_dir}")
+
+
+def find_converter(whisper_cpp_root: str) -> str:
+    p = os.path.join(whisper_cpp_root, "models", "convert-h5-to-ggml.py")
+    if not os.path.exists(p):
+        raise FileNotFoundError(f"convert-h5-to-ggml.py not found at: {p}")
+    return p
+
+
+def find_quantize(whisper_cpp_root: str) -> str:
+    candidates = [
+        os.path.join(whisper_cpp_root, "build", "bin", "Release", "quantize.exe"),
+        os.path.join(whisper_cpp_root, "build", "bin", "quantize.exe"),
+        os.path.join(whisper_cpp_root, "quantize.exe"),
+    ]
+    for c in candidates:
         if os.path.exists(c):
-            converter_path = c
-            break
-    
-    whisper_repo_path = None
-    for w in whisper_repo_candidates:
-        if os.path.exists(os.path.join(w, "whisper", "assets", "mel_filters.npz")):
-            whisper_repo_path = w
-            break
-    
-    if converter_path and whisper_repo_path:
-        print(f"Found converter at: {converter_path}")
-        print(f"Found whisper repo at: {whisper_repo_path}")
-        
-        # Run convert-h5-to-ggml.py
-        # Usage: convert-h5-to-ggml.py dir_model path-to-whisper-repo dir-output [use-f32]
-        use_f32 = "use-f32" if qtype == "f32" or qtype == "f16" else None
-        cmd = [
-            sys.executable,
-            converter_path,
-            model_dir,
-            whisper_repo_path,
-            output_dir,
-        ]
-        if use_f32:
-            cmd.append(use_f32)
-        
-        print(f"Running: {' '.join(cmd)}")
-        subprocess.run(cmd, check=True)
-        
-        # Handle quantization if needed
-        ggml_file = os.path.join(output_dir, "ggml-model.bin")
-        if os.path.exists(ggml_file) and qtype and qtype not in ["f16", "f32"]:
-            print(f"\nQuantizing to {qtype}...")
-            quantize_ggml(ggml_file, qtype, whisper_cpp_path)
-        
-        print(f"GGML model saved to {output_dir}")
-    else:
-        # Alternative: use transformers' built-in export if available
-        print("whisper.cpp converter not found. Trying alternative method...")
-        print(f"Converter path: {converter_path}")
-        print(f"Whisper repo path: {whisper_repo_path}")
-        try:
-            convert_with_ctranslate2(model_dir, output_dir)
-        except Exception as e:
-            print(f"Alternative conversion failed: {e}")
-            print("\nManual steps to convert:")
-            print("1. Clone whisper.cpp: git clone https://github.com/ggerganov/whisper.cpp")
-            print("2. Clone whisper: git clone https://github.com/openai/whisper")
-            print("3. Run: python whisper.cpp/models/convert-h5-to-ggml.py", model_dir, "./whisper", output_dir)
+            return c
+    raise FileNotFoundError(
+        "quantize.exe not found. Build whisper.cpp first, e.g.:\n"
+        "  cmake -B build -DCMAKE_BUILD_TYPE=Release\n"
+        "  cmake --build build --config Release"
+    )
 
-def quantize_ggml(ggml_file: str, qtype: str, whisper_cpp_path: str = None):
-    """Quantize GGML model using whisper.cpp quantize tool."""
-    
-    # Find quantize executable
-    if whisper_cpp_path:
-        quantize_candidates = [
-            os.path.join(whisper_cpp_path, "build", "bin", "Release", "quantize.exe"),
-            os.path.join(whisper_cpp_path, "build", "bin", "quantize.exe"),
-            os.path.join(whisper_cpp_path, "quantize.exe"),
-        ]
-    else:
-        quantize_candidates = [
-            r"i:\whisper-acft\whisper.cpp\build\bin\Release\quantize.exe",
-            r"whisper.cpp\build\bin\Release\quantize.exe",
-            r"whisper.cpp\build\bin\quantize.exe",
-        ]
-    
-    quantize_path = None
-    for q in quantize_candidates:
-        if os.path.exists(q):
-            quantize_path = q
-            break
-    
-    if not quantize_path:
-        print(f"Warning: quantize tool not found. Skipping quantization.")
-        print("To build quantize tool, run: cmake --build whisper.cpp/build --config Release")
-        return
-    
-    # Create quantized output filename
-    base_dir = os.path.dirname(ggml_file)
-    quantized_file = os.path.join(base_dir, f"ggml-model-{qtype}.bin")
-    
-    # Run quantization
-    cmd = [quantize_path, ggml_file, quantized_file, qtype]
-    print(f"Running: {' '.join(cmd)}")
+
+def convert_to_ggml(export_dir: str, out_dir: str, whisper_cpp_root: str, whisper_repo_root: str, use_f32: bool = False):
+    ensure_dir(out_dir)
+    converter = find_converter(whisper_cpp_root)
+
+    # convert-h5-to-ggml.py expects: dir_model, path-to-openai-whisper-repo, dir-output, [use-f32]
+    cmd = [sys.executable, converter, export_dir, whisper_repo_root, out_dir]
+    if use_f32:
+        cmd.append("use-f32")
+
+    print("\nRunning conversion:")
+    print("  " + " ".join(cmd))
     subprocess.run(cmd, check=True)
-    print(f"Quantized model saved to {quantized_file}")
 
-def convert_with_ctranslate2(model_dir: str, output_dir: str):
-    """Convert to CTranslate2 format (alternative to GGML)."""
-    try:
-        import ctranslate2
-        print("Converting to CTranslate2 format...")
-        converter = ctranslate2.converters.TransformersConverter(model_dir)
-        converter.convert(output_dir, quantization="int8")
-        print(f"CTranslate2 model saved to {output_dir}")
-    except ImportError:
-        print("ctranslate2 not installed. Install with: pip install ctranslate2")
-        raise
+    ggml_path = os.path.join(out_dir, "ggml-model-f32.bin" if use_f32 else "ggml-model.bin")
+    if not os.path.exists(ggml_path):
+        raise FileNotFoundError(f"Expected output not found: {ggml_path}")
+
+    print(f"✅ GGML model: {ggml_path}")
+    return ggml_path
+
+
+def quantize_ggml(ggml_fp16_path: str, qtype: str, whisper_cpp_root: str) -> str:
+    qexe = find_quantize(whisper_cpp_root)
+
+    base_dir = os.path.dirname(ggml_fp16_path)
+    qtype_norm = qtype.strip().lower()
+    out_path = os.path.join(base_dir, f"ggml-model-{qtype_norm}.bin")
+
+    cmd = [qexe, ggml_fp16_path, out_path, qtype_norm]
+    print("\nRunning quantize:")
+    print("  " + " ".join(cmd))
+    subprocess.run(cmd, check=True)
+
+    print(f"✅ Quantized model: {out_path}")
+    return out_path
+
 
 def main():
-    parser = argparse.ArgumentParser(description="Convert fine-tuned Whisper model to GGUF")
-    parser.add_argument("--model_dir", type=str, required=True, help="Path to HF model directory")
-    parser.add_argument("--output_dir", type=str, required=True, help="Output directory for GGUF")
-    parser.add_argument("--whisper_cpp", type=str, default=None, help="Path to whisper.cpp root")
-    parser.add_argument("--base_model", type=str, default="openai/whisper-tiny", help="Base model for tokenizer")
-    parser.add_argument(
-        "--qtype",
-        type=str,
-        default="q8_0",
-        help="Quantization type for GGUF (e.g., q8_0, q5_1, q4_0, f16). Set to '' to keep full precision.",
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--checkpoint_dir", required=True, help="HF checkpoint dir saved as WhisperModel (e.g., model_epoch_000003)")
+    ap.add_argument("--export_dir", required=True, help="Output HF seq2seq dir to create")
+    ap.add_argument("--out_dir", default=None, help="Where to put ggml-model.bin (default: <export_dir>\\ggml)")
+    ap.add_argument("--whisper_cpp", required=True, help="Path to whisper.cpp root")
+    ap.add_argument("--whisper_repo", required=True, help="Path to OpenAI whisper repo root (must contain whisper/assets/mel_filters.npz)")
+
+    ap.add_argument("--base_model", default="futo-org/acft-whisper-tiny.en", help="Base seq2seq model id for LM head")
+    ap.add_argument("--processor", default="openai/whisper-tiny.en", help="Processor id (tokenizer/feature extractor). Use .en if English-only")
+
+    ap.add_argument("--qtype", default="", help="Quantize type (Q4_0,Q4_1,Q5_0,Q5_1,Q8_0). Empty = no quantize")
+    ap.add_argument("--use_f32", action="store_true", help="Export F32 GGML instead of default FP16")
+
+    args = ap.parse_args()
+
+    hf_token = os.getenv("HF_TOKEN")
+
+    # Sanity: whisper repo must contain mel_filters.npz
+    mel = os.path.join(args.whisper_repo, "whisper", "assets", "mel_filters.npz")
+    if not os.path.exists(mel):
+        raise FileNotFoundError(f"OpenAI whisper repo not found / wrong root. Missing: {mel}")
+
+    export_merged_seq2seq(
+        checkpoint_dir=os.path.abspath(args.checkpoint_dir),
+        export_dir=os.path.abspath(args.export_dir),
+        base_model_id=args.base_model,
+        processor_id=args.processor,
+        hf_token=hf_token,
     )
-    args = parser.parse_args()
-    
-    model_dir = os.path.abspath(args.model_dir)
-    output_dir = os.path.abspath(args.output_dir)
-    
-    print(f"Model directory: {model_dir}")
-    print(f"Output directory: {output_dir}")
-    
-    # Step 1: Download missing tokenizer files
-    download_tokenizer_files(model_dir, args.base_model)
-    
-    # Step 2: Fix config if needed
-    fix_config_for_conversion(model_dir)
-    
-    # Step 3: Convert to GGUF
-    convert_hf_to_gguf(model_dir, output_dir, args.whisper_cpp, args.qtype)
-    
-    print("\nConversion complete!")
+
+    out_dir = os.path.abspath(args.out_dir) if args.out_dir else os.path.join(os.path.abspath(args.export_dir), "ggml")
+    ggml_fp = convert_to_ggml(
+        export_dir=os.path.abspath(args.export_dir),
+        out_dir=out_dir,
+        whisper_cpp_root=os.path.abspath(args.whisper_cpp),
+        whisper_repo_root=os.path.abspath(args.whisper_repo),
+        use_f32=args.use_f32,
+    )
+
+    if args.qtype.strip():
+        quantize_ggml(ggml_fp, args.qtype.strip(), os.path.abspath(args.whisper_cpp))
+
 
 if __name__ == "__main__":
     main()

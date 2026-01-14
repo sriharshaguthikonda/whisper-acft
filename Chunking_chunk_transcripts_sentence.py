@@ -1,3 +1,12 @@
+
+
+
+
+"""
+
+ i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\Chunking_chunk_transcripts_sentence.py" --input-dir "i:\Transcriptions" --output-dir "i:\Record_chunks" --manifest-path "i:\Record_chunks\pairs_manifest_local.jsonl" --audio-root "i:\Record_harsha" --repair-missing --workers 6  
+"""
+
 import argparse
 import json
 import os
@@ -165,20 +174,29 @@ def run_ffmpeg_cut(
 
 
 def resolve_audio_path(audio_path: str, audio_root: Path) -> Path:
-    original = Path(audio_path)
+    # Normalize leading slashes/backslashes from Colab-style paths
+    normalized = str(audio_path).lstrip("/\\")
+    original = Path(normalized)
     if original.exists():
         return original
 
     # Handle Colab-style prefix
-    colab_prefix = Path("/content/drive/My Drive")
-    if str(original).startswith(str(colab_prefix)):
-        candidate = audio_root / original.name
-        if candidate.exists():
-            return candidate
-        # Try .wav instead of original suffix
-        candidate_wav = candidate.with_suffix(".wav")
-        if candidate_wav.exists():
-            return candidate_wav
+    colab_prefixes = [
+        Path("/content/drive/My Drive"),
+        Path("content/drive/My Drive"),
+        Path("\\content\\drive\\My Drive"),
+        Path("content\\drive\\My Drive"),
+    ]
+    for colab_prefix in colab_prefixes:
+        if str(original).startswith(str(colab_prefix)):
+            candidate = audio_root / original.name
+            if candidate.exists():
+                return candidate
+            # Try .wav instead of original suffix
+            candidate_wav = candidate.with_suffix(".wav")
+            if candidate_wav.exists():
+                return candidate_wav
+            break
 
     # Fallback: try audio_root + filename with wav
     fallback = audio_root / original.name
@@ -193,7 +211,12 @@ def resolve_audio_path(audio_path: str, audio_root: Path) -> Path:
 
 
 def process_single_json(
-    json_path: Path, chunks_dir: Path, audio_root: Path, overwrite: bool
+    json_path: Path,
+    chunks_dir: Path,
+    audio_root: Path,
+    overwrite: bool,
+    existing_manifest_audio: set[str],
+    repair_missing: bool,
 ) -> tuple[int, int, List[str]]:
     with json_path.open("r", encoding="utf-8") as f:
         payload = json.load(f)
@@ -212,18 +235,32 @@ def process_single_json(
 
     # Pre-compute outputs to allow a fast skip when everything already exists
     outputs = [chunks_dir / f"{base}_sent{idx:04d}.wav" for idx in range(len(chunks))]
-    if not overwrite and all(p.exists() for p in outputs):
+    if not overwrite and not repair_missing and all(p.exists() for p in outputs):
         # All chunks already present; return quickly without rebuilding manifest records
         return 0, len(outputs), []
 
     for idx, (ch, out_wav) in enumerate(zip(chunks, outputs)):
         start = max(0.0, ch.start - PAD_SECONDS)
         end = ch.end + PAD_SECONDS
-        if out_wav.exists() and not overwrite:
-            skipped += 1
+        out_wav_exists = out_wav.exists()
+
+        # Decide whether to create/skip based on overwrite and repair_missing flags
+        should_cut = overwrite or not out_wav_exists
+        if repair_missing:
+            # If manifest is missing entry, always ensure record gets written below.
+            # Only cut audio when the file is absent or overwrite is requested.
+            if should_cut:
+                run_ffmpeg_cut(str(resolved_audio), str(out_wav), start, end, copy_if_wav=copy_ok)
+                created += 1
+            else:
+                skipped += 1
         else:
-            run_ffmpeg_cut(str(resolved_audio), str(out_wav), start, end, copy_if_wav=copy_ok)
-            created += 1
+            if out_wav_exists and not overwrite:
+                skipped += 1
+            else:
+                run_ffmpeg_cut(str(resolved_audio), str(out_wav), start, end, copy_if_wav=copy_ok)
+                created += 1
+
         record = {
             "audio_path": str(out_wav),
             "raw_transcription": ch.text,
@@ -244,6 +281,7 @@ def convert_all(
     manifest_path: Path,
     audio_root: Path,
     overwrite: bool,
+    repair_missing: bool,
     workers: int,
 ) -> None:
     json_files = sorted(input_dir.glob("*.json"))
@@ -275,7 +313,15 @@ def convert_all(
         submit_pbar = tqdm(total=len(json_files), desc="Queueing files", unit="file")
         futures = {}
         for jf in json_files:
-            fut = executor.submit(process_single_json, jf, output_dir, audio_root, overwrite)
+            fut = executor.submit(
+                process_single_json,
+                jf,
+                output_dir,
+                audio_root,
+                overwrite,
+                existing_audio,
+                repair_missing,
+            )
             futures[fut] = jf
             submit_pbar.update(1)
         submit_pbar.close()
@@ -326,25 +372,34 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--output-dir",
         type=Path,
-        default=Path(r"i:\P2GPT_google_drive\My Drive\Record_chunks"),
+        default=Path(r"I:\P2GPT_google_drive\My Drive\Record_chunks"),
         help="Where to write chunked WAV files.",
     )
     parser.add_argument(
         "--manifest-path",
         type=Path,
-        default=Path(r"i:\P2GPT_google_drive\My Drive\Record_chunks\pairs_manifest_sentence.jsonl"),
+        default=Path(r"i:\P2GPT_google_drive\My Drive\Record_chunks\pairs_manifest_local.jsonl"),
         help="Path to aggregated manifest JSONL (appends unless --overwrite).",
     )
     parser.add_argument(
         "--audio-root",
         type=Path,
-        default=Path(r"I:\Record_wav"),
+        default=Path(r"I:\Record_harsha"),
         help="Directory containing full-length source audio files (used to remap Colab paths).",
     )
     parser.add_argument(
         "--overwrite",
         action="store_true",
         help="Regenerate WAVs even if they already exist (otherwise skipped for resumability).",
+    )
+    parser.add_argument(
+        "--repair-missing",
+        action="store_true",
+        default=True,
+        help=(
+            "Fill in missing chunks/manifest entries without reprocessing existing files; "
+            "only cuts audio for absent chunk WAVs."
+        ),
     )
     parser.add_argument(
         "--workers",
@@ -363,6 +418,7 @@ def main() -> None:
         manifest_path=args.manifest_path,
         audio_root=args.audio_root,
         overwrite=args.overwrite,
+        repair_missing=args.repair_missing,
         workers=args.workers,
     )
     # Beep to signal completion (cross-platform best effort)
