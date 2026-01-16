@@ -5,6 +5,8 @@
 """
 
  i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\Chunking_chunk_transcripts_sentence.py" --input-dir "i:\Transcriptions" --output-dir "i:\Record_chunks" --manifest-path "i:\Record_chunks\pairs_manifest_local.jsonl" --audio-root "i:\Record_harsha" --repair-missing --workers 6  
+ 
+ i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\Chunking_chunk_transcripts_sentence.py" --input-dir "i:\Transcriptions" --output-dir "i:\Record_chunks_bad_quality" --manifest-path "i:\Record_chunks_bad_quality\pairs_manifest_bad_quality.jsonl" --audio-root "i:\Record_bad_quality" --repair-missing --workers 6  
 """
 
 import argparse
@@ -226,6 +228,11 @@ def process_single_json(
 
     audio_path = payload["input_file"]["path"]
     resolved_audio = resolve_audio_path(audio_path, audio_root)
+    
+    # Check if the resolved audio file actually exists
+    if not resolved_audio.exists():
+        raise FileNotFoundError(f"Audio file not found: {resolved_audio} (original path: {audio_path})")
+    
     base = Path(resolved_audio).stem
 
     manifest_records: List[str] = []
@@ -348,7 +355,10 @@ def convert_all(
                     new_lines += 1
                 tqdm.write(f"[{jf.name}] created={created} skipped={skipped}")
             except Exception as exc:  # noqa: BLE001
-                tqdm.write(f"[ERROR] {jf.name}: {exc}")
+                if isinstance(exc, FileNotFoundError):
+                    tqdm.write(f"[SKIP] {jf.name}: {exc}")
+                else:
+                    tqdm.write(f"[ERROR] {jf.name}: {exc}")
             finally:
                 process_pbar.update(1)
         process_pbar.close()

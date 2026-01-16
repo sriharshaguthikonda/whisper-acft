@@ -36,10 +36,10 @@ Usage examples
 # 1) Add noise-only rows (~20% of dataset size) + shuffle output
 
 cd "i:\whisper-acft" && python stage_6_add_noise_to_high_score_audio_chunks_manifest_with_noise.py \
-  --manifest "i:/Record_chunks/pairs_manifest_with_noises.jsonl" \
+  --manifest "i:/Record_chunks/pairs_manifest_filtered_with_noises.jsonl" \
   --noises_dir "i:/noise/RIRS_NOISES/pointsource_noises" \
   --scores_csv "i:/whisper-acft/speaker_sort_scores.csv" \
-  --out_manifest "i:/Record_chunks/pairs_manifest_with_noises_with_mix.jsonl" \
+  --out_manifest "i:/Record_chunks/pairs_manifest_filtered_with_noises_with_mix.jsonl" \
   --out_noise_dir "i:/Record_chunks/noise_chunks" \
   --out_mix_dir "i:/Record_chunks/noisy_mixed" \
   --mode mix \

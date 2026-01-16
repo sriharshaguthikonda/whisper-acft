@@ -1,3 +1,11 @@
+"""
+
+
+python Stage_4_Delete_common_fillers_words_from_manifest.py --input I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only.jsonl --output I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered.jsonl
+
+"""
+
+
 import argparse
 import json
 import random

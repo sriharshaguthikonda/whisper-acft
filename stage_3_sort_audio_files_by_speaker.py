@@ -17,10 +17,10 @@ Usage (Windows PowerShell)
 -------------------------
 
 
-$refs = @(Get-ChildItem "I:\Record_only_by_harsha" -Recurse -File `
-  -Include *.wav,*.m4a,*.mp3,*.flac,*.aac,*.ogg,*.opus,*.mka,*.mp4 | 
-  ForEach-Object { $_.FullName })
-
+$refs = @(Get-ChildItem "I:\Record_only_by_harsha" -Recurse -File  -Include *.wav,*.m4a,*.mp3,*.flac,*.aac,*.ogg,*.opus,*.mka,*.mp4 | ForEach-Object { $_.FullName })
+$refs
+$refs.Count
+I:\Whisper-training-env\Scripts\Activate.ps1
 python "i:\whisper-acft\stage_3_sort_audio_files_by_speaker.py" `
   --in "I:\Record_chunks" `
   --ref $refs[0] $refs[1] $refs[2] $refs[3] $refs[4] `
@@ -383,7 +383,7 @@ def main() -> None:
     ap.add_argument("--ref", dest="ref_files", nargs="+", required=True, help="Reference audio files for the target speaker")
     ap.add_argument("--target_out", required=True, help="Directory to put files matching target speaker")
     ap.add_argument("--other_out", required=True, help="Directory to put all other files")
-    ap.add_argument("--threshold", type=float, default=0.65, help="Cosine similarity threshold for match (tune this)")
+    ap.add_argument("--threshold", type=float, default=0.5, help="Cosine similarity threshold for match (tune this)")
     ap.add_argument("--min_seconds", type=float, default=2.0, help="Route to OTHER files shorter than this")
     ap.add_argument("--device", choices=["cpu", "cuda"], default="cpu", help="Use cuda if you have a GPU")
     ap.add_argument("--move", action="store_true", help="Move files instead of copying")

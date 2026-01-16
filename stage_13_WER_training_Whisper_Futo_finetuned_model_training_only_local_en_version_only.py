@@ -1,11 +1,13 @@
 # ============================================
 # Whisper partial-context training — BETTER no-cache mode
-# Improvements vs your current script:
-# 1) Works the same way (scan manifest forward, skip trained/missing/empty, fill N_SAMPLES_PER_EPOCH)
-# 2) Prefetch works EVEN when USE_LOCAL_CACHE=False (prefetches next epoch's selection)
-# 3) Optional fast pre-validation using soundfile.info (sample-rate + duration) so you don't “lose” samples later
-# 4) If LAMBDA_ACFT == 0, we DO NOT run the reference model and DO NOT request hidden_states (big speed win)
-# 5) pick_n_ctx can be set to a *bucketed minimum* that still covers the audio in the batch
+# + LR warmup + decay + proper resume LR override (FULL SCRIPT)
+#
+# This is your Stage 13 script with the learning-rate fixes applied:
+# - Explicit LR_START / LR_FLOOR / WARMUP_STEPS / DECAY_GAMMA
+# - Optional scheduler (warmup + epoch-based decay)
+# - Proper resume: restores global_step + scheduler and (optionally) forces LR_START
+# - Shows LR in progress bar
+# - Default: DYNAMIC_BATCH_SIZE=False while you tune LR (you can turn it back on later)
 # ============================================
 
 # ============================================
@@ -14,7 +16,7 @@
 
 #!pip -q install -U "transformers>=4.38" datasets accelerate soundfile tqdm
 
-import os, json, time, shutil, hashlib, gc, math
+import os, json, time, shutil, hashlib, gc, math, winsound
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -37,10 +39,10 @@ from transformers import (
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "i:/Record_chunks/pairs_manifest_local.jsonl"
+MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_filtered.jsonl"
 TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage1.jsonl"
 
-CHECKPOINT_DIR = "i:/checkpoints_partialctx"
+CHECKPOINT_DIR = "i:/Dynamic_n_ctx_checkpoints_partialctx"
 
 # If you're running on the same machine as the audio (local disk), caching copies is unnecessary.
 USE_LOCAL_CACHE = False
@@ -60,14 +62,40 @@ FUTO_MODEL_ID = "futo-org/acft-whisper-tiny.en"
 PROCESSOR_ID = "openai/whisper-tiny.en"  # must match the base family
 
 TARGET_SR = 16000
-N_SAMPLES_PER_EPOCH = 5000
+N_SAMPLES_PER_EPOCH = 5016
 MAX_EPOCHS = 999999
 
 # --- Training knobs ---
-BATCH_SIZE = 32
-GRAD_ACCUM_STEPS = 2
-LR = 5e-6
-MAX_AUDIO_SECONDS = 29.0  # we pad features to 30s; this filters absurdly long chunks
+BATCH_SIZE = 12  # Reduced from 24 to prevent CUDA OOM
+GRAD_ACCUM_STEPS = 4  # Increased from 2 to maintain effective batch size
+MIN_BATCH_SIZE = 4  # Minimum batch size for very large files
+MAX_BATCH_SIZE = 40  # Maximum batch size for small files
+MAX_AUDIO_SECONDS = 30.0  # we pad features to 30s; this filters absurdly long chunks
+
+# ----------------------------
+# Learning rate + scheduler (NEW)
+# ----------------------------
+# Start here:
+# - If training is unstable or WER collapses after epoch_000001: reduce LR_START (e.g., 2e-6 -> 1e-6 -> 5e-7)
+# - If training is too slow / no learning: increase LR_START (e.g., 2e-6 -> 5e-6)
+LR_START = 2e-6
+LR_FLOOR = 2e-7
+WARMUP_STEPS = 200          # optimizer-steps (NOT micro-batches)
+DECAY_GAMMA = 0.7           # per-epoch decay multiplier after warmup
+USE_SCHEDULER = True
+RESUME_OVERRIDE_LR = True   # IMPORTANT: force LR_START even when resuming optimizer state
+
+# Keep old name so existing code that logs LR still works
+LR = LR_START
+
+# Dynamic batch size settings
+# NOTE: while tuning LR, keep this OFF for stability.
+# After LR is stable, you can set True again.
+DYNAMIC_BATCH_SIZE = False
+MEMORY_THRESHOLD_HIGH = 0.85  # Reduce batch size if memory usage > 85%
+MEMORY_THRESHOLD_LOW = 0.60  # Increase batch size if memory usage < 60%
+DURATION_THRESHOLD_LARGE = 20.0  # Files longer than this get smaller batch size
+DURATION_THRESHOLD_SMALL = 10.0  # Files shorter than this can use larger batch size
 
 # Loss weights
 LAMBDA_ACFT = 0.00        # robustness term
@@ -77,7 +105,7 @@ LAMBDA_CE = 1.00          # ASR term
 NUM_WORKERS = 0           # Windows: keep 0. Colab/Linux: 2–4 can speed up.
 
 # Cleanup aggressiveness
-CLEANUP_EVERY_N_STEPS = 20
+CLEANUP_EVERY_N_STEPS = 10  # More frequent cleanup
 KEEP_LAST_LOCAL_EPOCH_DIRS = 2
 
 # Copying (only used when USE_LOCAL_CACHE=True)
@@ -95,9 +123,25 @@ os.environ["MKL_NUM_THREADS"] = "1"
 torch.set_num_threads(1)
 
 if torch.cuda.is_available():
-    torch.backends.cuda.matmul.fp32_precision = "tf32"
-    torch.backends.cudnn.conv.fp32_precision = "tf32"
+    try:
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+    except AttributeError:
+        pass
+    try:
+        torch.backends.cudnn.conv.fp32_precision = "tf32"
+    except AttributeError:
+        pass
     torch.backends.cudnn.benchmark = True
+
+
+def estimate_opt_steps_per_epoch(n_samples: int, batch_size: int, grad_accum: int) -> int:
+    bs = max(1, int(batch_size))
+    ga = max(1, int(grad_accum))
+    micro_batches = int(math.ceil(float(n_samples) / float(bs)))
+    return max(1, int(math.ceil(float(micro_batches) / float(ga))))
+
+
+OPT_STEPS_PER_EPOCH = estimate_opt_steps_per_epoch(N_SAMPLES_PER_EPOCH, BATCH_SIZE, GRAD_ACCUM_STEPS)
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -109,8 +153,39 @@ scaler = torch.amp.GradScaler("cuda", enabled=use_grad_scaler)
 print("Device:", device)
 if device == "cuda":
     print("GPU:", torch.cuda.get_device_name(0))
+    print(f"[lr] OPT_STEPS_PER_EPOCH≈{OPT_STEPS_PER_EPOCH} | WARMUP_STEPS={WARMUP_STEPS} | LR_START={LR_START} | LR_FLOOR={LR_FLOOR} | DECAY_GAMMA={DECAY_GAMMA}")
 else:
     print("WARNING: CPU training will be very slow.")
+
+
+# Global variables for dynamic batch size
+current_batch_size = BATCH_SIZE
+batch_size_history = []
+om_adjustments = 0
+
+
+def check_memory_availability(required_gb: float = 2.0) -> bool:
+    """Check if enough GPU memory is available."""
+    if not torch.cuda.is_available():
+        return True
+    try:
+        alloc = torch.cuda.memory_allocated() / (1024**3)
+        total = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        available = total - alloc
+        return available > required_gb
+    except Exception:
+        return True
+
+
+def beep_notification(frequency: int = 1000, duration: int = 500):
+    """Play a beep notification when script completes."""
+    try:
+        if os.name == 'nt':
+            winsound.Beep(frequency, duration)
+        else:
+            print('\a')
+    except Exception:
+        pass
 
 
 def cleanup_memory(tag: str = ""):
@@ -119,12 +194,70 @@ def cleanup_memory(tag: str = ""):
         try:
             torch.cuda.empty_cache()
             torch.cuda.ipc_collect()
+            torch.cuda.synchronize()
         except Exception:
             pass
     if tag and torch.cuda.is_available():
         alloc = torch.cuda.memory_allocated() / (1024**3)
         reserv = torch.cuda.memory_reserved() / (1024**3)
-        print(f"[mem] {tag} | cuda alloc={alloc:.2f}GB reserved={reserv:.2f}GB")
+        max_alloc = torch.cuda.get_device_properties(0).total_memory / (1024**3)
+        print(f"[mem] {tag} | cuda alloc={alloc:.2f}GB reserved={reserv:.2f}GB max={max_alloc:.2f}GB")
+        if alloc > max_alloc * 0.9:
+            print(f"[mem] WARNING: High memory usage ({alloc:.2f}GB / {max_alloc:.2f}GB)")
+
+
+def get_memory_usage_ratio() -> float:
+    """Get current GPU memory usage as ratio (0.0 to 1.0)."""
+    if not torch.cuda.is_available():
+        return 0.0
+    try:
+        alloc = torch.cuda.memory_allocated()
+        total = torch.cuda.get_device_properties(0).total_memory
+        return alloc / total
+    except Exception:
+        return 0.0
+
+
+def calculate_optimal_batch_size(avg_duration: float, memory_ratio: float) -> int:
+    """Calculate optimal batch size based on audio duration and memory usage."""
+    global current_batch_size, om_adjustments
+
+    if not DYNAMIC_BATCH_SIZE:
+        return BATCH_SIZE
+
+    suggested_size = current_batch_size
+
+    if avg_duration > DURATION_THRESHOLD_LARGE:
+        duration_factor = DURATION_THRESHOLD_LARGE / avg_duration
+        suggested_size = max(MIN_BATCH_SIZE, int(current_batch_size * duration_factor))
+
+    elif avg_duration < DURATION_THRESHOLD_SMALL:
+        duration_factor = avg_duration / DURATION_THRESHOLD_SMALL
+        suggested_size = min(MAX_BATCH_SIZE, int(current_batch_size * (1 + duration_factor * 0.5)))
+
+    if memory_ratio > MEMORY_THRESHOLD_HIGH:
+        memory_factor = MEMORY_THRESHOLD_HIGH / memory_ratio
+        suggested_size = max(MIN_BATCH_SIZE, int(suggested_size * memory_factor))
+
+    elif memory_ratio < MEMORY_THRESHOLD_LOW:
+        memory_factor = (memory_ratio / MEMORY_THRESHOLD_LOW) * 0.3 + 0.7
+        suggested_size = min(MAX_BATCH_SIZE, int(suggested_size * (1 / memory_factor)))
+
+    if abs(suggested_size - current_batch_size) >= 2:
+        old_size = current_batch_size
+        current_batch_size = suggested_size
+        om_adjustments += 1
+        batch_size_history.append({
+            'step': om_adjustments,
+            'old_size': old_size,
+            'new_size': current_batch_size,
+            'avg_duration': avg_duration,
+            'memory_ratio': memory_ratio,
+            'timestamp': time.time()
+        })
+        print(f"[batch] Adjusted batch size: {old_size} -> {current_batch_size} (avg_dur={avg_duration:.1f}s, mem={memory_ratio:.1%})")
+
+    return current_batch_size
 
 
 # ============================================
@@ -207,9 +340,7 @@ print("Already trained:", len(trained_set))
 
 
 def audio_header_ok(path: str) -> bool:
-    """Fast validation: checks sample rate + duration via header.
-    Returns True if path looks usable. (Does NOT decode the whole file.)
-    """
+    """Fast validation: checks sample rate + duration via header."""
     try:
         info = sf.info(path)
         if info.samplerate != TARGET_SR:
@@ -233,10 +364,7 @@ def _copy_one(src: str, dst: str):
 
 
 def select_epoch_rows(pointer: int, trained_set: set, need: int, manifest_rows: list):
-    """No-cache selection.
-
-    Critical improvement: (optional) validate sr+duration in selector so you really get ~need usable samples.
-    """
+    """No-cache selection."""
 
     kept = []
     scanned = 0
@@ -244,14 +372,12 @@ def select_epoch_rows(pointer: int, trained_set: set, need: int, manifest_rows: 
         "kept": 0,
         "scanned": 0,
         "trained_skipped": 0,
-        "empty_transcription": 0,
         "missing": 0,
         "bad_header": 0,
     }
 
     p = pointer
 
-    # We validate in blocks to keep threading simple.
     while p < len(manifest_rows) and len(kept) < need:
         block = []
 
@@ -268,9 +394,6 @@ def select_epoch_rows(pointer: int, trained_set: set, need: int, manifest_rows: 
             if ap in trained_set:
                 stats["trained_skipped"] += 1
                 continue
-            if not txt:
-                stats["empty_transcription"] += 1
-                continue
             if not os.path.exists(ap):
                 stats["missing"] += 1
                 continue
@@ -284,7 +407,6 @@ def select_epoch_rows(pointer: int, trained_set: set, need: int, manifest_rows: 
             kept.extend(block)
             continue
 
-        # Validate headers in parallel
         def vtask(row):
             return row, audio_header_ok(row["audio_path"])
 
@@ -382,6 +504,11 @@ def decode_mono_16k(path: str):
             return None, None
         if wav.ndim == 2:
             wav = wav.mean(axis=-1)
+
+        wav = np.asarray(wav, dtype=np.float32)
+        if not np.isfinite(wav).all():
+            wav = np.nan_to_num(wav, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
         return wav, sr
     except Exception:
         return None, None
@@ -435,6 +562,17 @@ def collate_batch(examples):
     if not waveforms_30s:
         return None
 
+    for i, w in enumerate(waveforms_30s):
+        if not np.isfinite(w).all():
+            audio_path = examples[i].get("audio", "unknown")
+            print(f"BAD AUDIO (non-finite) at: {audio_path}")
+            print(f"  - Audio shape: {w.shape}")
+            print(f"  - Contains NaN: {np.isnan(w).any()}")
+            print(f"  - Contains Inf: {np.isinf(w).any()}")
+            print(f"  - Min/Max values: [{np.nanmin(w):.6f}, {np.nanmax(w):.6f}]")
+            print(f"  - Text: '{examples[i].get('raw_transcription', '')[:100]}...'")
+            return None
+
     feats = processor.feature_extractor(
         waveforms_30s,
         sampling_rate=TARGET_SR,
@@ -455,6 +593,9 @@ def collate_batch(examples):
     labels = tok["input_ids"].clone()
     labels[labels == PAD_ID] = -100
 
+    if tok["attention_mask"].sum().item() == 0:
+        return None
+
     return {
         "lengths": torch.tensor(lengths_sec, dtype=torch.float32),
         "input_features": feats.input_features,
@@ -464,7 +605,7 @@ def collate_batch(examples):
 
 
 # ============================================
-# CELL 5/9 — Models + optimizer
+# CELL 5/9 — Models + optimizer + scheduler
 # ============================================
 
 try:
@@ -531,7 +672,6 @@ model_train.train()
 
 DECODER_START_ID = int(model_train.config.decoder_start_token_id)
 
-# Only load reference model if ACFT is enabled
 want_acft = (LAMBDA_ACFT > 0.0)
 if want_acft:
     model_ref = WhisperForConditionalGeneration.from_pretrained(FUTO_MODEL_ID, generation_config=gen_config)
@@ -542,8 +682,39 @@ if want_acft:
 else:
     model_ref = None
 
-optimizer = torch.optim.AdamW(model_train.parameters(), lr=LR)
+optimizer = torch.optim.AdamW(model_train.parameters(), lr=LR_START)
 
+# Track optimizer steps globally (NEW)
+global_step = 0
+
+# Scheduler (warmup + epoch decay) (NEW)
+scheduler = None
+if USE_SCHEDULER:
+    def lr_mult(step: int) -> float:
+        # warmup
+        if step < WARMUP_STEPS:
+            return float(step) / max(1.0, float(WARMUP_STEPS))
+
+        # epoch-based decay after warmup
+        post = step - WARMUP_STEPS
+        epoch_i = int(post // max(1, OPT_STEPS_PER_EPOCH))
+        mult = (DECAY_GAMMA ** epoch_i)
+
+        # floor
+        floor_mult = float(LR_FLOOR) / float(LR_START)
+        if mult < floor_mult:
+            mult = floor_mult
+        return float(mult)
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_mult)
+    print("[lr] Scheduler enabled: warmup + epoch decay")
+else:
+    print("[lr] Scheduler disabled: constant LR")
+
+# Add gradient clipping for stability
+MAX_GRAD_NORM = 1.0
+
+# Resume optimizer/scaler/scheduler/global_step
 if latest_state is not None:
     try:
         if latest_state.get("optimizer") is not None:
@@ -552,8 +723,32 @@ if latest_state is not None:
         if use_grad_scaler and latest_state.get("scaler") is not None:
             scaler.load_state_dict(latest_state["scaler"])
             print("Resumed GradScaler state.")
+
+        global_step = int(latest_state.get("global_step", 0) or 0)
+
+        if scheduler is not None and latest_state.get("scheduler") is not None:
+            try:
+                scheduler.load_state_dict(latest_state["scheduler"])
+                print("Resumed scheduler state.")
+            except Exception as e:
+                print("WARNING: failed to resume scheduler:", repr(e))
+
     except Exception as e:
         print("WARNING: failed to resume optimizer/scaler:", repr(e))
+
+# Force LR on resume (critical if you changed LR_START)
+if RESUME_OVERRIDE_LR:
+    for pg in optimizer.param_groups:
+        pg["lr"] = LR_START
+    if scheduler is not None:
+        # Ensure scheduler base_lrs reflect LR_START
+        scheduler.base_lrs = [LR_START for _ in optimizer.param_groups]
+        try:
+            # Align scheduler to global_step
+            scheduler.last_epoch = max(-1, global_step - 1)
+        except Exception:
+            pass
+    print(f"[lr] Forced LR_START on resume: {LR_START} (global_step={global_step})")
 
 cleanup_memory("after model load")
 
@@ -602,8 +797,6 @@ def compute_partially_encoder(whisper_model, input_features: torch.Tensor, n_aud
     return hs
 
 
-# IMPORTANT: This version NEVER truncates real audio information.
-# It picks the smallest context bucket that can cover the longest audio in the batch.
 CTX_BUCKETS = [256, 384, 512, 768, 1024, 1500]
 
 
@@ -647,16 +840,25 @@ def save_checkpoint(epoch_num: int, subset_start_idx: int, subset_count: int):
     model_train.to("cpu").save_pretrained(model_dir)
     model_train.to(device)
 
+    current_lr = float(optimizer.param_groups[0]["lr"])
+
     state = {
         "epoch": epoch_num,
         "subset_start_idx": subset_start_idx,
         "subset_count": subset_count,
         "optimizer": optimizer.state_dict(),
         "scaler": scaler.state_dict() if use_grad_scaler else None,
+        "scheduler": scheduler.state_dict() if scheduler is not None else None,
+        "global_step": int(global_step),
         "timestamp": time.time(),
         "model_id": FUTO_MODEL_ID,
         "processor_id": PROCESSOR_ID,
-        "lr": LR,
+        "lr_current": current_lr,
+        "lr_start": float(LR_START),
+        "lr_floor": float(LR_FLOOR),
+        "warmup_steps": int(WARMUP_STEPS),
+        "decay_gamma": float(DECAY_GAMMA),
+        "use_scheduler": bool(USE_SCHEDULER),
         "batch_size": BATCH_SIZE,
         "grad_accum_steps": GRAD_ACCUM_STEPS,
         "n_samples_per_epoch": N_SAMPLES_PER_EPOCH,
@@ -664,6 +866,7 @@ def save_checkpoint(epoch_num: int, subset_start_idx: int, subset_count: int):
         "lambda_ce": LAMBDA_CE,
         "use_local_cache": USE_LOCAL_CACHE,
         "validate_audio_in_selector": VALIDATE_AUDIO_IN_SELECTOR,
+        "dynamic_batch_size": bool(DYNAMIC_BATCH_SIZE),
     }
 
     state_path = os.path.join(CHECKPOINT_DIR, f"training_state_epoch_{epoch_num:06d}.pt")
@@ -694,7 +897,7 @@ def build_loader_from_rows(rows_for_epoch):
     loader = DataLoader(
         ds,
         batch_size=BATCH_SIZE,
-        shuffle=True,  # better training (within-epoch)
+        shuffle=True,
         collate_fn=collate_batch,
         num_workers=NUM_WORKERS,
         pin_memory=(device == "cuda"),
@@ -704,6 +907,8 @@ def build_loader_from_rows(rows_for_epoch):
 
 
 def train_one_epoch(epoch_num: int, loader: DataLoader):
+    global global_step
+
     model_train.train()
     optimizer.zero_grad(set_to_none=True)
 
@@ -711,6 +916,8 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
 
     running = 0.0
     steps = 0
+    batch_sizes_used = []
+    durations_seen = []
 
     pbar = tqdm(loader, desc=f"Epoch {epoch_num}")
 
@@ -718,61 +925,109 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
         if batch is None:
             continue
 
+        if not check_memory_availability(required_gb=3.0):
+            print("[mem] Low memory detected, forcing cleanup before batch...")
+            cleanup_memory(f"forced cleanup before batch {batch_idx}")
+            if not check_memory_availability(required_gb=2.0):
+                print("[mem] Still low memory after cleanup, skipping batch")
+                optimizer.zero_grad(set_to_none=True)
+                continue
+
         input_features = batch["input_features"].to(device, non_blocking=True)
         lengths = batch["lengths"].to(device, non_blocking=True)
         labels = batch["labels"].to(device, non_blocking=True)
         attn_mask = batch["attention_mask"].to(device, non_blocking=True)
+
+        current_batch_size_actual = input_features.shape[0]
+        avg_duration_in_batch = float(lengths.mean().item())
+        batch_sizes_used.append(current_batch_size_actual)
+        durations_seen.append(avg_duration_in_batch)
+
+        if not torch.isfinite(input_features).all():
+            print("BAD FEATURES (non-finite). Skipping batch.")
+            optimizer.zero_grad(set_to_none=True)
+            continue
 
         decoder_input_ids = shift_tokens_right(labels, pad_token_id=PAD_ID, decoder_start_token_id=DECODER_START_ID)
 
         max_embed_positions = model_train.model.encoder.embed_positions.weight.shape[0]
         n_ctx = pick_n_ctx_from_batch(lengths, max_embed_positions)
 
-        with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
-            # Student forward
-            enc_partial = compute_partially_encoder(model_train.model, input_features, n_ctx)
+        try:
+            with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
+                enc_partial = compute_partially_encoder(model_train.model, input_features, n_ctx)
 
-            dec_partial = model_train.model.decoder(
-                input_ids=decoder_input_ids,
-                attention_mask=attn_mask,
-                encoder_hidden_states=enc_partial,
-                output_hidden_states=want_acft,  # ONLY compute hidden_states if ACFT enabled
-                use_cache=False,
-            )
+                dec_partial = model_train.model.decoder(
+                    input_ids=decoder_input_ids,
+                    attention_mask=attn_mask,
+                    encoder_hidden_states=enc_partial,
+                    output_hidden_states=want_acft,
+                    use_cache=False,
+                )
 
-            logits = lm_head(dec_partial.last_hidden_state)
-            loss_ce = F.cross_entropy(
-                logits.reshape(-1, logits.shape[-1]),
-                labels.reshape(-1),
-                ignore_index=-100,
-            )
+                logits = lm_head(dec_partial.last_hidden_state)
+                loss_ce = F.cross_entropy(
+                    logits.reshape(-1, logits.shape[-1]),
+                    labels.reshape(-1),
+                    ignore_index=-100,
+                )
 
-            if want_acft:
-                with torch.no_grad():
-                    enc_full = compute_partially_encoder(model_ref.model, input_features, FULL_ENCODER_CONTEXT_LENGTH)
-                    dec_full = model_ref.model.decoder(
-                        input_ids=decoder_input_ids,
-                        attention_mask=attn_mask,
-                        encoder_hidden_states=enc_full,
-                        output_hidden_states=True,
-                        use_cache=False,
-                    )
+                if not torch.isfinite(loss_ce):
+                    print("Non-finite CE loss. Skipping batch.")
+                    optimizer.zero_grad(set_to_none=True)
+                    continue
 
-                hs_p = torch.stack(dec_partial.hidden_states, dim=0)
-                hs_f = torch.stack(dec_full.hidden_states, dim=0)
-                loss_acft = masked_hidden_mse(hs_p, hs_f, attn_mask)
+                if want_acft:
+                    with torch.no_grad():
+                        enc_full = compute_partially_encoder(model_ref.model, input_features, FULL_ENCODER_CONTEXT_LENGTH)
+                        dec_full = model_ref.model.decoder(
+                            input_ids=decoder_input_ids,
+                            attention_mask=attn_mask,
+                            encoder_hidden_states=enc_full,
+                            output_hidden_states=True,
+                            use_cache=False,
+                        )
+
+                    hs_p = torch.stack(dec_partial.hidden_states, dim=0)
+                    hs_f = torch.stack(dec_full.hidden_states, dim=0)
+                    loss_acft = masked_hidden_mse(hs_p, hs_f, attn_mask)
+                else:
+                    loss_acft = torch.zeros((), device=device)
+
+                loss = (LAMBDA_CE * loss_ce) + (LAMBDA_ACFT * loss_acft)
+                loss = loss / float(GRAD_ACCUM_STEPS)
+
+                if not torch.isfinite(loss):
+                    print("Non-finite total loss. Skipping batch.")
+                    optimizer.zero_grad(set_to_none=True)
+                    continue
+
+        except torch.cuda.OutOfMemoryError as e:
+            print(f"[mem] CUDA OOM caught: {str(e)}")
+            print(f"[mem] Batch size: {input_features.shape[0]}, Context: {n_ctx}")
+            cleanup_memory("after OOM")
+            optimizer.zero_grad(set_to_none=True)
+            continue
+        except RuntimeError as e:
+            if "out of memory" in str(e).lower():
+                print(f"[mem] Memory error caught: {str(e)}")
+                cleanup_memory("after memory error")
+                optimizer.zero_grad(set_to_none=True)
+                continue
             else:
-                loss_acft = torch.zeros((), device=device)
-
-            loss = (LAMBDA_CE * loss_ce) + (LAMBDA_ACFT * loss_acft)
-            loss = loss / float(GRAD_ACCUM_STEPS)
+                raise e
 
         if use_grad_scaler:
             scaler.scale(loss).backward()
         else:
             loss.backward()
 
+        did_opt_step = False
         if (batch_idx + 1) % GRAD_ACCUM_STEPS == 0:
+            if use_grad_scaler:
+                scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model_train.parameters(), MAX_GRAD_NORM)
+
             if use_grad_scaler:
                 scaler.step(optimizer)
                 scaler.update()
@@ -780,8 +1035,24 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
                 optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
+            did_opt_step = True
+
+            # Scheduler step ONCE per optimizer step (NEW)
+            if scheduler is not None:
+                scheduler.step()
+
+            global_step += 1
+
+            # Optional dynamic batch logic (disabled by default)
+            if DYNAMIC_BATCH_SIZE and (batch_idx + 1) % (GRAD_ACCUM_STEPS * 5) == 0:
+                memory_ratio = get_memory_usage_ratio()
+                avg_duration_recent = np.mean(durations_seen[-10:]) if len(durations_seen) >= 10 else avg_duration_in_batch
+                _ = calculate_optimal_batch_size(avg_duration_recent, memory_ratio)
+
         running += float(loss.item())
         steps += 1
+
+        cur_lr = float(optimizer.param_groups[0]["lr"])
 
         pbar.set_postfix({
             "loss": f"{(running / max(1, steps)):.6f}",
@@ -789,6 +1060,9 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
             "acft": f"{loss_acft.item():.4f}" if want_acft else "off",
             "n_ctx": int(n_ctx),
             "bs": int(input_features.shape[0]),
+            "lr": f"{cur_lr:.2e}",
+            "gs": int(global_step),
+            "mem": f"{get_memory_usage_ratio():.1%}",
         })
 
         # Cleanup
@@ -800,6 +1074,11 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
 
         if (batch_idx + 1) % CLEANUP_EVERY_N_STEPS == 0:
             cleanup_memory(f"epoch {epoch_num} step {batch_idx+1}")
+
+    if batch_sizes_used:
+        avg_bs = np.mean(batch_sizes_used)
+        avg_dur = np.mean(durations_seen)
+        print(f"[epoch] Avg batch size: {avg_bs:.1f}, Avg duration: {avg_dur:.1f}s, Total adjustments: {om_adjustments}")
 
     cleanup_memory(f"end epoch {epoch_num}")
     return running / max(1, steps)
@@ -842,7 +1121,6 @@ def cleanup_trained_drive_audio(drive_paths, mode: str, allowed_prefix: str, arc
     print(f"Drive cleanup done (mode={mode}). moved={moved}, deleted={deleted}, missing={missing}, skipped={skipped}")
 
 
-# Start pointer: first untrained in manifest (best effort)
 pointer = 0
 while pointer < len(manifest_rows) and manifest_rows[pointer]["audio_path"] in trained_set:
     pointer += 1
@@ -863,14 +1141,12 @@ try:
         if USE_LOCAL_CACHE:
             cleanup_old_epoch_dirs(LOCAL_EPOCH_CACHE_ROOT, keep_last_k=KEEP_LAST_LOCAL_EPOCH_DIRS)
 
-        # Consume prefetched epoch if ready
         if prefetch_future is not None and prefetch_future.done():
             current_rows, new_pointer, meta = prefetch_future.result()
             pointer = new_pointer
             prefetch_future = None
             print(f"\nEpoch {epoch} ready: kept={len(current_rows)} | {meta}")
         else:
-            # Build synchronously
             if USE_LOCAL_CACHE:
                 epoch_dir = os.path.join(LOCAL_EPOCH_CACHE_ROOT, f"epoch_{epoch:06d}")
                 print(f"\nPreparing epoch {epoch} cache -> {epoch_dir}")
@@ -896,7 +1172,6 @@ try:
             print("No more usable samples. Stopping.")
             break
 
-        # Kick off next prefetch (BOTH modes)
         if prefetch_future is None:
             if USE_LOCAL_CACHE:
                 next_epoch_dir = os.path.join(LOCAL_EPOCH_CACHE_ROOT, f"epoch_{(epoch+1):06d}")
@@ -919,21 +1194,17 @@ try:
                     manifest_rows,
                 )
 
-        # Train
         loader = build_loader_from_rows(current_rows)
         avg_loss = train_one_epoch(epoch, loader)
         print(f"Epoch {epoch} avg loss: {avg_loss:.6f}")
 
-        # Mark trained
         trained_to_append = [{"audio_path": r["audio_path"]} for r in current_rows if r.get("audio_path")]
         append_jsonl(TRAINED_JSONL_PATH, trained_to_append)
         for r in trained_to_append:
             trained_set.add(r["audio_path"])
 
-        # Save
         save_checkpoint(epoch, subset_start_idx=-1, subset_count=len(current_rows))
 
-        # Optional cleanup
         if DELETE_TRAINED_FROM_DRIVE:
             drive_paths = [r.get("audio_path") for r in current_rows if r.get("audio_path")]
             cleanup_trained_drive_audio(drive_paths, DRIVE_CLEANUP_MODE, DRIVE_ALLOWED_PREFIX, DRIVE_ARCHIVE_DIR)
@@ -954,3 +1225,6 @@ finally:
             pass
 
 print("Done.")
+beep_notification(1000, 500)
+time.sleep(0.1)
+beep_notification(1200, 500)

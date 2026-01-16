@@ -22,7 +22,7 @@ This script is designed for your manifest schema:
   }
 
 Noise-only rows will use:
-  raw_transcription: ""  (empty)
+  raw_transcription: "<|nocaptions|>"  (no-speech token)
   transcript_json: null
   is_noise_only: true
 
@@ -33,9 +33,11 @@ pip install numpy soundfile tqdm
 
 Usage examples
 --------------
-# 1) Add noise-only rows (~20% of dataset size) + shuffle output
+# Stage 5: Augment manifest with noise
+# Input: pairs_manifest_filtered.jsonl (from stage 4)
+# Output: pairs_manifest_filtered_with_noises.jsonl
 
-cd "i:\whisper-acft" && python stage_5_augment_manifest_with_noise.py --manifest "i:/Record_chunks/pairs_manifest_local.jsonl" --noises_dir "i:/noise/RIRS_NOISES/pointsource_noises" --out_manifest "i:/Record_chunks/pairs_manifest_with_noises.jsonl" --out_noise_dir "i:/Record_chunks/noise_chunks" --mode noise_only --noise_ratio 0.2 --seed 1337 --shuffle
+cd "i:\whisper-acft" && python stage_5_augment_manifest_with_noise.py --manifest "i:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered.jsonl" --noises_dir "i:/noise/RIRS_NOISES/pointsource_noises" --out_manifest "i:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises.jsonl" --out_noise_dir "i:/Record_chunks/noise_chunks" --mode noise_only --noise_ratio 0.2 --seed 1337 --shuffle
 
 
 """
@@ -294,7 +296,7 @@ def add_noise_only_rows(
         out.append(
             {
                 "audio_path": nc.audio_path,
-                "raw_transcription": "",
+                "raw_transcription": "<|nocaptions|>",
                 "source_audio": nc.source_audio,
                 "chunk_index": nc.chunk_index,
                 "chunk_start": nc.chunk_start,

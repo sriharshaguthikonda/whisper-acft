@@ -35,12 +35,16 @@ pip install numpy soundfile tqdm
 
 Usage examples
 --------------
-# Mix OTHER voices onto TARGET files:
+# Mix OTHER voices onto TARGET files using I:\Record_others directory:
 
+
+
+# Use custom other voices directory:
 cd "i:\whisper-acft" && python stage_7_add_others_voices_to_my_audio.py \
-  --manifest "i:/Record_chunks/pairs_manifest_with_noises_with_mix.jsonl" \
+  --manifest "i:/Record_chunks/pairs_manifest_filtered_with_noises_with_mix.jsonl" \
   --scores_csv "i:/whisper-acft/speaker_sort_scores.csv" \
-  --out_manifest "i:/Record_chunks/pairs_manifest_with_others_voices_mixed.jsonl" \
+  --other_voices_dir "I:/Custom/Other/Voices" \
+  --out_manifest "i:/Record_chunks/pairs_manifest_filtered_with_noises_and_others_voices_mixed.jsonl" \
   --out_mix_dir "i:/Record_chunks/voice_mixed" \
   --mix_ratio 0.5 \
   --snr_db_min 5 \
@@ -76,8 +80,8 @@ def _norm_path(p: str | Path) -> str:
 
 def _is_audio_file(p: Path) -> bool:
     # soundfile supports wav/flac/ogg and some others depending on libsndfile.
-    # Keep this conservative.
-    return p.suffix.lower() in {".wav", ".flac", ".ogg"}
+    # Keep this conservative but add m4a support for this pipeline.
+    return p.suffix.lower() in {".wav", ".flac", ".ogg", ".m4a"}
 
 
 def _rms(x: np.ndarray, eps: float = 1e-12) -> float:
@@ -117,14 +121,16 @@ def _safe_write_wav(path: Path, audio: np.ndarray, sr: int) -> None:
     sf.write(str(path), audio, sr, subtype="PCM_16")
 
 
-def load_target_and_other_files(scores_csv: Path) -> Tuple[set[str], List[Tuple[Path, float]]]:
-    """Load TARGET files set and OTHER files with scores from speaker sort scores CSV.
+def load_target_and_other_files(scores_csv: Path, other_voices_dir: Path = None) -> Tuple[set[str], List[Tuple[Path, float]]]:
+    """Load TARGET files set and OTHER files from either CSV scores or a directory.
     
+    If other_voices_dir is provided, scan it for audio files instead of using CSV.
     Returns OTHER files sorted by score (low to high) - lower scores = more likely other speakers.
     """
     target_files = set()
     other_files_with_scores = []
     
+    # Load target files from CSV
     with scores_csv.open("r", encoding="utf-8") as f:
         next(f)  # Skip header
         for line in f:
@@ -139,15 +145,36 @@ def load_target_and_other_files(scores_csv: Path) -> Tuple[set[str], List[Tuple[
                 
                 if decision == "TARGET":
                     target_files.add(norm_path)
-                elif decision == "OTHER" and score_str and score_str != "":
-                    try:
-                        score = float(score_str)
-                        # Only include OTHER files with non-zero scores
-                        if score > 0:
-                            other_files_with_scores.append((Path(file_path), score))
-                    except ValueError:
-                        # Skip if score is not a valid number
-                        continue
+    
+    # Load other voice files
+    if other_voices_dir and other_voices_dir.exists():
+        # Scan directory for audio files
+        print(f"Scanning {other_voices_dir} for other voice files...")
+        for audio_file in other_voices_dir.rglob("*"):
+            if audio_file.is_file() and _is_audio_file(audio_file):
+                # Assign a default score (0.5) for directory files
+                other_files_with_scores.append((audio_file, 0.5))
+        print(f"Found {len(other_files_with_scores)} audio files in {other_voices_dir}")
+    else:
+        # Load from CSV (original behavior)
+        with scores_csv.open("r", encoding="utf-8") as f:
+            next(f)  # Skip header
+            for line in f:
+                parts = line.strip().split(",")
+                if len(parts) >= 3:
+                    file_path = parts[0]
+                    score_str = parts[1]
+                    decision = parts[2]
+                    
+                    if decision == "OTHER" and score_str and score_str != "":
+                        try:
+                            score = float(score_str)
+                            # Only include OTHER files with non-zero scores
+                            if score > 0:
+                                other_files_with_scores.append((Path(file_path), score))
+                        except ValueError:
+                            # Skip if score is not a valid number
+                            continue
     
     # Sort OTHER files by score (low to high) - lower scores = more likely other speakers
     other_files_with_scores.sort(key=lambda x: x[1])
@@ -178,9 +205,38 @@ def write_manifest(path: Path, rows: List[Dict]) -> None:
 
 def _read_wav_any(path: Path) -> Tuple[np.ndarray, int]:
     # Use soundfile; assumes wav/flac/ogg supported
+    # Convert m4a to wav first if needed
+    if path.suffix.lower() == ".m4a":
+        wav_path = path.with_suffix(".wav")
+        if not wav_path.exists() or wav_path.stat().st_mtime < path.stat().st_mtime:
+            # Convert m4a to wav using ffmpeg
+            import subprocess
+            cmd = ["ffmpeg", "-y", "-i", str(path), str(wav_path)]
+            try:
+                subprocess.run(cmd, check=True, capture_output=True)
+                print(f"Converted {path} to {wav_path}")
+            except subprocess.CalledProcessError as e:
+                raise RuntimeError(f"Failed to convert {path} to wav: {e}")
+        path = wav_path
+    
     audio, sr = sf.read(str(path), dtype="float32", always_2d=False)
     audio = _ensure_mono(audio)
     return audio, int(sr)
+
+
+def _extract_random_segment(audio: np.ndarray, sr: int, target_duration: float, rng: random.Random) -> Tuple[np.ndarray, float]:
+    """Extract a random segment of target_duration from audio, or entire audio if shorter."""
+    audio_duration = len(audio) / sr
+    if audio_duration <= target_duration:
+        return audio, audio_duration
+    
+    # Extract random segment
+    max_start = audio_duration - target_duration
+    start_time = rng.uniform(0, max_start)
+    start_sample = int(start_time * sr)
+    end_sample = int((start_time + target_duration) * sr)
+    
+    return audio[start_sample:end_sample], target_duration
 
 
 def mix_other_voices_into_target(
@@ -238,10 +294,10 @@ def mix_other_voices_into_target(
             if target_dur <= 0.01:
                 continue
 
-            # Find suitable OTHER voice files (prioritize low scores)
+            # Find suitable OTHER voice files (any audio file can work now since we extract segments)
             suitable_other_files = []
             checked_count = 0
-            max_checks = min(100, len(other_files_with_scores))  # Limit checks for performance
+            max_checks = min(50, len(other_files_with_scores))  # Limit checks for performance
             
             for other_path, other_score in other_files_with_scores:
                 if checked_count >= max_checks:
@@ -254,8 +310,9 @@ def mix_other_voices_into_target(
                 try:
                     other_audio, other_sr = _read_wav_any(other_path)
                     other_dur = float(len(other_audio)) / other_sr
-                    if other_dur >= target_dur:
-                        suitable_other_files.append((other_path, other_score))
+                    # Any audio file with duration > 1 second can work (we'll extract segments)
+                    if other_dur > 1.0:
+                        suitable_other_files.append((other_path, other_score, other_audio, other_sr))
                         # If we found a few good options, stop searching
                         if len(suitable_other_files) >= 5:
                             break
@@ -269,23 +326,13 @@ def mix_other_voices_into_target(
             # Pick from suitable files, prioritizing lowest scores
             # Sort by score again to ensure we pick the lowest scoring suitable files
             suitable_other_files.sort(key=lambda x: x[1])
-            other_voice_path, other_score = random.choice(suitable_other_files[:min(3, len(suitable_other_files))])
+            chosen_other = suitable_other_files[0]
+            other_path, other_score, other_audio, other_sr = chosen_other
             
-            other_voice, other_sr = _read_wav_any(other_voice_path)
-            other_voice = _resample_if_needed(other_voice, other_sr, target_sr)
-
-            # Ensure OTHER voice length matches TARGET length
-            if len(other_voice) < len(target_speech):
-                reps = int(math.ceil(len(target_speech) / max(1, len(other_voice))))
-                other_voice = np.tile(other_voice, reps)[: len(target_speech)]
-            else:
-                # Random crop from the longer OTHER voice
-                max_start = len(other_voice) - len(target_speech)
-                if max_start > 0:
-                    start = random.randint(0, max_start)
-                    other_voice = other_voice[start : start + len(target_speech)]
-                else:
-                    other_voice = other_voice[: len(target_speech)]
+            # Extract a random segment from the other voice that matches target duration
+            rng = random.Random(1337)  # Use fixed seed for reproducibility
+            other_voice_segment, actual_duration = _extract_random_segment(other_audio, other_sr, target_dur, rng)
+            other_voice = _resample_if_needed(other_voice_segment, other_sr, target_sr)
 
             # Choose SNR and scale OTHER voice
             snr_db = random.uniform(float(snr_db_min), float(snr_db_max))
@@ -308,7 +355,7 @@ def mix_other_voices_into_target(
             # Build output name
             target_stem = target_ap.stem
             safe_target_stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in target_stem)
-            other_stem = other_voice_path.stem
+            other_stem = other_path.stem
             safe_other_stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in other_stem)
 
             out_name = f"{safe_target_stem}__voice_mixed__snr{snr_db:.1f}dB__score{other_score:.3f}__{safe_other_stem}.wav"
@@ -323,7 +370,7 @@ def mix_other_voices_into_target(
             # Create new row with TARGET transcript and metadata
             new_row = dict(row)
             new_row["audio_path"] = _norm_path(out_path)
-            new_row["aug_voice_source"] = str(other_voice_path)
+            new_row["aug_voice_source"] = str(other_path)
             new_row["aug_voice_score"] = float(other_score)
             new_row["aug_snr_db"] = float(snr_db)
             new_row["is_voice_mixed"] = True
@@ -339,6 +386,7 @@ def main() -> int:
     p = argparse.ArgumentParser()
     p.add_argument("--manifest", required=True, help="Input JSONL manifest path")
     p.add_argument("--scores_csv", required=True, help="Speaker sort scores CSV with TARGET/OTHER files")
+    p.add_argument("--other_voices_dir", default="I:\\Record_others", help="Directory with other voice audio files (default: I:\\Record_others)")
     
     p.add_argument("--out_manifest", required=True, help="Output JSONL manifest path")
     p.add_argument("--out_mix_dir", required=True, help="Where to write voice-mixed copies")
@@ -361,6 +409,7 @@ def main() -> int:
     
     manifest_path = Path(args.manifest)
     scores_csv = Path(args.scores_csv)
+    other_voices_dir = Path(args.other_voices_dir)
     out_manifest = Path(args.out_manifest)
     out_mix_dir = Path(args.out_mix_dir)
     
@@ -369,12 +418,12 @@ def main() -> int:
     if not scores_csv.exists():
         raise FileNotFoundError(f"Scores CSV not found: {scores_csv}")
     
-    # Load target files and other voice files from scores CSV
-    target_files, other_files_with_scores = load_target_and_other_files(scores_csv)
-    print(f"Loaded {len(target_files)} target files and {len(other_files_with_scores)} OTHER voice files from {scores_csv}")
+    # Load target files and other voice files from scores CSV or directory
+    target_files, other_files_with_scores = load_target_and_other_files(scores_csv, other_voices_dir)
+    print(f"Loaded {len(target_files)} target files and {len(other_files_with_scores)} OTHER voice files")
     
     if not other_files_with_scores:
-        raise RuntimeError(f"No OTHER voice files with non-zero scores found in {scores_csv}")
+        raise RuntimeError(f"No OTHER voice files found in {other_voices_dir} or {scores_csv}")
     
     base_rows = load_manifest(manifest_path)
     if not base_rows:
