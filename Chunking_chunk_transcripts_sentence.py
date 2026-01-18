@@ -23,7 +23,7 @@ from typing import Iterable, List, Mapping, MutableMapping, Sequence
 from tqdm import tqdm
 
 PAD_SECONDS = 0.15
-MAX_SENTENCE_SECONDS = 25.0
+MAX_SENTENCE_SECONDS = 29.9
 
 
 @dataclass

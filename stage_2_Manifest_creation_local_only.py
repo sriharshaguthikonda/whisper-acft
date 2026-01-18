@@ -25,7 +25,7 @@ MAX_LABEL_TOKENS = 420
 CONTEXT_PAD = 0.10            # small padding (0.05–0.20 recommended)
 MIN_SEG_SEC = 0.80            # if a segment is shorter than this, merge forward
 MERGE_GAP_FOR_SHORT = 0.5    # only merge short segments if the gap is <= this
-MERGE_SHORT_SEGMENTS = True  # set True to merge short segments; False keeps every segment standalone
+MERGE_SHORT_SEGMENTS = False  # set True to merge short segments; False keeps every segment standalone
 KEEP_TINY_SEGMENTS = True     # keep very short segments even if under MIN_SEG_SEC
 
 # Groq no_speech_prob is often not reliable for filtering. Leave disabled.

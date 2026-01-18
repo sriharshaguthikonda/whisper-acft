@@ -26,18 +26,20 @@ Usage examples
 
 # Use 8 worker threads
 python stage_8_add_random_gain_to_high_score_voices_parallel.py \
-  --in_manifest I:/Record_chunks/pairs_manifest_filtered_with_noises_and_others_voices_mixed.jsonl \
+  --in_manifest I:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed.jsonl \
   --out_audio_dir I:/Record_chunks_aug_gain \
-  --out_manifest I:/Record_chunks/pairs_manifest_filtered_with_noises_and_others_voices_mixed_aug_gain.jsonl \
+  --out_manifest I:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain.jsonl \
+  --keep_original \
   --copies 1 \
   --min_db -12 --max_db 12 \
   --p 0.1 \
   --workers 8
 
   python stage_8_add_random_gain_to_high_score_voices_parallel.py \
-    --in_manifest I:/Record_chunks/pairs_manifest_filtered_with_noises_and_others_voices_mixed.jsonl \
+    --in_manifest I:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed.jsonl \
     --out_audio_dir I:/Record_chunks_aug_gain \
-    --out_manifest I:/Record_chunks/pairs_manifest_filtered_with_noises_and_others_voices_mixed_aug_gain.jsonl \
+    --out_manifest I:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain.jsonl \
+    --keep_original \
     --copies 1 \
     --min_db -12 --max_db 12 \
     --p 0.1 \

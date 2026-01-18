@@ -29,10 +29,10 @@ Usage
 -----
 i:\\Whisper-training-env\\Scripts\\python.exe i:\\whisper-acft\\stage_10_split_silent_and_add_to_manifest.py `
   --silent_audio "I:\\Silence_from_phone\\silent recording baseline.m4a" `
-  --in_manifest "I:\\Record_chunks\\pairs_manifest_filtered_with_noises_and_others_voices_mixed_aug_gain_aug_rir_real.jsonl" `
-  --out_manifest "I:\\Record_chunks\\pairs_manifest_filtered_with_noises_and_others_voices_mixed_aug_gain_aug_rir_real_silent.jsonl" `
+  --in_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real.jsonl" `
+  --out_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent.jsonl" `
   --out_audio_dir "I:\\Record_chunks\\silent_chunks" `
-  --min_chunk_sec 5.0 `
+  --min_chunk_sec 1.0 `
   --max_chunk_sec 30.0 `
   --silent_ratio 0.05 `
   --seed 1337

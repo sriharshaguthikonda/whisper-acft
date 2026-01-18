@@ -5,7 +5,7 @@ Extract 10% of manifest files for testing by MOVING (not copying) them to a sepa
 This ensures no data leakage between training and testing sets.
 
 Usage:
-python stage_11_isolate_testing_data.py --input_manifest "I:\Record_chunks\pairs_manifest_filtered_with_noises_and_others_voices_mixed_aug_gain_aug_rir_real_silent.jsonl" --test_manifest "I:\Record_chunks\pairs_manifest_filtered_with_noises_and_others_voices_mixed_aug_gain_aug_rir_real_silent_test_manifest.jsonl" --train_manifest "I:\Record_chunks\pairs_manifest_filtered_with_noises_and_others_voices_mixed_aug_gain_aug_rir_real_silent_train_manifest.jsonl" --test_ratio 0.1 --seed 1337
+python stage_11_isolate_testing_data.py --input_manifest "I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent.jsonl" --test_manifest "I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_test.jsonl" --train_manifest "I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_train.jsonl" --test_ratio 0.1 --seed 1337
 """
 
 from __future__ import annotations

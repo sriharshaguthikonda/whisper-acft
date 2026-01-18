@@ -33,6 +33,7 @@ import sys
 import json
 import argparse
 import subprocess
+import re
 from pathlib import Path
 
 import torch
@@ -104,7 +105,55 @@ def find_quantize(whisper_cpp_root: str) -> str:
     )
 
 
-def convert_to_ggml(export_dir: str, out_dir: str, whisper_cpp_root: str, whisper_repo_root: str, use_f32: bool = False):
+def extract_checkpoint_info(checkpoint_dir: str) -> dict:
+    """Extract meaningful information from checkpoint directory name."""
+    checkpoint_name = os.path.basename(os.path.normpath(checkpoint_dir))
+    
+    # Extract epoch number from names like "model_epoch_000001"
+    epoch_match = re.search(r'epoch_(\d+)', checkpoint_name)
+    epoch_num = epoch_match.group(1) if epoch_match else "unknown"
+    
+    # Extract other info if present
+    info = {
+        'checkpoint_name': checkpoint_name,
+        'epoch': epoch_num,
+        'base_name': checkpoint_name
+    }
+    
+    return info
+
+
+def generate_model_name(checkpoint_info: dict, qtype: str = "", use_f32: bool = False) -> str:
+    """Generate a meaningful model filename."""
+    base_name = "whisper"
+    
+    # Add epoch info
+    if checkpoint_info['epoch'] != "unknown":
+        base_name += f"-epoch{checkpoint_info['epoch']}"
+    
+    # Add precision info
+    if use_f32:
+        base_name += "-f32"
+    elif qtype:
+        base_name += f"-{qtype.lower()}"
+    else:
+        base_name += "-fp16"
+    
+    return base_name
+
+
+def generate_base_name(checkpoint_info: dict) -> str:
+    """Generate base name without quantization info."""
+    base_name = "whisper"
+    
+    # Add epoch info
+    if checkpoint_info['epoch'] != "unknown":
+        base_name += f"-epoch{checkpoint_info['epoch']}"
+    
+    return base_name
+
+
+def convert_to_ggml(export_dir: str, out_dir: str, whisper_cpp_root: str, whisper_repo_root: str, use_f32: bool = False, model_name: str = "ggml-model"):
     ensure_dir(out_dir)
     converter = find_converter(whisper_cpp_root)
 
@@ -117,7 +166,10 @@ def convert_to_ggml(export_dir: str, out_dir: str, whisper_cpp_root: str, whispe
     print("  " + " ".join(cmd))
     subprocess.run(cmd, check=True)
 
-    ggml_path = os.path.join(out_dir, "ggml-model-f32.bin" if use_f32 else "ggml-model.bin")
+    # Keep the original filename for quantization input
+    default_filename = "ggml-model-f32.bin" if use_f32 else "ggml-model.bin"
+    ggml_path = os.path.join(out_dir, default_filename)
+    
     if not os.path.exists(ggml_path):
         raise FileNotFoundError(f"Expected output not found: {ggml_path}")
 
@@ -125,20 +177,29 @@ def convert_to_ggml(export_dir: str, out_dir: str, whisper_cpp_root: str, whispe
     return ggml_path
 
 
-def quantize_ggml(ggml_fp16_path: str, qtype: str, whisper_cpp_root: str) -> str:
+def quantize_ggml(ggml_fp16_path: str, qtype: str, whisper_cpp_root: str, model_name: str) -> str:
     qexe = find_quantize(whisper_cpp_root)
 
     base_dir = os.path.dirname(ggml_fp16_path)
     qtype_norm = qtype.strip().lower()
-    out_path = os.path.join(base_dir, f"ggml-model-{qtype_norm}.bin")
+    
+    # Create a temporary output path for quantization
+    temp_out_path = os.path.join(base_dir, f"temp_quantized_{qtype_norm}.bin")
+    
+    # The final output path with the meaningful name
+    final_out_path = os.path.join(base_dir, f"{model_name}.bin")
 
-    cmd = [qexe, ggml_fp16_path, out_path, qtype_norm]
+    cmd = [qexe, ggml_fp16_path, temp_out_path, qtype_norm]
     print("\nRunning quantize:")
     print("  " + " ".join(cmd))
     subprocess.run(cmd, check=True)
+    
+    # Rename the temp file to the final meaningful name
+    if os.path.exists(temp_out_path):
+        os.rename(temp_out_path, final_out_path)
 
-    print(f"✅ Quantized model: {out_path}")
-    return out_path
+    print(f"✅ Quantized model: {final_out_path}")
+    return final_out_path
 
 
 def main():
@@ -158,6 +219,18 @@ def main():
     args = ap.parse_args()
 
     hf_token = os.getenv("HF_TOKEN")
+    
+    # Extract checkpoint information for meaningful naming
+    checkpoint_info = extract_checkpoint_info(args.checkpoint_dir)
+    base_name = generate_base_name(checkpoint_info)
+    fp16_name = generate_model_name(checkpoint_info, "", args.use_f32)
+    quantized_name = generate_model_name(checkpoint_info, args.qtype.strip(), args.use_f32)
+    
+    print(f"📁 Converting checkpoint: {checkpoint_info['checkpoint_name']}")
+    print(f"🏷️  Base name: {base_name}")
+    print(f"📄 FP16 model: {fp16_name}")
+    if args.qtype.strip():
+        print(f"🔢 Quantized model: {quantized_name}")
 
     # Sanity: whisper repo must contain mel_filters.npz
     mel = os.path.join(args.whisper_repo, "whisper", "assets", "mel_filters.npz")
@@ -179,10 +252,19 @@ def main():
         whisper_cpp_root=os.path.abspath(args.whisper_cpp),
         whisper_repo_root=os.path.abspath(args.whisper_repo),
         use_f32=args.use_f32,
+        model_name=fp16_name,
     )
+    
+    # Rename the FP16/F32 file to have a meaningful name
+    if ggml_fp:
+        fp16_path = os.path.join(out_dir, f"{fp16_name}.bin")
+        if os.path.exists(ggml_fp) and ggml_fp != fp16_path:
+            os.rename(ggml_fp, fp16_path)
+            print(f"✅ Renamed FP16 model: {fp16_path}")
+            ggml_fp = fp16_path
 
     if args.qtype.strip():
-        quantize_ggml(ggml_fp, args.qtype.strip(), os.path.abspath(args.whisper_cpp))
+        quantize_ggml(ggml_fp, args.qtype.strip(), os.path.abspath(args.whisper_cpp), quantized_name)
 
 
 if __name__ == "__main__":

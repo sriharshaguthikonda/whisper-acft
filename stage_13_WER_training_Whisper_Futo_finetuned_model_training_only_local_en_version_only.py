@@ -39,10 +39,10 @@ from transformers import (
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_filtered.jsonl"
+MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_train.jsonl"
 TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage1.jsonl"
 
-CHECKPOINT_DIR = "i:/Dynamic_n_ctx_checkpoints_partialctx"
+CHECKPOINT_DIR = "i:/Dynamic_n_ctx_checkpoints_partialctx2"
 
 # If you're running on the same machine as the audio (local disk), caching copies is unnecessary.
 USE_LOCAL_CACHE = False
@@ -66,7 +66,7 @@ N_SAMPLES_PER_EPOCH = 5016
 MAX_EPOCHS = 999999
 
 # --- Training knobs ---
-BATCH_SIZE = 12  # Reduced from 24 to prevent CUDA OOM
+BATCH_SIZE = 24  # Reduced from 24 to prevent CUDA OOM
 GRAD_ACCUM_STEPS = 4  # Increased from 2 to maintain effective batch size
 MIN_BATCH_SIZE = 4  # Minimum batch size for very large files
 MAX_BATCH_SIZE = 40  # Maximum batch size for small files

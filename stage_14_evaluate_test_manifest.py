@@ -5,7 +5,7 @@ Evaluate the trained model on the test manifest created in stage 11.
 This provides WER metrics on the held-out test set.
 
 Usage:
-python stage_14_evaluate_test_manifest.py --test_manifest "I:\Record_chunks\pairs_manifest_filtered_with_noises_and_others_voices_mixed_aug_gain_aug_rir_real_silent_test_manifest.jsonl" --checkpoint_dir "I:\Dynamic_n_ctx_checkpoints_partialctx" [--percentage 100]
+python stage_14_evaluate_test_manifest.py --test_manifest "I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_test.jsonl" --checkpoint_dir "I:\Dynamic_n_ctx_checkpoints_partialctx" [--percentage 100]
 """
 
 from __future__ import annotations

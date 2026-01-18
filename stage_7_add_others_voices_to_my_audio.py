@@ -41,16 +41,19 @@ Usage examples
 
 # Use custom other voices directory:
 cd "i:\whisper-acft" && python stage_7_add_others_voices_to_my_audio.py \
-  --manifest "i:/Record_chunks/pairs_manifest_filtered_with_noises_with_mix.jsonl" \
+  --manifest "i:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix.jsonl" \
   --scores_csv "i:/whisper-acft/speaker_sort_scores.csv" \
   --other_voices_dir "I:/Custom/Other/Voices" \
-  --out_manifest "i:/Record_chunks/pairs_manifest_filtered_with_noises_and_others_voices_mixed.jsonl" \
+  --out_manifest "i:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed.jsonl" \
   --out_mix_dir "i:/Record_chunks/voice_mixed" \
   --mix_ratio 0.5 \
   --snr_db_min 5 \
   --snr_db_max 20 \
   --seed 1337 \
   --shuffle
+
+python stage_7_add_others_voices_to_my_audio.py --manifest "i:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix.jsonl" --scores_csv "i:\whisper-acft\speaker_sort_scores.csv" --other_voices_dir "i:\Custom\Other\Voices" --out_manifest "i:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed.jsonl" --out_mix_dir "i:\Record_chunks\voice_mixed" --mix_ratio 0.5 --snr_db_min 5 --snr_db_max 20 --seed 1337 --shuffle
+  
 """
 
 from __future__ import annotations
@@ -236,7 +239,18 @@ def _extract_random_segment(audio: np.ndarray, sr: int, target_duration: float, 
     start_sample = int(start_time * sr)
     end_sample = int((start_time + target_duration) * sr)
     
-    return audio[start_sample:end_sample], target_duration
+    segment = audio[start_sample:end_sample]
+    
+    # Ensure segment has exactly the right length by padding or trimming if needed
+    target_length = int(target_duration * sr)
+    if len(segment) < target_length:
+        # Pad with zeros if segment is too short
+        segment = np.pad(segment, (0, target_length - len(segment)), mode='constant')
+    elif len(segment) > target_length:
+        # Trim if segment is too long
+        segment = segment[:target_length]
+    
+    return segment, target_duration
 
 
 def mix_other_voices_into_target(
@@ -333,6 +347,17 @@ def mix_other_voices_into_target(
             rng = random.Random(1337)  # Use fixed seed for reproducibility
             other_voice_segment, actual_duration = _extract_random_segment(other_audio, other_sr, target_dur, rng)
             other_voice = _resample_if_needed(other_voice_segment, other_sr, target_sr)
+
+            # Ensure both arrays have the same length for broadcasting
+            target_length = len(target_speech)
+            other_length = len(other_voice)
+            
+            if other_length < target_length:
+                # Pad other voice with zeros
+                other_voice = np.pad(other_voice, (0, target_length - other_length), mode='constant')
+            elif other_length > target_length:
+                # Trim other voice
+                other_voice = other_voice[:target_length]
 
             # Choose SNR and scale OTHER voice
             snr_db = random.uniform(float(snr_db_min), float(snr_db_max))

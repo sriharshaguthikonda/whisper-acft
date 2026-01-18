@@ -37,7 +37,7 @@ RESPONSE_SCHEMA = {
 """
 use :
 
-python rename_and_correct_transcripts_with_groq.py --transcripts-dir "i:\P2GPT_google_drive\My Drive\Transcriptions" --audio-dir "i:\Record" --report rename_and_corrected_transcript_report.json --retry-backoff-base 2
+python rename_and_correct_transcripts_with_groq.py --transcripts-dir "i:\P2GPT_google_drive\My Drive\Transcriptions" --audio-dir "i:\Record_harsha" --report rename_and_corrected_transcript_report.json --retry-backoff-base 2
 """
 
 def load_env(env_path: Path) -> Dict[str, str]:
@@ -414,7 +414,8 @@ def main() -> None:
         sys.stdout.flush()
 
     processed_set = {
-        normalize_path(Path(item.get("transcript"))) for item in report if item.get("transcript")
+        normalize_path(Path(item.get("transcript"))) for item in report 
+        if item.get("transcript") and item.get("corrected_transcript")
     }
 
     bar_width = 30
@@ -432,7 +433,7 @@ def main() -> None:
     for idx, json_file in enumerate(transcripts, start=1):
         transcript_key = normalize_path(json_file)
         if args.resume and transcript_key in processed_set:
-            print(f"[{idx}/{total}] Skipping {json_file.name} (already in report).")
+            print(f"[{idx}/{total}] Skipping {json_file.name} (already processed with valid corrected transcript).")
             render_progress(idx, total)
             continue
         print(f"[{idx}/{total}] Processing {json_file.name}...")
