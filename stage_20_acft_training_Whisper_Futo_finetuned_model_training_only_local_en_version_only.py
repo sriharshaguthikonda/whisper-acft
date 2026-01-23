@@ -5,7 +5,7 @@
 ##       ##     ## ##       ######### ##       
 ##       ##     ## ##    ## ##     ## ##       
 ########  #######   ######  ##     ## ######## 
-needs workd!!!!!!!!!
+# needs workd!!!!!!!!!
 
 # ============================================
 # CELL 1/9 — Install + imports
@@ -37,9 +37,9 @@ from transformers import (
 
 # --- Data ---
 MANIFEST_PATH = "i:/Record_chunks/pairs_manifest_filtered_with_noises_and_others_voices_mixed_aug_gain_aug_rir_real_silent_train_manifest.jsonl"
-TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage2.jsonl"
+TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage5.jsonl"
 
-CHECKPOINT_DIR = "i:/acft_checkpoints_partialctx"
+CHECKPOINT_DIR = "i:/acft_checkpoints_partialctx_stage5"
 
 # If you're running on the same machine as the audio (local disk), caching copies is unnecessary.
 # Set to False to stream directly from manifest paths without staging per-epoch copies.

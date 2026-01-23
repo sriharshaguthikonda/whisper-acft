@@ -4,9 +4,9 @@
 
 """
 
- i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\Chunking_chunk_transcripts_sentence.py" --input-dir "i:\Transcriptions" --output-dir "i:\Record_chunks" --manifest-path "i:\Record_chunks\pairs_manifest_local.jsonl" --audio-root "i:\Record_harsha" --repair-missing --workers 6  
+ i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\Stage_2_Chunking_chunk_transcripts_sentence.py" --input-dir "I:\P2GPT_google_drive\My Drive\nfa_corrected\patched_json" --output-dir "i:\Record_chunks" --manifest-path "i:\Record_chunks\pairs_manifest_local.jsonl" --audio-root "i:\Record_harsha" --repair-missing --workers 5 
  
- i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\Chunking_chunk_transcripts_sentence.py" --input-dir "i:\Transcriptions" --output-dir "i:\Record_chunks_bad_quality" --manifest-path "i:\Record_chunks_bad_quality\pairs_manifest_bad_quality.jsonl" --audio-root "i:\Record_bad_quality" --repair-missing --workers 6  
+ i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\Stage_2_Chunking_chunk_transcripts_sentence.py" --input-dir "i:\Transcriptions" --output-dir "i:\Record_chunks_bad_quality" --manifest-path "i:\Record_chunks_bad_quality\pairs_manifest_bad_quality.jsonl" --audio-root "i:\Record_bad_quality" --repair-missing --workers 6  
 """
 
 import argparse
@@ -23,7 +23,7 @@ from typing import Iterable, List, Mapping, MutableMapping, Sequence
 from tqdm import tqdm
 
 PAD_SECONDS = 0.15
-MAX_SENTENCE_SECONDS = 29.9
+MAX_SENTENCE_SECONDS = 29
 
 
 @dataclass

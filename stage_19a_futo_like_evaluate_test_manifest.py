@@ -1,4 +1,21 @@
-r"""stage_14a_futo_like_evaluate_test_manifest.py
+# Drop-in replacement for stage_19a_futo_like_evaluate_test_manifest.py
+# Adds: batched inference + auto batch-size tuning (backoff on OOM) + optional fp16 on CUDA.
+#
+# Save as: stage_19a_futo_like_evaluate_test_manifest_dynamic_batch.py
+#
+# Example:
+#   python stage_19a_futo_like_evaluate_test_manifest_dynamic_batch.py \
+#     --test_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_speaker_scores_test.jsonl" \
+#     --checkpoint_dir "I:\\Dynamic_n_ctx_checkpoints_partialctx3" \
+#     --base_model "futo-org/acft-whisper-tiny.en" \
+#     --device cuda \
+#     --num_beams 5 \
+#     --fp16 1 \
+#     --batch_size 16 \
+#     --auto_batch 1 \
+#     --batch_max 64
+
+r"""stage_19a_futo_like_evaluate_test_manifest.py
 
 Evaluate Whisper checkpoints in a way that's closer to keyboard voice-input usage:
 - short dictations
@@ -9,9 +26,9 @@ Evaluate Whisper checkpoints in a way that's closer to keyboard voice-input usag
 - duration-bucket breakdown
 
 Example:
-  python stage_14a_futo_like_evaluate_test_manifest.py \
-    --test_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_speaker_scores_test.jsonl" \
-    --checkpoint_dir "I:\\Dynamic_n_ctx_checkpoints_partialctx2" \
+  python stage_19a_futo_like_evaluate_test_manifest.py \
+    --test_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_test.jsonl" \
+    --checkpoint_dir "I:\\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx4" \
     --base_model "futo-org/acft-whisper-tiny.en" \
     --percentage 1 \
     --device cuda \
@@ -21,6 +38,9 @@ Example:
     --dynamic_audio_ctx 1 \
     --vad_filter 1 \
     --vad_policy skip
+    --fp16 1 \
+    --batch_size 8 \
+    --auto_batch 1
 
 Notes:
 - VAD trim is FIRST speech to LAST speech (+pad). We do NOT split into multiple chunks.
@@ -32,7 +52,6 @@ from __future__ import annotations
 import argparse
 import gc
 import json
-import os
 import re
 from dataclasses import dataclass
 from pathlib import Path
@@ -40,6 +59,7 @@ from typing import Dict, List, Tuple, Optional
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from tqdm import tqdm
 
 import soundfile as sf
@@ -278,6 +298,17 @@ class EvalConfig:
     normalize_mode: str
     device: str
 
+    # Inference batching (evaluation speed)
+    batch_size: int
+    auto_batch: bool
+    batch_min: int
+    batch_max: int
+
+    # Memory / dtype knobs
+    fp16: bool
+    mem_low: float   # if below this ratio, try increasing batch size
+    mem_high: float  # if above this ratio, try decreasing batch size
+
 
 def build_generate_kwargs(cfg: EvalConfig) -> Dict:
     # Keep kwargs minimal/robust across checkpoint configs.
@@ -287,6 +318,97 @@ def build_generate_kwargs(cfg: EvalConfig) -> Dict:
         "do_sample": False,
         "max_new_tokens": int(cfg.max_new_tokens),
     }
+
+
+# ----------------------------
+# Batched generation helpers (dynamic batch size)
+# ----------------------------
+
+def _cuda_mem_ratio() -> float:
+    """Return current CUDA memory allocated / total, or 0.0 if not on CUDA."""
+    if not torch.cuda.is_available():
+        return 0.0
+    try:
+        dev = torch.cuda.current_device()
+        total = torch.cuda.get_device_properties(dev).total_memory
+        alloc = torch.cuda.memory_allocated(dev)
+        return float(alloc) / float(total) if total else 0.0
+    except Exception:
+        return 0.0
+
+
+def _ensure_80_first(feat_2d: torch.Tensor) -> torch.Tensor:
+    """Whisper mels should be (80, T). If we see (T, 80) we transpose."""
+    if feat_2d.ndim != 2:
+        return feat_2d
+    if feat_2d.shape[0] == 80:
+        return feat_2d
+    if feat_2d.shape[1] == 80:
+        return feat_2d.transpose(0, 1)
+    return feat_2d
+
+
+def _pad_stack_input_features(feats_3d: List[torch.Tensor]) -> torch.Tensor:
+    """Take a list of (1,80,T) or (80,T) tensors and return (B,80,Tmax)."""
+    feats_2d: List[torch.Tensor] = []
+    tmax = 1
+    for f in feats_3d:
+        if f.ndim == 3:
+            f2 = f[0]
+        else:
+            f2 = f
+        f2 = _ensure_80_first(f2)
+        feats_2d.append(f2)
+        if f2.ndim == 2:
+            tmax = max(tmax, int(f2.shape[1]))
+
+    padded: List[torch.Tensor] = []
+    for f2 in feats_2d:
+        if f2.ndim != 2:
+            padded.append(f2)
+            continue
+        pad_t = max(0, tmax - int(f2.shape[1]))
+        if pad_t:
+            f2 = F.pad(f2, (0, pad_t))  # pad time dim on the right
+        padded.append(f2)
+
+    return torch.stack(padded, dim=0)  # (B,80,T)
+
+
+def _adjust_batch_size(
+    cur_bs: int,
+    avg_dur: float,
+    mem_ratio: float,
+    cfg: EvalConfig,
+    oom_cooldown: int,
+) -> Tuple[int, int]:
+    """Heuristic: nudge batch size up/down to keep VRAM hot but safe."""
+    cur_bs = int(max(cfg.batch_min, min(cfg.batch_max, cur_bs)))
+
+    if not cfg.auto_batch:
+        return cur_bs, max(0, oom_cooldown - 1)
+
+    # Cooldown prevents immediate re-growth after an OOM.
+    if oom_cooldown > 0:
+        return cur_bs, oom_cooldown - 1
+
+    new_bs = cur_bs
+
+    # If we are comfortably under memory, try to grow.
+    if mem_ratio > 0.0 and mem_ratio < float(cfg.mem_low):
+        new_bs = min(cfg.batch_max, cur_bs + 2)
+
+    # If we are close to the cliff, shrink.
+    if mem_ratio > float(cfg.mem_high):
+        new_bs = max(cfg.batch_min, max(1, int(cur_bs * 0.7)))
+
+    # Duration heuristic (longer utterances cost more encoder memory when dynamic_audio_ctx is on)
+    if avg_dur > 15.0:
+        new_bs = max(cfg.batch_min, max(1, int(new_bs * 0.7)))
+    elif avg_dur < 6.0 and mem_ratio < float(cfg.mem_low):
+        new_bs = min(cfg.batch_max, new_bs + 1)
+
+    return int(max(cfg.batch_min, min(cfg.batch_max, new_bs))), 0
 
 
 def eval_one_model(
@@ -321,7 +443,21 @@ def eval_one_model(
         vad_trimmer = SileroVADTrimmer()
 
     with torch.inference_mode():
-        for item in tqdm(test_rows, desc=f"eval {Path(model_id_or_path).name}"):
+        use_cuda = bool(str(cfg.device).startswith("cuda") and torch.cuda.is_available())
+        cur_bs = int(max(cfg.batch_min, min(cfg.batch_max, cfg.batch_size)))
+        oom_cooldown = 0
+
+        # Optional half precision to allow larger batches on GPU
+        if use_cuda and cfg.fp16:
+            try:
+                model.half()
+            except Exception:
+                pass
+
+        batch_buf: List[dict] = []
+
+        pbar = tqdm(test_rows, desc=f"eval {Path(model_id_or_path).name}")
+        for item in pbar:
             ap = Path(item.get("audio_path", ""))
             if not ap.exists():
                 skipped.append({"audio_path": str(ap), "reason": "missing_file"})
@@ -378,55 +514,211 @@ def eval_one_model(
 
                 dur_eval = seconds_from_audio(audio_eval, sr)
 
-                # Feature extraction
+                # Feature extraction (CPU for now; we batch-move to GPU later)
                 inputs = processor(audio_eval, sampling_rate=sr, return_tensors="pt")
-                input_features = inputs["input_features"].to(cfg.device)
+                input_features = inputs["input_features"]  # (1,80,T)
 
                 if cfg.dynamic_audio_ctx:
                     input_features = crop_input_features_for_duration(input_features, dur_eval)
 
-                # Generate
-                try:
-                    generated_ids = model.generate(input_features=input_features, **gen_kwargs)
-                except ValueError as e:
-                    # Some configs can be strict; retry bare minimum.
-                    msg = str(e)
-                    if any(k in msg for k in ("forced_decoder_ids", "return_timestamps", "language", "task")):
-                        generated_ids = model.generate(input_features=input_features)
-                    else:
-                        raise
-
-                pred = processor.batch_decode(generated_ids, skip_special_tokens=True)[0].strip()
-                ref = (item.get("raw_transcription") or "").strip()
-
-                preds_raw.append(pred)
-                refs_raw.append(ref)
-
-                if cfg.normalize_mode in {"whisper_basic", "basic"}:
-                    pred_n = _basic_whisperish_normalize(pred)
-                    ref_n = _basic_whisperish_normalize(ref)
-                else:
-                    pred_n = pred
-                    ref_n = ref
-
-                per_utt_wer.append(jiwer.wer(ref_n, pred_n))
-
-                per_item.append(
+                batch_buf.append(
                     {
                         "audio_path": str(ap),
                         "duration_sec_raw": dur_raw,
                         "duration_sec_eval": dur_eval,
-                        "ref": ref,
-                        "pred": pred,
-                        "ref_norm": ref_n,
-                        "pred_norm": pred_n,
+                        "ref": (item.get("raw_transcription") or "").strip(),
                         "vad": vad_info,
+                        "input_features": input_features,
                     }
                 )
 
             except Exception as e:
                 skipped.append({"audio_path": str(ap), "reason": f"exception: {type(e).__name__}: {e}"})
                 continue
+
+            # Flush when buffer reaches batch size
+            if len(batch_buf) < cur_bs:
+                continue
+
+            pending = batch_buf
+            batch_buf = []
+
+            while pending:
+                chunk = pending[:cur_bs]
+
+                try:
+                    feats = [c["input_features"] for c in chunk]
+                    batch_feats = _pad_stack_input_features(feats)  # (B,80,Tmax) on CPU
+
+                    # Move to device
+                    batch_feats = batch_feats.to(cfg.device, non_blocking=True)
+                    if use_cuda and cfg.fp16:
+                        batch_feats = batch_feats.half()
+
+                    # Generate
+                    try:
+                        generated_ids = model.generate(input_features=batch_feats, **gen_kwargs)
+                    except ValueError as e:
+                        # Some configs can be strict; retry bare minimum.
+                        msg = str(e)
+                        if any(k in msg for k in ("forced_decoder_ids", "return_timestamps", "language", "task")):
+                            generated_ids = model.generate(input_features=batch_feats)
+                        else:
+                            raise
+
+                    texts = processor.batch_decode(generated_ids, skip_special_tokens=True)
+
+                    # Record per-item outputs
+                    for c, text_out in zip(chunk, texts):
+                        pred = (text_out or "").strip()
+                        ref = (c.get("ref") or "").strip()
+
+                        preds_raw.append(pred)
+                        refs_raw.append(ref)
+
+                        if cfg.normalize_mode in {"whisper_basic", "basic"}:
+                            pred_n = _basic_whisperish_normalize(pred)
+                            ref_n = _basic_whisperish_normalize(ref)
+                        else:
+                            pred_n = pred
+                            ref_n = ref
+
+                        per_utt_wer.append(jiwer.wer(ref_n, pred_n))
+
+                        per_item.append(
+                            {
+                                "audio_path": c["audio_path"],
+                                "duration_sec_raw": c["duration_sec_raw"],
+                                "duration_sec_eval": c["duration_sec_eval"],
+                                "ref": ref,
+                                "pred": pred,
+                                "ref_norm": ref_n,
+                                "pred_norm": pred_n,
+                                "vad": c.get("vad", {"vad_applied": False}),
+                            }
+                        )
+
+                    # Consume chunk
+                    pending = pending[len(chunk):]
+
+                    # Heuristic batch-size update
+                    if use_cuda:
+                        mem_ratio = _cuda_mem_ratio()
+                        avg_d = float(np.mean([x["duration_sec_eval"] for x in chunk])) if chunk else 0.0
+                        cur_bs, oom_cooldown = _adjust_batch_size(cur_bs, avg_d, mem_ratio, cfg, oom_cooldown)
+                        pbar.set_postfix({"bs": cur_bs, "vram": f"{mem_ratio:.0%}"})
+
+                except torch.cuda.OutOfMemoryError:
+                    if use_cuda:
+                        torch.cuda.empty_cache()
+                    gc.collect()
+
+                    # Back off and retry
+                    old_bs = cur_bs
+                    cur_bs = max(cfg.batch_min, max(1, int(cur_bs // 2)))
+                    oom_cooldown = 5
+
+                    if cur_bs == old_bs and old_bs == 1:
+                        # If we cannot go any lower, skip one sample to make progress.
+                        bad = pending[0]
+                        skipped.append({"audio_path": bad["audio_path"], "reason": "oom_single"})
+                        pending = pending[1:]
+                    continue
+
+                finally:
+                    # encourage freeing temporary tensors
+                    try:
+                        del batch_feats
+                    except Exception:
+                        pass
+                    try:
+                        del generated_ids
+                    except Exception:
+                        pass
+
+        # Flush remaining
+        if batch_buf:
+            pending = batch_buf
+            batch_buf = []
+
+            while pending:
+                chunk = pending[:cur_bs]
+
+                try:
+                    feats = [c["input_features"] for c in chunk]
+                    batch_feats = _pad_stack_input_features(feats)
+                    batch_feats = batch_feats.to(cfg.device, non_blocking=True)
+                    if use_cuda and cfg.fp16:
+                        batch_feats = batch_feats.half()
+
+                    try:
+                        generated_ids = model.generate(input_features=batch_feats, **gen_kwargs)
+                    except ValueError as e:
+                        msg = str(e)
+                        if any(k in msg for k in ("forced_decoder_ids", "return_timestamps", "language", "task")):
+                            generated_ids = model.generate(input_features=batch_feats)
+                        else:
+                            raise
+
+                    texts = processor.batch_decode(generated_ids, skip_special_tokens=True)
+
+                    for c, text_out in zip(chunk, texts):
+                        pred = (text_out or "").strip()
+                        ref = (c.get("ref") or "").strip()
+
+                        preds_raw.append(pred)
+                        refs_raw.append(ref)
+
+                        if cfg.normalize_mode in {"whisper_basic", "basic"}:
+                            pred_n = _basic_whisperish_normalize(pred)
+                            ref_n = _basic_whisperish_normalize(ref)
+                        else:
+                            pred_n = pred
+                            ref_n = ref
+
+                        per_utt_wer.append(jiwer.wer(ref_n, pred_n))
+
+                        per_item.append(
+                            {
+                                "audio_path": c["audio_path"],
+                                "duration_sec_raw": c["duration_sec_raw"],
+                                "duration_sec_eval": c["duration_sec_eval"],
+                                "ref": ref,
+                                "pred": pred,
+                                "ref_norm": ref_n,
+                                "pred_norm": pred_n,
+                                "vad": c.get("vad", {"vad_applied": False}),
+                            }
+                        )
+
+                    pending = pending[len(chunk):]
+
+                    if use_cuda:
+                        mem_ratio = _cuda_mem_ratio()
+                        avg_d = float(np.mean([x["duration_sec_eval"] for x in chunk])) if chunk else 0.0
+                        cur_bs, oom_cooldown = _adjust_batch_size(cur_bs, avg_d, mem_ratio, cfg, oom_cooldown)
+
+                except torch.cuda.OutOfMemoryError:
+                    if use_cuda:
+                        torch.cuda.empty_cache()
+                    gc.collect()
+                    cur_bs = max(cfg.batch_min, max(1, int(cur_bs // 2)))
+                    oom_cooldown = 5
+                    if cur_bs == 1 and len(chunk) == 1:
+                        bad = pending[0]
+                        skipped.append({"audio_path": bad["audio_path"], "reason": "oom_single"})
+                        pending = pending[1:]
+                    continue
+
+                finally:
+                    try:
+                        del batch_feats
+                    except Exception:
+                        pass
+                    try:
+                        del generated_ids
+                    except Exception:
+                        pass
 
     # Final metrics (micro)
     if cfg.normalize_mode in {"whisper_basic", "basic"}:
@@ -532,16 +824,14 @@ def load_jsonl(path: Path) -> List[dict]:
 
 def save_incremental_results(results: dict, all_predictions: dict, out_json: Path) -> None:
     """Save intermediate results after each model evaluation."""
-    # Save main results
     out_json.parent.mkdir(parents=True, exist_ok=True)
     with out_json.open("w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
-    
-    # Save per-sample predictions
+
     per_sample_json = out_json.parent / "evaluation_per_sample_predictions.json"
     with per_sample_json.open("w", encoding="utf-8") as f:
         json.dump(list(all_predictions.values()), f, indent=2, ensure_ascii=False)
-    
+
     print(f"✓ Incremental results saved to: {out_json}")
     print(f"✓ Per-sample predictions saved to: {per_sample_json}")
 
@@ -550,11 +840,11 @@ def load_existing_results(out_json: Path) -> Tuple[dict, dict]:
     """Load existing results for resume capability."""
     if not out_json.exists():
         return {}, {}
-    
+
     try:
         with out_json.open("r", encoding="utf-8") as f:
             results = json.load(f)
-        
+
         per_sample_json = out_json.parent / "evaluation_per_sample_predictions.json"
         all_predictions = {}
         if per_sample_json.exists():
@@ -562,7 +852,7 @@ def load_existing_results(out_json: Path) -> Tuple[dict, dict]:
                 per_sample_data = json.load(f)
                 for item in per_sample_data:
                     all_predictions[item["audio_path"]] = item
-        
+
         print(f"✓ Loaded existing results from: {out_json}")
         print(f"✓ Found {len(results.get('models', []))} already evaluated models")
         return results, all_predictions
@@ -592,6 +882,19 @@ def main() -> None:
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--max_new_tokens", type=int, default=128)
 
+    # Inference batching (evaluation speed)
+    ap.add_argument("--batch_size", type=int, default=0, help="0=auto default (GPU:8, CPU:1)")
+    ap.add_argument("--auto_batch", type=int, default=1, help="1=auto-adjust batch size to use more VRAM safely; 0=static")
+    ap.add_argument("--batch_min", type=int, default=1, help="Minimum batch size when auto_batch is enabled")
+    ap.add_argument("--batch_max", type=int, default=64, help="Maximum batch size when auto_batch is enabled")
+
+    # Half precision inference (GPU only)
+    ap.add_argument("--fp16", type=int, default=1, help="1=use float16 model+inputs on CUDA to reduce VRAM; 0=float32")
+
+    # Memory thresholds for auto_batch (allocated VRAM / total VRAM)
+    ap.add_argument("--mem_low", type=float, default=0.60, help="If below this VRAM ratio, try increasing batch size")
+    ap.add_argument("--mem_high", type=float, default=0.88, help="If above this VRAM ratio, try decreasing batch size")
+
     ap.add_argument("--dynamic_audio_ctx", type=int, default=1, help="1=enable mel cropping by duration; 0=disable")
 
     ap.add_argument("--normalize", default="whisper_basic", choices=["whisper_basic", "none"])
@@ -608,6 +911,10 @@ def main() -> None:
     ap.add_argument("--resume", action="store_true", help="Resume from existing results")
 
     args = ap.parse_args()
+
+    if args.batch_size <= 0:
+        # Conservative defaults: CPU=1, CUDA=8 (auto_batch can still back off on OOM)
+        args.batch_size = 8 if str(args.device).startswith("cuda") and torch.cuda.is_available() else 1
 
     if not args.test_manifest.exists():
         raise FileNotFoundError(args.test_manifest)
@@ -662,6 +969,13 @@ def main() -> None:
         vad=vad_cfg,
         normalize_mode=args.normalize,
         device=args.device,
+        batch_size=int(args.batch_size),
+        auto_batch=bool(args.auto_batch),
+        batch_min=int(args.batch_min),
+        batch_max=int(args.batch_max),
+        fp16=bool(args.fp16),
+        mem_low=float(args.mem_low),
+        mem_high=float(args.mem_high),
     )
 
     out_json = args.out_json
@@ -680,13 +994,13 @@ def main() -> None:
         },
     }
     all_predictions = {}
-    
+
     if args.resume:
         existing_results, existing_predictions = load_existing_results(out_json)
         if existing_results:
             results = existing_results
             all_predictions = existing_predictions
-    
+
     # Get list of already evaluated models to skip them
     evaluated_models = {model_info["model"] for model_info in results.get("models", [])}
     print(f"Already evaluated models: {len(evaluated_models)}")

@@ -2,7 +2,7 @@
 # Whisper partial-context training — BETTER no-cache mode
 # + LR warmup + decay + proper resume LR override (FULL SCRIPT)
 #
-# This is your Stage 13 script with the learning-rate fixes applied:
+# This is your Stage 18 script with the learning-rate fixes applied:
 # - Explicit LR_START / LR_FLOOR / WARMUP_STEPS / DECAY_GAMMA
 # - Optional scheduler (warmup + epoch-based decay)
 # - Proper resume: restores global_step + scheduler and (optionally) forces LR_START
@@ -42,7 +42,7 @@ from transformers import (
 MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_train.jsonl"
 TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage1.jsonl"
 
-CHECKPOINT_DIR = "i:/Dynamic_n_ctx_checkpoints_partialctx2"
+CHECKPOINT_DIR = "i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx5"
 
 # If you're running on the same machine as the audio (local disk), caching copies is unnecessary.
 USE_LOCAL_CACHE = False

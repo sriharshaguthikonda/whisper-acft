@@ -9,9 +9,9 @@ from transformers import WhisperProcessor, WhisperForConditionalGeneration
 ACFT_MODEL_ID = "futo-org/acft-whisper-tiny.en"     # weights
 BASE_PROCESSOR_ID = "openai/whisper-tiny.en"        # processor (feature extractor + tokenizer)
 
-TRANSCRIPT_DIR = "i:\\Transcriptions"
-CHUNKS_DIR = "i:\\Record_chunks_bad_quality"
-AUDIO_SOURCE_DIR = "i:\\Record_bad_quality"  # directory containing full-length audios to include
+TRANSCRIPT_DIR = r"I:\P2GPT_google_drive\My Drive\nfa_corrected\patched_json"
+CHUNKS_DIR = "i:\\Record_chunks"
+AUDIO_SOURCE_DIR = "i:\\Record_harsha"  # directory containing full-length audios to include
 
 TARGET_SR = 16000
 MAX_OUT_SECONDS = 30.0
@@ -40,9 +40,9 @@ AUDIO_SOURCE_DIR_P = pathlib.Path(AUDIO_SOURCE_DIR)
 if not AUDIO_SOURCE_DIR_P.exists():
     raise FileNotFoundError(f"AUDIO_SOURCE_DIR does not exist: {AUDIO_SOURCE_DIR_P}")
 
-MANIFEST_PATH = str(CHUNKS_DIR_P / "pairs_manifest_bad_quality.jsonl")
-PENDING_PAIRS_PATH = str(CHUNKS_DIR_P / "pairs_pending_bad_quality.jsonl")
-PENDING_TASKS_PATH = str(CHUNKS_DIR_P / "tasks_pending_bad_quality.jsonl")
+MANIFEST_PATH = str(CHUNKS_DIR_P / "pairs_manifest.jsonl")
+PENDING_PAIRS_PATH = str(CHUNKS_DIR_P / "pairs_pending.jsonl")
+PENDING_TASKS_PATH = str(CHUNKS_DIR_P / "tasks_pending.jsonl")
 
 # Use the *base* processor (has preprocessor_config.json etc.)
 processor = WhisperProcessor.from_pretrained(BASE_PROCESSOR_ID)
