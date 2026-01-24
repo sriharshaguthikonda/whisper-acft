@@ -23,9 +23,10 @@ $refs.Count
 I:\Whisper-training-env\Scripts\Activate.ps1
 python "i:\whisper-acft\stage_3_sort_audio_files_by_speaker.py" `
   --in "I:\Record_chunks" `
-  --ref $refs[0] $refs[1] $refs[2] $refs[3] $refs[4] `
+  --ref @refs `
   --target_out "I:\Record_chunks_sorted\target" `
   --other_out "I:\Record_chunks_sorted\other" `
+  --threshold 0.55 `
   --device cuda `
   --dry_run `
   --progress print `

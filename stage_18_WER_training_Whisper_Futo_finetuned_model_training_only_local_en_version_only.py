@@ -39,7 +39,7 @@ from transformers import (
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_train.jsonl"
+MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_local_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_randomized_filtered_train_no_targets_filtered.jsonl"
 TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage1.jsonl"
 
 CHECKPOINT_DIR = "i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx5"
