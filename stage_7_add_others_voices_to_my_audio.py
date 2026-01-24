@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """stage_7_add_others_voices_to_my_audio.py
 
+
+
+https://chatgpt.com/g/g-p-6969433d33d4819187ec3158a8f3745f-whisper-training/c/69746fed-bf70-8324-85ae-514723de0e1e
+
 Goal
 ----
 Given a Whisper-style JSONL manifest and speaker scores, augment TARGET audio files
