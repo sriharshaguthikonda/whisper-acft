@@ -24,8 +24,8 @@ Key design choices
 Usage
 -----
 i:\\Whisper-training-env\\Scripts\\python.exe i:\\whisper-acft\\stage_11_a_randomize_manifest.py `
-  --input_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent.jsonl" `
-  --output_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_randomized.jsonl" `
+  --input_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real.jsonl" `
+  --output_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized.jsonl" `
   --seed 1337
 
 Optional:

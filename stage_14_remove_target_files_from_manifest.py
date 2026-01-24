@@ -24,8 +24,8 @@ Key design choices
 Usage
 -----
 i:\\Whisper-training-env\\Scripts\\python.exe i:\\whisper-acft\\stage_14_remove_target_files_from_manifest.py `
-  --input_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_randomized_filtered_train.jsonl" `
-  --output_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_randomized_filtered_train_no_targets.jsonl" `
+  --input_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_filtered_train.jsonl" `
+  --output_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_filtered_train_no_targets.jsonl" `
   --speaker_scores_csv "i:\\whisper-acft\\speaker_sort_scores.csv"
 
 Optional:
