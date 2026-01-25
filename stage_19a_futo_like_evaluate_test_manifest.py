@@ -26,21 +26,15 @@ Evaluate Whisper checkpoints in a way that's closer to keyboard voice-input usag
 - duration-bucket breakdown
 
 Example:
-  python stage_19a_futo_like_evaluate_test_manifest.py \
-    --test_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_filtered_test.jsonl" \
-    --checkpoint_dir "I:\\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx4" \
-    --base_model "futo-org/acft-whisper-tiny.en" \
-    --percentage 1 \
-    --device cuda \
-    --num_beams 5 \
-    --temperature 0.0 \
-    --normalize whisper_basic \
-    --dynamic_audio_ctx 1 \
-    --vad_filter 1 \
-    --vad_policy skip
-    --fp16 1 \
-    --batch_size 8 \
-    --auto_batch 1
+# Force resume using existing predictions
+python stage_19a_futo_like_evaluate_test_manifest.py \
+  --test_manifest "I:\Record_chunks\pairs_manifest_local_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_randomized_filtered_test.jsonl" \
+  --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx5" \
+  --base_model "futo-org/acft-whisper-tiny.en" \
+  --percentage 100 --device cuda --num_beams 5 --temperature 0.0 \
+  --normalize whisper_basic --dynamic_audio_ctx 0 --vad_filter 0 \
+  --vad_policy skip --fp16 1 --batch_size 16 --auto_batch 1 \
+  --force_resume
 
 Notes:
 - VAD trim is FIRST speech to LAST speech (+pad). We do NOT split into multiple chunks.
@@ -308,6 +302,9 @@ class EvalConfig:
     fp16: bool
     mem_low: float   # if below this ratio, try increasing batch size
     mem_high: float  # if above this ratio, try decreasing batch size
+    
+    # Periodic cleanup to prevent memory fragmentation
+    cleanup_interval: int  # cleanup every N batches
 
 
 def build_generate_kwargs(cfg: EvalConfig) -> Dict:
@@ -417,6 +414,9 @@ def eval_one_model(
     processor: WhisperProcessor,
     cfg: EvalConfig,
     vad_trimmer: Optional[SileroVADTrimmer] = None,
+    results: Optional[dict] = None,
+    all_predictions: Optional[dict] = None,
+    out_json: Optional[Path] = None,
 ) -> Tuple[Dict, List[dict]]:
 
     model = WhisperForConditionalGeneration.from_pretrained(model_id_or_path)
@@ -455,6 +455,7 @@ def eval_one_model(
                 pass
 
         batch_buf: List[dict] = []
+        batch_count = 0  # Track batches for periodic cleanup
 
         pbar = tqdm(test_rows, desc=f"eval {Path(model_id_or_path).name}")
         for item in pbar:
@@ -607,6 +608,19 @@ def eval_one_model(
                         avg_d = float(np.mean([x["duration_sec_eval"] for x in chunk])) if chunk else 0.0
                         cur_bs, oom_cooldown = _adjust_batch_size(cur_bs, avg_d, mem_ratio, cfg, oom_cooldown)
                         pbar.set_postfix({"bs": cur_bs, "vram": f"{mem_ratio:.0%}"})
+                    
+                    # Periodic cleanup to prevent memory fragmentation
+                    batch_count += 1
+                    if batch_count % cfg.cleanup_interval == 0:
+                        if use_cuda:
+                            torch.cuda.synchronize()
+                            torch.cuda.empty_cache()
+                        gc.collect()
+                        
+                        # Incremental save predictions during cleanup
+                        save_incremental_results(results, all_predictions, out_json)
+                        
+                        pbar.set_postfix({"bs": cur_bs, "vram": f"{mem_ratio:.0%}" if use_cuda else "cpu", "cleanup": f"batch_{batch_count}"})
 
                 except torch.cuda.OutOfMemoryError:
                     if use_cuda:
@@ -697,6 +711,19 @@ def eval_one_model(
                         mem_ratio = _cuda_mem_ratio()
                         avg_d = float(np.mean([x["duration_sec_eval"] for x in chunk])) if chunk else 0.0
                         cur_bs, oom_cooldown = _adjust_batch_size(cur_bs, avg_d, mem_ratio, cfg, oom_cooldown)
+                    
+                    # Periodic cleanup to prevent memory fragmentation
+                    batch_count += 1
+                    if batch_count % cfg.cleanup_interval == 0:
+                        if use_cuda:
+                            torch.cuda.synchronize()
+                            torch.cuda.empty_cache()
+                        gc.collect()
+                        
+                        # Incremental save predictions during cleanup
+                        save_incremental_results(results, all_predictions, out_json)
+                        
+                        pbar.set_postfix({"bs": cur_bs, "vram": f"{mem_ratio:.0%}" if use_cuda else "cpu", "cleanup": f"batch_{batch_count}"})
 
                 except torch.cuda.OutOfMemoryError:
                     if use_cuda:
@@ -822,6 +849,122 @@ def load_jsonl(path: Path) -> List[dict]:
     return out
 
 
+def recalculate_metrics_from_predictions(all_predictions: dict, model_name: str, cfg: EvalConfig) -> Tuple[Dict, List[dict]]:
+    """Recalculate metrics for a model using existing predictions."""
+    preds_raw = []
+    refs_raw = []
+    per_utt_wer = []
+    per_item = []
+    skipped = 0
+    
+    for audio_path, data in all_predictions.items():
+        if "predictions" not in data or model_name not in data["predictions"]:
+            skipped += 1
+            continue
+            
+        pred_data = data["predictions"][model_name]
+        pred = pred_data.get("pred", "").strip()
+        ref = data.get("reference", "").strip()
+        
+        preds_raw.append(pred)
+        refs_raw.append(ref)
+        
+        if cfg.normalize_mode in {"whisper_basic", "basic"}:
+            pred_n = _basic_whisperish_normalize(pred)
+            ref_n = _basic_whisperish_normalize(ref)
+        else:
+            pred_n = pred
+            ref_n = ref
+            
+        per_utt_wer.append(jiwer.wer(ref_n, pred_n))
+        
+        per_item.append({
+            "audio_path": audio_path,
+            "duration_sec_raw": pred_data.get("duration_sec_raw", 0.0),
+            "duration_sec_eval": pred_data.get("duration_sec_eval", 0.0),
+            "ref": ref,
+            "pred": pred,
+            "ref_norm": ref_n,
+            "pred_norm": pred_n,
+            "vad": pred_data.get("vad", {"vad_applied": False}),
+        })
+    
+    if len(refs_raw) == 0:
+        return {
+            "samples": 0,
+            "skipped": skipped,
+            "wer_micro": None,
+            "cer_micro": None,
+            "wer_macro": None,
+            "wer_by_duration": {"0-1s": None, "1-2s": None, "2-5s": None, "5-10s": None, "10-30s": None},
+            "normalize_mode": cfg.normalize_mode,
+            "dynamic_audio_ctx": bool(cfg.dynamic_audio_ctx),
+            "vad": cfg.vad.__dict__,
+            "decode": {
+                "num_beams": int(cfg.num_beams),
+                "temperature": float(cfg.temperature),
+                "max_new_tokens": int(cfg.max_new_tokens),
+                "language": cfg.language,
+                "task": cfg.task,
+            },
+        }, per_item
+
+    # Calculate metrics
+    if cfg.normalize_mode in {"whisper_basic", "basic"}:
+        refs = [_basic_whisperish_normalize(r) for r in refs_raw]
+        preds = [_basic_whisperish_normalize(p) for p in preds_raw]
+    else:
+        refs = refs_raw
+        preds = preds_raw
+
+    wer_micro = float(jiwer.wer(refs, preds))
+    cer_micro = float(jiwer.cer(refs, preds))
+    wer_macro = float(np.mean(per_utt_wer)) if per_utt_wer else None
+
+    # Duration buckets
+    buckets: Dict[str, List[float]] = {"0-1s": [], "1-2s": [], "2-5s": [], "5-10s": [], "10-30s": []}
+    for row in per_item:
+        d = float(row.get("duration_sec_eval", row.get("duration_sec_raw", 0.0)))
+        if cfg.normalize_mode in {"whisper_basic", "basic"}:
+            w = jiwer.wer(row["ref_norm"], row["pred_norm"])
+        else:
+            w = jiwer.wer(row["ref"], row["pred"])
+
+        if d < 1:
+            buckets["0-1s"].append(w)
+        elif d < 2:
+            buckets["1-2s"].append(w)
+        elif d < 5:
+            buckets["2-5s"].append(w)
+        elif d < 10:
+            buckets["5-10s"].append(w)
+        else:
+            buckets["10-30s"].append(w)
+
+    bucket_means = {k: (float(np.mean(v)) if v else None) for k, v in buckets.items()}
+
+    metrics = {
+        "samples": len(refs),
+        "skipped": skipped,
+        "wer_micro": wer_micro,
+        "cer_micro": cer_micro,
+        "wer_macro": float(wer_macro) if wer_macro is not None else None,
+        "wer_by_duration": bucket_means,
+        "normalize_mode": cfg.normalize_mode,
+        "dynamic_audio_ctx": bool(cfg.dynamic_audio_ctx),
+        "vad": cfg.vad.__dict__,
+        "decode": {
+            "num_beams": int(cfg.num_beams),
+            "temperature": float(cfg.temperature),
+            "max_new_tokens": int(cfg.max_new_tokens),
+            "language": cfg.language,
+            "task": cfg.task,
+        },
+    }
+
+    return metrics, per_item
+
+
 def save_incremental_results(results: dict, all_predictions: dict, out_json: Path) -> None:
     """Save intermediate results after each model evaluation."""
     out_json.parent.mkdir(parents=True, exist_ok=True)
@@ -894,6 +1037,9 @@ def main() -> None:
     # Memory thresholds for auto_batch (allocated VRAM / total VRAM)
     ap.add_argument("--mem_low", type=float, default=0.60, help="If below this VRAM ratio, try increasing batch size")
     ap.add_argument("--mem_high", type=float, default=0.88, help="If above this VRAM ratio, try decreasing batch size")
+    
+    # Periodic cleanup settings
+    ap.add_argument("--cleanup_interval", type=int, default=50, help="Cleanup memory every N batches to prevent fragmentation")
 
     ap.add_argument("--dynamic_audio_ctx", type=int, default=1, help="1=enable mel cropping by duration; 0=disable")
 
@@ -909,6 +1055,7 @@ def main() -> None:
 
     ap.add_argument("--out_json", type=Path, default=None)
     ap.add_argument("--resume", action="store_true", help="Resume from existing results")
+    ap.add_argument("--force_resume", action="store_true", help="Force resume: use existing predictions to skip evaluated audio files")
 
     args = ap.parse_args()
 
@@ -976,6 +1123,7 @@ def main() -> None:
         fp16=bool(args.fp16),
         mem_low=float(args.mem_low),
         mem_high=float(args.mem_high),
+        cleanup_interval=int(args.cleanup_interval),
     )
 
     out_json = args.out_json
@@ -995,7 +1143,7 @@ def main() -> None:
     }
     all_predictions = {}
 
-    if args.resume:
+    if args.resume or args.force_resume:
         existing_results, existing_predictions = load_existing_results(out_json)
         if existing_results:
             results = existing_results
@@ -1004,6 +1152,30 @@ def main() -> None:
     # Get list of already evaluated models to skip them
     evaluated_models = {model_info["model"] for model_info in results.get("models", [])}
     print(f"Already evaluated models: {len(evaluated_models)}")
+
+    # Force resume: filter out already evaluated audio files
+    if args.force_resume and all_predictions:
+        original_count = len(rows)
+        # Filter rows to only include audio files that haven't been fully evaluated for all models
+        unevaluated_audio = []
+        models_to_eval = [m for m in models if m not in evaluated_models]
+        
+        for row in rows:
+            audio_path = str(row.get("audio_path", ""))
+            if audio_path in all_predictions:
+                # Check if this audio file has predictions for all already evaluated models
+                existing_preds = all_predictions[audio_path].get("predictions", {})
+                # If any model in models_to_eval is missing, keep this row for evaluation
+                if any(model_name not in existing_preds for model_name in models_to_eval):
+                    unevaluated_audio.append(row)
+            else:
+                unevaluated_audio.append(row)
+        
+        rows = unevaluated_audio
+        print(f"Force resume: filtered from {original_count} to {len(rows)} audio files")
+        if len(rows) == 0:
+            print("All audio files already evaluated. Nothing to do.")
+            return
 
     best_micro = results.get("summary", {}).get("best_wer_micro")
     best_model = results.get("summary", {}).get("best_wer_micro_model")
@@ -1030,13 +1202,66 @@ def main() -> None:
         print(f"Evaluating: {m}")
         print("=" * 70)
 
-        metrics, per_item = eval_one_model(m, rows, processor, cfg, vad_trimmer=vad_trimmer)
-        results["models"].append({"model": m, "metrics": metrics})
+        # Force resume: check if we can recalculate from existing predictions
+        if args.force_resume and all_predictions:
+            model_name = Path(m).name if Path(m).exists() else m
+            has_predictions = any(
+                model_name in data.get("predictions", {}) 
+                for data in all_predictions.values()
+            )
+            
+            if has_predictions:
+                print(f"📊 Recalculating metrics from existing predictions for {model_name}")
+                metrics, per_item = recalculate_metrics_from_predictions(all_predictions, model_name, cfg)
+                results["models"].append({"model": m, "metrics": metrics})
+                
+                # Update per-sample predictions structure (already exists)
+                for item in per_item:
+                    apath = item["audio_path"]
+                    if apath in all_predictions and model_name in all_predictions[apath].get("predictions", {}):
+                        # Ensure the prediction data has the expected structure
+                        pred_data = all_predictions[apath]["predictions"][model_name]
+                        pred_data.update({
+                            "pred_norm": item["pred_norm"],
+                            "duration_sec_raw": item.get("duration_sec_raw"),
+                            "duration_sec_eval": item.get("duration_sec_eval"),
+                            "vad": item.get("vad"),
+                        })
+            else:
+                print(f"⚠ No existing predictions found for {model_name}, running full evaluation")
+                metrics, per_item = eval_one_model(m, rows, processor, cfg, vad_trimmer=vad_trimmer, results=results, all_predictions=all_predictions, out_json=out_json)
+                results["models"].append({"model": m, "metrics": metrics})
 
-        model_name = Path(m).name if Path(m).exists() else m
-        for item in per_item:
-            apath = item["audio_path"]
-            if apath in all_predictions:
+                model_name = Path(m).name if Path(m).exists() else m
+                for item in per_item:
+                    apath = item["audio_path"]
+                    if apath not in all_predictions:
+                        all_predictions[apath] = {
+                            "audio_path": apath,
+                            "reference": (item.get("ref") or "").strip(),
+                            "predictions": {},
+                        }
+                    all_predictions[apath]["predictions"][model_name] = {
+                        "pred": item["pred"],
+                        "pred_norm": item["pred_norm"],
+                        "duration_sec_raw": item.get("duration_sec_raw"),
+                        "duration_sec_eval": item.get("duration_sec_eval"),
+                        "vad": item.get("vad"),
+                    }
+        else:
+            # Normal evaluation
+            metrics, per_item = eval_one_model(m, rows, processor, cfg, vad_trimmer=vad_trimmer, results=results, all_predictions=all_predictions, out_json=out_json)
+            results["models"].append({"model": m, "metrics": metrics})
+
+            model_name = Path(m).name if Path(m).exists() else m
+            for item in per_item:
+                apath = item["audio_path"]
+                if apath not in all_predictions:
+                    all_predictions[apath] = {
+                        "audio_path": apath,
+                        "reference": (item.get("ref") or "").strip(),
+                        "predictions": {},
+                    }
                 all_predictions[apath]["predictions"][model_name] = {
                     "pred": item["pred"],
                     "pred_norm": item["pred_norm"],
@@ -1057,6 +1282,12 @@ def main() -> None:
         # Update summary and save incrementally
         results["summary"] = {"best_wer_micro_model": best_model, "best_wer_micro": best_micro}
         save_incremental_results(results, all_predictions, out_json)
+        
+        # Aggressive memory cleanup between models
+        if torch.cuda.is_available():
+            torch.cuda.synchronize()
+            torch.cuda.empty_cache()
+        gc.collect()
 
     print("\n" + "#" * 70)
     print("FINAL")
