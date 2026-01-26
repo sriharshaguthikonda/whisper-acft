@@ -39,10 +39,10 @@ from transformers import (
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_local_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_filtered_train_no_targets_filtered.jsonl"
+MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_local_english_only_filtered_with_noises_bottom20_removed.jsonl"
 TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage1.jsonl"
 
-CHECKPOINT_DIR = "i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx5"
+CHECKPOINT_DIR = "i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx6"
 
 # If you're running on the same machine as the audio (local disk), caching copies is unnecessary.
 USE_LOCAL_CACHE = False
@@ -92,7 +92,7 @@ LR = LR_START
 # NOTE: while tuning LR, keep this OFF for stability.
 # After LR is stable, you can set True again.
 DYNAMIC_BATCH_SIZE = False
-MEMORY_THRESHOLD_HIGH = 0.85  # Reduce batch size if memory usage > 85%
+MEMORY_THRESHOLD_HIGH = 0.95  # Reduce batch size if memory usage > 85%
 MEMORY_THRESHOLD_LOW = 0.60  # Increase batch size if memory usage < 60%
 DURATION_THRESHOLD_LARGE = 20.0  # Files longer than this get smaller batch size
 DURATION_THRESHOLD_SMALL = 10.0  # Files shorter than this can use larger batch size
@@ -906,8 +906,15 @@ def build_loader_from_rows(rows_for_epoch):
     return loader
 
 
-def train_one_epoch(epoch_num: int, loader: DataLoader):
-    global global_step
+def _is_oom(e: BaseException) -> bool:
+    msg = str(e).lower()
+    return isinstance(e, torch.cuda.OutOfMemoryError) or ("out of memory" in msg)
+
+
+def train_one_epoch(epoch_num: int, loader):
+    """Drop-in replacement body for your existing train_one_epoch."""
+
+    global global_step  # keep your existing global
 
     model_train.train()
     optimizer.zero_grad(set_to_none=True)
@@ -919,41 +926,49 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
     batch_sizes_used = []
     durations_seen = []
 
+    # NEW: count *successful* micro-batches for grad accumulation
+    accum_ok = 0
+
     pbar = tqdm(loader, desc=f"Epoch {epoch_num}")
 
     for batch_idx, batch in enumerate(pbar):
         if batch is None:
             continue
 
-        if not check_memory_availability(required_gb=3.0):
-            print("[mem] Low memory detected, forcing cleanup before batch...")
-            cleanup_memory(f"forced cleanup before batch {batch_idx}")
-            if not check_memory_availability(required_gb=2.0):
-                print("[mem] Still low memory after cleanup, skipping batch")
-                optimizer.zero_grad(set_to_none=True)
-                continue
+        # Optional: do a LIGHT cleanup now and then (does NOT skip)
+        if (batch_idx + 1) % CLEANUP_EVERY_N_STEPS == 0:
+            cleanup_memory(f"pre batch {batch_idx+1}")
 
-        input_features = batch["input_features"].to(device, non_blocking=True)
-        lengths = batch["lengths"].to(device, non_blocking=True)
-        labels = batch["labels"].to(device, non_blocking=True)
-        attn_mask = batch["attention_mask"].to(device, non_blocking=True)
-
-        current_batch_size_actual = input_features.shape[0]
-        avg_duration_in_batch = float(lengths.mean().item())
-        batch_sizes_used.append(current_batch_size_actual)
-        durations_seen.append(avg_duration_in_batch)
-
-        if not torch.isfinite(input_features).all():
-            print("BAD FEATURES (non-finite). Skipping batch.")
-            optimizer.zero_grad(set_to_none=True)
-            continue
-
-        decoder_input_ids = shift_tokens_right(labels, pad_token_id=PAD_ID, decoder_start_token_id=DECODER_START_ID)
-
-        max_embed_positions = model_train.model.encoder.embed_positions.weight.shape[0]
-        n_ctx = pick_n_ctx_from_batch(lengths, max_embed_positions)
+        # Initialise for safe logging in except blocks
+        n_ctx = None
+        bs = None
 
         try:
+            input_features = batch["input_features"].to(device, non_blocking=True)
+            lengths = batch["lengths"].to(device, non_blocking=True)
+            labels = batch["labels"].to(device, non_blocking=True)
+            attn_mask = batch["attention_mask"].to(device, non_blocking=True)
+
+            bs = int(input_features.shape[0])
+            avg_duration_in_batch = float(lengths.mean().item())
+            batch_sizes_used.append(bs)
+            durations_seen.append(avg_duration_in_batch)
+
+            if not torch.isfinite(input_features).all():
+                print("BAD FEATURES (non-finite). Skipping batch.")
+                optimizer.zero_grad(set_to_none=True)
+                accum_ok = 0
+                continue
+
+            decoder_input_ids = shift_tokens_right(
+                labels,
+                pad_token_id=PAD_ID,
+                decoder_start_token_id=DECODER_START_ID,
+            )
+
+            max_embed_positions = model_train.model.encoder.embed_positions.weight.shape[0]
+            n_ctx = pick_n_ctx_from_batch(lengths, max_embed_positions)
+
             with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
                 enc_partial = compute_partially_encoder(model_train.model, input_features, n_ctx)
 
@@ -966,7 +981,8 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
                 )
 
                 logits = lm_head(dec_partial.last_hidden_state)
-                loss_ce = F.cross_entropy(
+
+                loss_ce = torch.nn.functional.cross_entropy(
                     logits.reshape(-1, logits.shape[-1]),
                     labels.reshape(-1),
                     ignore_index=-100,
@@ -975,11 +991,14 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
                 if not torch.isfinite(loss_ce):
                     print("Non-finite CE loss. Skipping batch.")
                     optimizer.zero_grad(set_to_none=True)
+                    accum_ok = 0
                     continue
 
                 if want_acft:
                     with torch.no_grad():
-                        enc_full = compute_partially_encoder(model_ref.model, input_features, FULL_ENCODER_CONTEXT_LENGTH)
+                        enc_full = compute_partially_encoder(
+                            model_ref.model, input_features, FULL_ENCODER_CONTEXT_LENGTH
+                        )
                         dec_full = model_ref.model.decoder(
                             input_ids=decoder_input_ids,
                             attention_mask=attn_mask,
@@ -1000,85 +1019,94 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
                 if not torch.isfinite(loss):
                     print("Non-finite total loss. Skipping batch.")
                     optimizer.zero_grad(set_to_none=True)
+                    accum_ok = 0
                     continue
 
-        except torch.cuda.OutOfMemoryError as e:
-            print(f"[mem] CUDA OOM caught: {str(e)}")
-            print(f"[mem] Batch size: {input_features.shape[0]}, Context: {n_ctx}")
-            cleanup_memory("after OOM")
-            optimizer.zero_grad(set_to_none=True)
-            continue
-        except RuntimeError as e:
-            if "out of memory" in str(e).lower():
-                print(f"[mem] Memory error caught: {str(e)}")
-                cleanup_memory("after memory error")
+            # Backward (can OOM) — keep inside try
+            if use_grad_scaler:
+                scaler.scale(loss).backward()
+            else:
+                loss.backward()
+
+            accum_ok += 1
+            did_opt_step = False
+
+            if accum_ok >= GRAD_ACCUM_STEPS:
+                if use_grad_scaler:
+                    scaler.unscale_(optimizer)
+
+                torch.nn.utils.clip_grad_norm_(model_train.parameters(), MAX_GRAD_NORM)
+
+                if use_grad_scaler:
+                    scaler.step(optimizer)
+                    scaler.update()
+                else:
+                    optimizer.step()
+
                 optimizer.zero_grad(set_to_none=True)
+                accum_ok = 0
+                did_opt_step = True
+
+                if scheduler is not None:
+                    scheduler.step()
+
+                global_step += 1
+
+            running += float(loss.item())
+            steps += 1
+
+            cur_lr = float(optimizer.param_groups[0]["lr"])
+            pbar.set_postfix({
+                "loss": f"{(running / max(1, steps)):.6f}",
+                "ce": f"{loss_ce.item():.4f}",
+                "acft": f"{loss_acft.item():.4f}" if want_acft else "off",
+                "n_ctx": int(n_ctx),
+                "bs": int(bs),
+                "lr": f"{cur_lr:.2e}",
+                "gs": int(global_step),
+                "mem": f"{get_memory_usage_ratio():.1%}",
+            })
+
+        except Exception as e:
+            if _is_oom(e):
+                print(f"[mem] OOM -> skipping batch {batch_idx} | bs={bs} n_ctx={n_ctx} | {e}")
+                optimizer.zero_grad(set_to_none=True)
+                accum_ok = 0
+                cleanup_memory(f"after OOM batch {batch_idx}")
                 continue
-            else:
-                raise e
+            raise
 
-        if use_grad_scaler:
-            scaler.scale(loss).backward()
-        else:
-            loss.backward()
-
-        did_opt_step = False
-        if (batch_idx + 1) % GRAD_ACCUM_STEPS == 0:
-            if use_grad_scaler:
-                scaler.unscale_(optimizer)
-            torch.nn.utils.clip_grad_norm_(model_train.parameters(), MAX_GRAD_NORM)
-
-            if use_grad_scaler:
-                scaler.step(optimizer)
-                scaler.update()
-            else:
-                optimizer.step()
-            optimizer.zero_grad(set_to_none=True)
-
-            did_opt_step = True
-
-            # Scheduler step ONCE per optimizer step (NEW)
-            if scheduler is not None:
-                scheduler.step()
-
-            global_step += 1
-
-            # Optional dynamic batch logic (disabled by default)
-            if DYNAMIC_BATCH_SIZE and (batch_idx + 1) % (GRAD_ACCUM_STEPS * 5) == 0:
-                memory_ratio = get_memory_usage_ratio()
-                avg_duration_recent = np.mean(durations_seen[-10:]) if len(durations_seen) >= 10 else avg_duration_in_batch
-                _ = calculate_optimal_batch_size(avg_duration_recent, memory_ratio)
-
-        running += float(loss.item())
-        steps += 1
-
-        cur_lr = float(optimizer.param_groups[0]["lr"])
-
-        pbar.set_postfix({
-            "loss": f"{(running / max(1, steps)):.6f}",
-            "ce": f"{loss_ce.item():.4f}",
-            "acft": f"{loss_acft.item():.4f}" if want_acft else "off",
-            "n_ctx": int(n_ctx),
-            "bs": int(input_features.shape[0]),
-            "lr": f"{cur_lr:.2e}",
-            "gs": int(global_step),
-            "mem": f"{get_memory_usage_ratio():.1%}",
-        })
-
-        # Cleanup
-        del batch
-        del input_features, lengths, labels, attn_mask, decoder_input_ids
-        del enc_partial, dec_partial, logits, loss_ce, loss_acft, loss
-        if want_acft:
-            del enc_full, dec_full, hs_p, hs_f
-
-        if (batch_idx + 1) % CLEANUP_EVERY_N_STEPS == 0:
-            cleanup_memory(f"epoch {epoch_num} step {batch_idx+1}")
-
-    if batch_sizes_used:
-        avg_bs = np.mean(batch_sizes_used)
-        avg_dur = np.mean(durations_seen)
-        print(f"[epoch] Avg batch size: {avg_bs:.1f}, Avg duration: {avg_dur:.1f}s, Total adjustments: {om_adjustments}")
+        finally:
+            # Ensure we drop references so CUDA can reuse memory.
+            try:
+                del batch
+            except Exception:
+                pass
+            for name in (
+                "input_features",
+                "lengths",
+                "labels",
+                "attn_mask",
+                "decoder_input_ids",
+                "enc_partial",
+                "dec_partial",
+                "logits",
+                "loss_ce",
+                "loss_acft",
+                "loss",
+            ):
+                if name in locals():
+                    try:
+                        del locals()[name]
+                    except Exception:
+                        pass
+            if want_acft:
+                for name in ("enc_full", "dec_full", "hs_p", "hs_f"):
+                    if name in locals():
+                        try:
+                            del locals()[name]
+                        except Exception:
+                            pass
 
     cleanup_memory(f"end epoch {epoch_num}")
     return running / max(1, steps)

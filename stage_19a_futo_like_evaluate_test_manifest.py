@@ -31,7 +31,7 @@ python stage_19a_futo_like_evaluate_test_manifest.py \
   --test_manifest "I:\Record_chunks\pairs_manifest_local_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_randomized_filtered_test.jsonl" \
   --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx5" \
   --base_model "futo-org/acft-whisper-tiny.en" \
-  --percentage 100 --device cuda --num_beams 5 --temperature 0.0 \
+  --percentage 10 --device cuda --num_beams 5 --temperature 0.0 \
   --normalize whisper_basic --dynamic_audio_ctx 0 --vad_filter 0 \
   --vad_policy skip --fp16 1 --batch_size 16 --auto_batch 1 \
   --force_resume
@@ -598,6 +598,23 @@ def eval_one_model(
                                 "vad": c.get("vad", {"vad_applied": False}),
                             }
                         )
+                        
+                        # Immediately save each prediction to prevent data loss
+                        model_name = Path(model_id_or_path).name if Path(model_id_or_path).exists() else model_id_or_path
+                        audio_path = c["audio_path"]
+                        if audio_path not in all_predictions:
+                            all_predictions[audio_path] = {
+                                "audio_path": audio_path,
+                                "reference": ref,
+                                "predictions": {},
+                            }
+                        all_predictions[audio_path]["predictions"][model_name] = {
+                            "pred": pred,
+                            "pred_norm": pred_n,
+                            "duration_sec_raw": c.get("duration_sec_raw"),
+                            "duration_sec_eval": c.get("duration_sec_eval"),
+                            "vad": c.get("vad", {"vad_applied": False}),
+                        }
 
                     # Consume chunk
                     pending = pending[len(chunk):]
@@ -621,22 +638,35 @@ def eval_one_model(
                         save_incremental_results(results, all_predictions, out_json)
                         
                         pbar.set_postfix({"bs": cur_bs, "vram": f"{mem_ratio:.0%}" if use_cuda else "cpu", "cleanup": f"batch_{batch_count}"})
+                    
+                    # Save every 10 batches to prevent data loss
+                    elif batch_count % 10 == 0 and out_json is not None:
+                        save_incremental_results(results, all_predictions, out_json)
 
                 except torch.cuda.OutOfMemoryError:
                     if use_cuda:
                         torch.cuda.empty_cache()
                     gc.collect()
 
-                    # Back off and retry
+                    # Skip the problematic batch and continue
                     old_bs = cur_bs
                     cur_bs = max(cfg.batch_min, max(1, int(cur_bs // 2)))
                     oom_cooldown = 5
 
-                    if cur_bs == old_bs and old_bs == 1:
-                        # If we cannot go any lower, skip one sample to make progress.
-                        bad = pending[0]
-                        skipped.append({"audio_path": bad["audio_path"], "reason": "oom_single"})
-                        pending = pending[1:]
+                    # Output problematic files to console
+                    print(f"\n⚠ OOM Error: Skipping batch of {len(chunk)} items due to insufficient GPU memory")
+                    print("📁 Problematic files in this batch:")
+                    for i, bad_item in enumerate(chunk, 1):
+                        audio_path = bad_item.get("audio_path", "unknown")
+                        duration = bad_item.get("duration_sec_eval", bad_item.get("duration_sec_raw", "unknown"))
+                        print(f"   {i}. {audio_path} (duration: {duration}s)")
+                        skipped.append({"audio_path": audio_path, "reason": "oom_batch_skipped"})
+                    
+                    print(f"🔧 Reducing batch size from {old_bs} to {cur_bs} and continuing...")
+                    print(f"💾 Current progress: {len(preds_raw)}/{len(test_rows)} samples processed\n")
+                    
+                    # Consume the problematic chunk entirely
+                    pending = pending[len(chunk):]
                     continue
 
                 finally:
@@ -724,17 +754,35 @@ def eval_one_model(
                         save_incremental_results(results, all_predictions, out_json)
                         
                         pbar.set_postfix({"bs": cur_bs, "vram": f"{mem_ratio:.0%}" if use_cuda else "cpu", "cleanup": f"batch_{batch_count}"})
+                    
+                    # Save every 10 batches to prevent data loss
+                    elif batch_count % 10 == 0 and out_json is not None:
+                        save_incremental_results(results, all_predictions, out_json)
 
                 except torch.cuda.OutOfMemoryError:
                     if use_cuda:
                         torch.cuda.empty_cache()
                     gc.collect()
+                    
+                    # Skip the problematic batch and continue
+                    old_bs = cur_bs
                     cur_bs = max(cfg.batch_min, max(1, int(cur_bs // 2)))
                     oom_cooldown = 5
-                    if cur_bs == 1 and len(chunk) == 1:
-                        bad = pending[0]
-                        skipped.append({"audio_path": bad["audio_path"], "reason": "oom_single"})
-                        pending = pending[1:]
+                    
+                    # Output problematic files to console
+                    print(f"\n⚠ OOM Error: Skipping batch of {len(chunk)} items due to insufficient GPU memory")
+                    print("📁 Problematic files in this batch:")
+                    for i, bad_item in enumerate(chunk, 1):
+                        audio_path = bad_item.get("audio_path", "unknown")
+                        duration = bad_item.get("duration_sec_eval", bad_item.get("duration_sec_raw", "unknown"))
+                        print(f"   {i}. {audio_path} (duration: {duration}s)")
+                        skipped.append({"audio_path": audio_path, "reason": "oom_batch_skipped"})
+                    
+                    print(f"🔧 Reducing batch size from {old_bs} to {cur_bs} and continuing...")
+                    print(f"💾 Current progress: {len(preds_raw)}/{len(test_rows)} samples processed\n")
+                    
+                    # Consume the problematic chunk entirely
+                    pending = pending[len(chunk):]
                     continue
 
                 finally:

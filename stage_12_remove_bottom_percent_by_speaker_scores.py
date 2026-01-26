@@ -25,7 +25,7 @@ Usage
 -----
 i:\\Whisper-training-env\\Scripts\\python.exe i:\\whisper-acft\\stage_12_remove_bottom_percent_by_speaker_scores.py `
   --input_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized.jsonl" `
-  --output_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_filtered.jsonl" `
+  --output_manifest "I:\\Record_chunks\\pairs_manifest_sorted_by_scores_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_bottom_filtered.jsonl" `
   --speaker_scores_csv "i:\\whisper-acft\\speaker_sort_scores.csv" `
   --bottom_percent 30
 
