@@ -47,16 +47,16 @@ Usage examples
 cd "i:\whisper-acft" && python stage_7_add_others_voices_to_my_audio.py \
   --manifest "i:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix.jsonl" \
   --scores_csv "i:/whisper-acft/speaker_sort_scores.csv" \
-  --other_voices_dir "I:/Custom/Other/Voices" \
+  --other_voices_dir "I:/Record_others" \
   --out_manifest "i:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed.jsonl" \
-  --out_mix_dir "i:/Record_chunks/voice_mixed" \
+  --out_mix_dir "i:/Record_chunks_voice_mixed" \
   --mix_ratio 0.5 \
   --snr_db_min 5 \
-  --snr_db_max 20 \
+  --snr_db_max 10 \
   --seed 1337 \
   --shuffle
 
-python stage_7_add_others_voices_to_my_audio.py --manifest "i:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix.jsonl" --scores_csv "i:\whisper-acft\speaker_sort_scores.csv" --other_voices_dir "i:\Custom\Other\Voices" --out_manifest "i:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed.jsonl" --out_mix_dir "i:\Record_chunks\voice_mixed" --mix_ratio 0.5 --snr_db_min 5 --snr_db_max 20 --seed 1337 --shuffle
+python stage_7_add_others_voices_to_my_audio.py --manifest "i:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix.jsonl" --scores_csv "i:\whisper-acft\speaker_sort_scores.csv" --other_voices_dir "i:\Custom\Other\Voices" --out_manifest "i:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed.jsonl" --out_mix_dir "i:\Record_chunks_voice_mixed" --mix_ratio 0.5 --snr_db_min 5 --snr_db_max 10 --seed 1337 --shuffle
   
 """
 

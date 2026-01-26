@@ -46,8 +46,8 @@ python stage_6_add_noise_to_high_score_audio_chunks_manifest_with_noise.py \
   --noises_dir "i:/noise/RIRS_NOISES/pointsource_noises" \
   --scores_csv "i:/whisper-acft/speaker_sort_scores.csv" \
   --out_manifest "i:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_mix.jsonl" \
-  --out_noise_dir "i:/Record_chunks/noise_chunks" \
-  --out_mix_dir "i:/Record_chunks/noisy_mixed" \
+  --out_noise_dir "i:/Record_chunks_noise_chunks" \
+  --out_mix_dir "i:/Record_chunks_noisy_mixed" \
   --mode mix \
   --mix_ratio 0.5 \
   --snr_db_min 5 \

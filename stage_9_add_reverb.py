@@ -44,6 +44,7 @@ Usage
 
 i:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\stage_9_add_reverb.py `
   --in_manifest "I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain.jsonl" `
+  --input_audio_dir "I:\Record_chunks" `
   --rir_dir "I:\noise\RIRS_NOISES\real_rirs_isotropic_noises" `
   --out_audio_dir "I:\Record_chunks_aug_rir_real" `
   --out_manifest "I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real.jsonl" `
@@ -262,6 +263,7 @@ def make_out_name(src: Path, suffix: str) -> str:
 def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--in_manifest", required=True)
+    ap.add_argument("--input_audio_dir", required=True, help="Only process audio files from this directory")
     ap.add_argument("--rir_dir", required=True, help="Folder containing RIR wav/flac etc. (recursively scanned)")
     ap.add_argument("--out_audio_dir", required=True)
     ap.add_argument("--out_manifest", required=True)
@@ -287,6 +289,7 @@ def main() -> None:
     args = ap.parse_args()
 
     in_manifest = Path(args.in_manifest)
+    input_audio_dir = Path(args.input_audio_dir).resolve()
     rir_dir = Path(args.rir_dir)
     out_audio_dir = Path(args.out_audio_dir)
     out_manifest = Path(args.out_manifest)
@@ -322,6 +325,10 @@ def main() -> None:
     def process_row(row: Dict[str, Any], row_idx: int) -> Tuple[Dict[str, Any], List[Dict[str, Any]]]:
         """Process a single manifest row and return original and augmented rows"""
         src_path = Path(row["audio_path"])
+        
+        # Skip files not directly in the input directory (no subdirectories)
+        if src_path.parent != input_audio_dir:
+            return row, []
         
         # Always keep the original file
         original_row = row

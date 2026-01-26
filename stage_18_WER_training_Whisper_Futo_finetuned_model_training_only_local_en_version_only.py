@@ -16,7 +16,7 @@
 
 #!pip -q install -U "transformers>=4.38" datasets accelerate soundfile tqdm
 
-import os, json, time, shutil, hashlib, gc, math, winsound
+import os, json, time, shutil, hashlib, gc, math, winsound, sys, atexit
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -39,10 +39,95 @@ from transformers import (
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_local_english_only_filtered_with_noises_bottom20_removed.jsonl"
+MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_local_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_bottom_filtered_train.jsonl"
 TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage1.jsonl"
 
 CHECKPOINT_DIR = "i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx6"
+
+# ===== Console Logging Setup =====
+os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+LOG_PATH = os.path.join(CHECKPOINT_DIR, "console.log")
+
+
+class _Tee:
+    """Duplicate writes to console + log file (works for tqdm which expects write/flush/isatty)."""
+
+    def __init__(self, console_stream, log_file):
+        self._console = console_stream
+        self._log = log_file
+
+    def write(self, data):
+        # tqdm and print both call write() a lot; keep it robust.
+        try:
+            self._console.write(data)
+        except Exception:
+            pass
+        try:
+            self._log.write(data)
+            self._log.flush()  # so you don't lose anything if it crashes
+        except Exception:
+            pass
+
+    def flush(self):
+        try:
+            self._console.flush()
+        except Exception:
+            pass
+        try:
+            self._log.flush()
+        except Exception:
+            pass
+
+    def isatty(self):
+        try:
+            return bool(self._console.isatty())
+        except Exception:
+            return False
+
+    def fileno(self):
+        # Some libs ask for this.
+        try:
+            return self._console.fileno()
+        except Exception:
+            raise OSError("fileno() not supported")
+
+
+_log_fh = open(LOG_PATH, "a", encoding="utf-8", errors="replace", buffering=1)
+_log_fh.write("\n" + "=" * 80 + "\n")
+_log_fh.write(f"Run started: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
+_log_fh.write("Command: " + " ".join(map(str, sys.argv)) + "\n")
+_log_fh.write("=" * 80 + "\n")
+_log_fh.flush()
+
+_orig_stdout = sys.stdout
+_orig_stderr = sys.stderr
+sys.stdout = _Tee(_orig_stdout, _log_fh)
+sys.stderr = _Tee(_orig_stderr, _log_fh)
+
+
+def _close_console_log():
+    # Restore streams first (helps avoid odd behaviour during interpreter shutdown)
+    try:
+        sys.stdout.flush()
+        sys.stderr.flush()
+    except Exception:
+        pass
+
+    try:
+        sys.stdout = _orig_stdout
+        sys.stderr = _orig_stderr
+    except Exception:
+        pass
+
+    try:
+        _log_fh.flush()
+        _log_fh.close()
+    except Exception:
+        pass
+
+
+atexit.register(_close_console_log)
+# ===== End Console Logging Setup =====
 
 # If you're running on the same machine as the audio (local disk), caching copies is unnecessary.
 USE_LOCAL_CACHE = False
