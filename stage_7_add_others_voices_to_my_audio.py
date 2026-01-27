@@ -53,10 +53,14 @@ cd "i:\whisper-acft" && python stage_7_add_others_voices_to_my_audio.py \
   --mix_ratio 0.5 \
   --snr_db_min 5 \
   --snr_db_max 10 \
+  --max_bad_to_good_ratio 1.0 --good_floor_db -120 \
   --seed 1337 \
   --shuffle
 
-python stage_7_add_others_voices_to_my_audio.py --manifest "i:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix.jsonl" --scores_csv "i:\whisper-acft\speaker_sort_scores.csv" --other_voices_dir "i:\Custom\Other\Voices" --out_manifest "i:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed.jsonl" --out_mix_dir "i:\Record_chunks_voice_mixed" --mix_ratio 0.5 --snr_db_min 5 --snr_db_max 10 --seed 1337 --shuffle
+# With relaxed ducker (allows some other voice during silence):
+# Add: --good_floor_db -45
+
+python stage_7_add_others_voices_to_my_audio.py --manifest "i:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix.jsonl" --scores_csv "i:\whisper-acft\speaker_sort_scores.csv" --other_voices_dir "i:\Custom\Other\Voices" --out_manifest "i:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed.jsonl" --out_mix_dir "i:\Record_chunks_voice_mixed" --mix_ratio 0.5 --snr_db_min 5 --snr_db_max 10 --max_bad_to_good_ratio 1.0 --good_floor_db -120 --seed 1337 --shuffle
   
 """
 
