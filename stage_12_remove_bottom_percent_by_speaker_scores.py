@@ -102,7 +102,8 @@ def filter_manifest_by_scores(
     manifest_rows: List[Dict[str, Any]], 
     score_dict: Dict[str, float],
     bottom_percent: float,
-    min_score: float = None
+    min_score: float = None,
+    remove_no_score: bool = False
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Filter manifest entries by speaker scores."""
     
@@ -170,10 +171,16 @@ def filter_manifest_by_scores(
                     stats['removed'] += 1
                     stats['removed_by_threshold'] += 1
         else:
-            # No score found - keep these (they weren't scored)
-            kept_entries.append(entry)
-            stats['kept'] += 1
-            stats['kept_no_score'] += 1
+            # No score found - behavior depends on remove_no_score flag
+            if remove_no_score:
+                removed_entries.append(entry)
+                stats['removed'] += 1
+                stats['removed_no_score'] += 1
+            else:
+                # Keep these (they weren't scored)
+                kept_entries.append(entry)
+                stats['kept'] += 1
+                stats['kept_no_score'] += 1
     
     return kept_entries, stats
 
@@ -247,6 +254,11 @@ def main() -> None:
         action="store_true",
         help="Show what would be done without writing output file"
     )
+    parser.add_argument(
+        "--remove_no_score",
+        action="store_true",
+        help="Remove entries that don't have speaker scores (default: keep them)"
+    )
     
     args = parser.parse_args()
     
@@ -269,6 +281,7 @@ def main() -> None:
     print(f"Bottom percentage to remove: {args.bottom_percent}%")
     if args.min_score is not None:
         print(f"Minimum score threshold: {args.min_score}")
+    print(f"Remove no-score entries: {args.remove_no_score}")
     print(f"Dry run: {args.dry_run}")
     print("=" * 60)
     
@@ -283,7 +296,7 @@ def main() -> None:
     # Filter manifest
     print("Filtering manifest by speaker scores...")
     kept_entries, stats = filter_manifest_by_scores(
-        manifest_rows, score_dict, args.bottom_percent, args.min_score
+        manifest_rows, score_dict, args.bottom_percent, args.min_score, args.remove_no_score
     )
     
     # Print statistics

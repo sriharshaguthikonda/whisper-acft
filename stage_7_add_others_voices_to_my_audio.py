@@ -53,7 +53,7 @@ cd "i:\whisper-acft" && python stage_7_add_others_voices_to_my_audio.py \
   --mix_ratio 0.5 \
   --snr_db_min 5 \
   --snr_db_max 10 \
-  --max_bad_to_good_ratio 1.0 --good_floor_db -120 \
+  --max_bad_to_good_ratio 1.0 --good_floor_db -45 \
   --seed 1337 \
   --shuffle
 

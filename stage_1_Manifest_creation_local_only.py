@@ -9,7 +9,7 @@ from transformers import WhisperProcessor, WhisperForConditionalGeneration
 ACFT_MODEL_ID = "futo-org/acft-whisper-tiny.en"     # weights
 BASE_PROCESSOR_ID = "openai/whisper-tiny.en"        # processor (feature extractor + tokenizer)
 
-TRANSCRIPT_DIR = r"I:\P2GPT_google_drive\My Drive\nfa_corrected\patched_json"
+TRANSCRIPT_DIR = r"I:\P2GPT_google_drive\My Drive\Transcriptions_patched_corrected"
 CHUNKS_DIR = "i:\\Record_chunks"
 AUDIO_SOURCE_DIR = "i:\\Record_harsha"  # directory containing full-length audios to include
 
@@ -22,8 +22,8 @@ DUR_CAP_SEC = (MAX_OUT_FRAMES - 1) / float(TARGET_SR)  # ~29.9999s at 16k
 MAX_LABEL_TOKENS = 420
 
 # Segment-level behaviour
-CONTEXT_PAD = 0.10            # small padding (0.05–0.20 recommended)
-MIN_SEG_SEC = 0.80            # if a segment is shorter than this, merge forward
+CONTEXT_PAD = 0.20            # small padding (0.05–0.20 recommended)
+MIN_SEG_SEC = 2.00            # if a segment is shorter than this, merge forward
 MERGE_GAP_FOR_SHORT = 0.5    # only merge short segments if the gap is <= this
 MERGE_SHORT_SEGMENTS = False  # set True to merge short segments; False keeps every segment standalone
 KEEP_TINY_SEGMENTS = True     # keep very short segments even if under MIN_SEG_SEC

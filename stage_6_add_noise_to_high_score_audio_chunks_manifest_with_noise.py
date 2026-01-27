@@ -40,7 +40,7 @@ python stage_6_add_noise_to_high_score_audio_chunks_manifest_with_noise.py \
   --mode mix \
   --mix_ratio 0.5 \
   --snr_db_min 5 --snr_db_max 20 \
-  --max_bad_to_good_ratio 1.0 --good_floor_db -120 \
+  --max_bad_to_good_ratio 1.0 --good_floor_db -45 \
   --seed 1337 \
   --shuffle \
   --workers 8
