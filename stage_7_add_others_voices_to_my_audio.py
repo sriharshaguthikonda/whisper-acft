@@ -272,6 +272,8 @@ def mix_one(
     others_items: Sequence[OtherVoice],
     others_weights: Sequence[float],
     seed: int,
+    max_bad_to_good_ratio: float = 1.0,
+    good_floor_db: float = -120.0,
 ) -> Optional[Dict]:
     """Mix one OTHER voice segment on top of TARGET speech for one row."""
 
@@ -314,8 +316,18 @@ def mix_one(
         rn = _rms(other_seg)
         target_rn = rs / (10.0 ** (snr_db / 20.0))
         gain = target_rn / max(rn, 1e-12)
-
-        mixed = target_speech + (other_seg * gain)
+        other_scaled = other_seg * gain
+        
+        # Apply instantaneous ducker to ensure other voice never exceeds target speech
+        from audio_instant_ducker_utils import duck_bad_under_good
+        other_scaled = duck_bad_under_good(
+            other_scaled,
+            good=target_speech,
+            max_ratio=max_bad_to_good_ratio,
+            good_floor_db=good_floor_db,
+        )
+        
+        mixed = target_speech + other_scaled
 
         # avoid clipping
         peak = float(np.max(np.abs(mixed)))
@@ -378,6 +390,10 @@ def main() -> int:
 
     p.add_argument("--overwrite", action="store_true", help="Allow overwriting generated audio files")
     p.add_argument("--workers", type=int, default=0, help="Thread workers for mixing (0=auto)")
+    
+    # Instantaneous ducker parameters
+    p.add_argument('--max_bad_to_good_ratio', type=float, default=1.0, help='Maximum ratio of bad to good signal at any sample (1.0 = bad never louder)')
+    p.add_argument('--good_floor_db', type=float, default=-120.0, help='Floor for good signal in dB (strict: -120, relaxed: -45)')
 
     args = p.parse_args()
 
@@ -469,6 +485,8 @@ def main() -> int:
                     others_items=others_items,
                     others_weights=others_weights,
                     seed=int(args.seed),
+                    max_bad_to_good_ratio=float(args.max_bad_to_good_ratio),
+                    good_floor_db=float(args.good_floor_db),
                 )
             )
 

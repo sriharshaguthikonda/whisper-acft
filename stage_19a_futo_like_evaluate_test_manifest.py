@@ -28,8 +28,8 @@ Evaluate Whisper checkpoints in a way that's closer to keyboard voice-input usag
 Example:
 # Force resume using existing predictions
 python stage_19a_futo_like_evaluate_test_manifest.py \
-  --test_manifest "I:\Record_chunks\pairs_manifest_local_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_silent_randomized_filtered_test.jsonl" \
-  --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx5" \
+  --test_manifest "I:\Record_chunks\pairs_manifest_local_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_bottom_filtered_test.jsonl" \
+  --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx6"\
   --base_model "futo-org/acft-whisper-tiny.en" \
   --percentage 10 --device cuda --num_beams 5 --temperature 0.0 \
   --normalize whisper_basic --dynamic_audio_ctx 0 --vad_filter 0 \

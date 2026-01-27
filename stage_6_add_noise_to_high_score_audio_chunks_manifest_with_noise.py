@@ -1,60 +1,54 @@
 #!/usr/bin/env python3
-"""stage_6_add_noise_to_high_score_audio_chunks_manifest_with_noise.py
+"""stage_6_add_noise_to_high_score_audio_chunks_manifest_with_noise_NO_NOISE_ONLY.py
+
+What changed vs your current Stage 6
+-----------------------------------
+- **Noise-only rows are disabled by default** and will NOT be added to the output manifest.
+- Backwards compatible: you can still request `--mode noise_only` / `--mode both`, but
+  **nothing will be added** unless you explicitly pass `--enable_noise_only_rows`.
+
+Why
+---
+Noise-only rows typically have an empty transcript (or a placeholder). Depending on your
+collator/normaliser, they can become batches with zero valid label tokens -> CrossEntropyLoss
+can produce NaN/Inf when the loss is averaged over zero valid targets.
 
 Goal
 ----
-Given a Whisper-style JSONL manifest (one JSON object per line), augment it using a folder
-of *non-speech* noise audio:
+Given a Whisper-style JSONL manifest and a folder of noise audio:
 
-1) Chunk ALL noise files into <= 30s WAV segments (16 kHz by default)
-2) Add a random subset of those noise-only chunks as extra manifest rows (true negatives)
-3) (Optional) Also create noisy MIXED versions of existing speech clips at random SNRs,
-   BUT only for rows whose audio files are marked as TARGET in your speaker_sort_scores.csv.
+1) Chunk ALL noise files into <= max_chunk_sec WAV segments (16 kHz default)
+2) Create noisy MIXED versions of existing speech clips at random SNRs,
+   BUT only for rows whose audio files are marked as TARGET in speaker_sort_scores.csv.
 
-Parallel upgrade (this version)
--------------------------------
-- Noise chunking is parallelised per noise file using ProcessPoolExecutor (Windows-safe spawn).
-- Mixing is parallelised per selected TARGET speech clip using ProcessPoolExecutor with an
-  initializer that loads the noise-chunk index once per worker.
-
-Manifest schema assumed
------------------------
-  {
-    "audio_path": "...wav",
-    "raw_transcription": "...",
-    "source_audio": "...m4a",
-    "chunk_index": 0,
-    "chunk_start": 0.0,
-    "chunk_end": 2.40,
-    "transcript_json": "...json"
-  }
-
-Noise-only rows will use:
-  raw_transcription: "" (empty)
-  transcript_json: null
-  is_noise_only: true
+(Optionally) Add noise-only rows ONLY if you *explicitly* enable them.
 
 Dependencies
 ------------
 pip install numpy soundfile tqdm
 (Optional for resampling) pip install scipy
 
-Usage example
--------------
+Example (recommended)
+---------------------
 python stage_6_add_noise_to_high_score_audio_chunks_manifest_with_noise.py \
-  --manifest "i:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered.jsonl" \
+  --manifest "i:/Record_chunks/pairs_manifest.jsonl" \
   --noises_dir "i:/noise/RIRS_NOISES/pointsource_noises" \
   --scores_csv "i:/whisper-acft/speaker_sort_scores.csv" \
-  --out_manifest "i:/Record_chunks/pairs_manifest_sorted_by_scores_english_only_filtered_with_mix.jsonl" \
-  --out_noise_dir "i:/Record_chunks_noise_chunks" \
-  --out_mix_dir "i:/Record_chunks_noisy_mixed" \
+  --out_manifest "i:/Record_chunks/pairs_manifest_with_mix.jsonl" \
+  --out_noise_dir "i:/Record_chunks/noise_chunks" \
+  --out_mix_dir "i:/Record_chunks/noisy_mixed" \
   --mode mix \
   --mix_ratio 0.5 \
-  --snr_db_min 5 \
-  --snr_db_max 20 \
+  --snr_db_min 5 --snr_db_max 20 \
   --seed 1337 \
   --shuffle \
   --workers 8
+
+If you *really* want noise-only rows (not recommended):
+------------------------------------------------------
+Add:
+  --mode both --enable_noise_only_rows --noise_ratio 0.05
+
 """
 
 from __future__ import annotations
@@ -86,8 +80,19 @@ from tqdm import tqdm
 
 
 # -----------------------------
-# Utilities
+# Small helpers
 # -----------------------------
+
+def beep() -> None:
+    """Audible notification when done."""
+    try:
+        import winsound
+
+        winsound.Beep(1000, 350)
+        winsound.Beep(1400, 250)
+    except Exception:
+        print("\a")
+
 
 def _norm_path(p: str | Path) -> str:
     return str(Path(p))
@@ -95,7 +100,6 @@ def _norm_path(p: str | Path) -> str:
 
 def _is_audio_file(p: Path) -> bool:
     # soundfile supports wav/flac/ogg and some others depending on libsndfile.
-    # Keep this conservative.
     return p.suffix.lower() in {".wav", ".flac", ".ogg"}
 
 
@@ -107,7 +111,6 @@ def _rms(x: np.ndarray, eps: float = 1e-12) -> float:
 def _ensure_mono(x: np.ndarray) -> np.ndarray:
     if x.ndim == 1:
         return x
-    # Average channels
     return np.mean(x, axis=1)
 
 
@@ -122,7 +125,6 @@ def _resample_if_needed(x: np.ndarray, sr_in: int, sr_out: int) -> np.ndarray:
             "Install scipy or ensure all audio is already at the target sample rate."
         ) from e
 
-    # Polyphase resampling: up/down ratio reduced by gcd
     g = math.gcd(sr_in, sr_out)
     up = sr_out // g
     down = sr_in // g
@@ -179,7 +181,6 @@ def _chunk_one_noise_file(task: Dict) -> List[Dict]:
     random_max_sec = float(task["random_max_sec"])
     base_seed = int(task["seed"])
 
-    # deterministic per file
     per_file_seed = base_seed ^ int(hashlib.md5(str(nf).lower().encode("utf-8")).hexdigest()[:8], 16)
     rng = random.Random(per_file_seed)
 
@@ -195,11 +196,8 @@ def _chunk_one_noise_file(task: Dict) -> List[Dict]:
             noise_id = _stable_id(str(nf).lower(), 8)
 
             while cursor < n_frames:
-                if random_chunking:
-                    dur = rng.uniform(random_min_sec, random_max_sec)
-                    dur = min(dur, max_chunk_sec)
-                else:
-                    dur = max_chunk_sec
+                dur = rng.uniform(random_min_sec, random_max_sec) if random_chunking else max_chunk_sec
+                dur = min(dur, max_chunk_sec)
 
                 frames = int(round(dur * sr_in))
                 if frames <= 0:
@@ -314,7 +312,12 @@ def chunk_noises(
     flat: List[Dict] = []
     with ProcessPoolExecutor(max_workers=w, mp_context=_mp_context_spawn()) as ex:
         futures = [ex.submit(_chunk_one_noise_file, t) for t in tasks]
-        for fut in tqdm(as_completed(futures), total=len(futures), desc=f"Chunking noise files (proc={w})", unit="file"):
+        for fut in tqdm(
+            as_completed(futures),
+            total=len(futures),
+            desc=f"Chunking noise files (proc={w})",
+            unit="file",
+        ):
             res = fut.result()
             if res:
                 flat.extend(res)
@@ -322,7 +325,6 @@ def chunk_noises(
     if not flat:
         raise RuntimeError("Chunking produced zero usable noise chunks. Check your noises_dir contents.")
 
-    # sort for stability
     flat.sort(key=lambda o: (o["source_audio"], int(o["chunk_index"]), o["audio_path"]))
 
     tmp = index_path.with_suffix(".jsonl.tmp")
@@ -351,8 +353,7 @@ def load_target_files(scores_csv: Path) -> set[str]:
         for line in f:
             parts = line.strip().split(",")
             if len(parts) >= 3 and parts[2] == "TARGET":
-                file_path = _norm_key(parts[0])
-                target_files.add(file_path)
+                target_files.add(_norm_key(parts[0]))
     return target_files
 
 
@@ -376,6 +377,10 @@ def write_manifest(path: Path, rows: List[Dict]) -> None:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
+
+# -----------------------------
+# Optional noise-only rows (now opt-in)
+# -----------------------------
 
 def add_noise_only_rows(
     base_rows: List[Dict],
@@ -470,7 +475,6 @@ def _mix_one_target_row(task: Dict) -> Optional[Dict]:
         if speech_dur <= 0.01:
             return None
 
-        # Pick a noise chunk at least as long as speech
         noise_pick: Optional[Dict] = None
         for _ in range(30):
             cand = rng.choice(_G_NOISE_CHUNKS)
@@ -488,7 +492,6 @@ def _mix_one_target_row(task: Dict) -> Optional[Dict]:
         noise, nsr = _read_wav_any(noise_audio_path)
         noise = _resample_if_needed(noise, nsr, _G_TARGET_SR)
 
-        # Ensure noise length matches speech length
         if len(noise) < len(speech):
             reps = int(math.ceil(len(speech) / max(1, len(noise))))
             noise = np.tile(noise, reps)[: len(speech)]
@@ -500,26 +503,37 @@ def _mix_one_target_row(task: Dict) -> Optional[Dict]:
             else:
                 noise = noise[: len(speech)]
 
-        # Choose SNR and scale noise
         snr_db = rng.uniform(snr_db_min, snr_db_max)
         rs = _rms(speech)
         rn = _rms(noise)
         target_rn = rs / (10.0 ** (snr_db / 20.0))
         gain = target_rn / max(rn, 1e-12)
-        mixed = speech + (noise * gain)
+        noise_scaled = noise * gain
+        
+        # Apply instantaneous ducker to ensure noise never exceeds speech
+        from audio_instant_ducker_utils import duck_bad_under_good
+        noise_scaled = duck_bad_under_good(
+            noise_scaled,
+            good=speech,
+            max_ratio=float(task.get("max_bad_to_good_ratio", 1.0)),
+            good_floor_db=float(task.get("good_floor_db", -120.0)),
+        )
+        
+        mixed = speech + noise_scaled
 
         peak = float(np.max(np.abs(mixed)))
         if peak > 0.99:
             mixed = mixed * (0.99 / peak)
 
-        # Unique-ish output filename (avoid collisions across folders / parallel workers)
         safe_stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in ap.stem)
         speech_id = _stable_id(_norm_key(str(ap)), 6)
         noise_src = str(noise_pick.get("source_audio", "noise"))
         noise_stem = "".join(c if c.isalnum() or c in "-_" else "_" for c in Path(noise_src).stem)
         noise_id = _stable_id(_norm_key(noise_src), 6)
 
-        out_name = f"{safe_stem}__{speech_id}__row{row_uid}__noisy__snr{snr_db:.1f}dB__{noise_stem}_{noise_id}.wav"
+        out_name = (
+            f"{safe_stem}__{speech_id}__row{row_uid}__noisy__snr{snr_db:.1f}dB__{noise_stem}_{noise_id}.wav"
+        )
         out_path = out_mix_dir / out_name
         out_mix_dir.mkdir(parents=True, exist_ok=True)
 
@@ -550,6 +564,8 @@ def mix_noise_into_speech(
     target_files: set[str],
     seed: int,
     workers: int,
+    max_bad_to_good_ratio: float = 1.0,
+    good_floor_db: float = -120.0,
 ) -> List[Dict]:
     """Create noisy mixed copies for a subset of TARGET base_rows and return new rows (parallel)."""
 
@@ -565,7 +581,7 @@ def mix_noise_into_speech(
         print("[WARN] No target files found in manifest for noise mixing", file=sys.stderr)
         return []
 
-    print(f"Found {len(target_rows)} target files out of {len(base_rows)} total rows")
+    print(f"Found {len(target_rows)} TARGET rows out of {len(base_rows)} total rows")
 
     n_to_mix = int(round(len(target_rows) * float(mix_ratio)))
     n_to_mix = max(0, min(len(target_rows), n_to_mix))
@@ -577,17 +593,22 @@ def mix_noise_into_speech(
 
     w = _suggest_workers(workers)
 
-    # Create temporary noise index for workers
     noise_index_path = out_mix_dir / "temp_noise_index.jsonl"
     with noise_index_path.open("w", encoding="utf-8") as f:
         for nc in noise_chunks:
-            f.write(json.dumps({
-                "audio_path": nc.audio_path,
-                "source_audio": nc.source_audio,
-                "chunk_index": nc.chunk_index,
-                "chunk_start": nc.chunk_start,
-                "chunk_end": nc.chunk_end,
-            }, ensure_ascii=False) + "\n")
+            f.write(
+                json.dumps(
+                    {
+                        "audio_path": nc.audio_path,
+                        "source_audio": nc.source_audio,
+                        "chunk_index": nc.chunk_index,
+                        "chunk_start": nc.chunk_start,
+                        "chunk_end": nc.chunk_end,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
 
     tasks: List[Dict] = []
     for local_i in chosen_idx:
@@ -599,6 +620,8 @@ def mix_noise_into_speech(
                 "snr_db_min": float(snr_db_min),
                 "snr_db_max": float(snr_db_max),
                 "allow_overwrite": bool(allow_overwrite),
+                "max_bad_to_good_ratio": float(max_bad_to_good_ratio),
+                "good_floor_db": float(good_floor_db),
                 "seed": int(seed + local_i * 10007),
             }
         )
@@ -612,12 +635,16 @@ def mix_noise_into_speech(
         initargs=(str(noise_index_path), int(target_sr)),
     ) as ex:
         futures = [ex.submit(_mix_one_target_row, t) for t in tasks]
-        for fut in tqdm(as_completed(futures), total=len(futures), desc=f"Mixing noise into TARGET speech (proc={w})", unit="clip"):
+        for fut in tqdm(
+            as_completed(futures),
+            total=len(futures),
+            desc=f"Mixing noise into TARGET speech (proc={w})",
+            unit="clip",
+        ):
             r = fut.result()
             if r is not None:
                 new_rows.append(r)
 
-    # Clean up temporary index
     noise_index_path.unlink(missing_ok=True)
 
     return new_rows
@@ -630,10 +657,13 @@ def main() -> int:
     p.add_argument("--scores_csv", required=True, help="Speaker sort scores CSV with TARGET files")
 
     p.add_argument("--out_manifest", required=True, help="Output JSONL manifest path")
-    p.add_argument("--out_noise_dir", required=True, help="Where to write <=30s noise chunks")
-    p.add_argument("--out_mix_dir", default=None, help="Where to write noisy mixed copies (mode=mix)")
+    p.add_argument("--out_noise_dir", required=True, help="Where to write <=max_chunk_sec noise chunks (used as mix sources)")
+    p.add_argument("--out_mix_dir", default=None, help="Where to write noisy mixed copies (mode=mix or both)")
 
-    p.add_argument("--mode", choices=["noise_only", "mix", "both"], default="noise_only")
+    # Keep backwards compatible modes, but default is now mix
+    p.add_argument("--mode", choices=["noise_only", "mix", "both"], default="mix")
+
+    p.add_argument("--enable_noise_only_rows", action="store_true", help="Explicitly allow adding noise-only rows to manifest (NOT recommended)")
 
     p.add_argument("--target_sr", type=int, default=16000)
     p.add_argument("--max_chunk_sec", type=float, default=29.5)
@@ -643,7 +673,8 @@ def main() -> int:
     p.add_argument("--random_min_sec", type=float, default=2.0)
     p.add_argument("--random_max_sec", type=float, default=29.5)
 
-    p.add_argument("--noise_ratio", type=float, default=0.15, help="How many noise-only rows to add, as a fraction of manifest")
+    # Noise-only parameters (only used if --enable_noise_only_rows)
+    p.add_argument("--noise_ratio", type=float, default=0.15, help="Fraction of manifest rows to add as noise-only")
     p.add_argument("--n_noise", type=int, default=None, help="Exact number of noise-only rows to add (overrides noise_ratio)")
 
     p.add_argument("--mix_ratio", type=float, default=0.0, help="Fraction of TARGET rows to create noisy mixed copies for")
@@ -657,6 +688,10 @@ def main() -> int:
     p.add_argument("--overwrite", action="store_true", help="Allow overwriting generated audio files")
 
     p.add_argument("--workers", type=int, default=0, help="Parallel workers (0=auto)")
+    
+    # Instantaneous ducker parameters
+    p.add_argument('--max_bad_to_good_ratio', type=float, default=1.0, help='Maximum ratio of bad to good signal at any sample (1.0 = bad never louder)')
+    p.add_argument('--good_floor_db', type=float, default=-120.0, help='Floor for good signal in dB (strict: -120, relaxed: -45)')
 
     args = p.parse_args()
 
@@ -676,15 +711,13 @@ def main() -> int:
     if not scores_csv.exists():
         raise FileNotFoundError(f"Scores CSV not found: {scores_csv}")
 
-    # Load target files from scores CSV
     target_files = load_target_files(scores_csv)
-    print(f"Loaded {len(target_files)} target files from {scores_csv}")
+    print(f"Loaded {len(target_files)} TARGET files from {scores_csv}")
 
     base_rows = load_manifest(manifest_path)
     if not base_rows:
         raise RuntimeError(f"Manifest is empty: {manifest_path}")
 
-    # 1) Chunk noises (parallel)
     noise_chunks = chunk_noises(
         noises_dir=noises_dir,
         out_noise_dir=out_noise_dir,
@@ -699,26 +732,30 @@ def main() -> int:
         workers=int(args.workers),
     )
 
-    new_rows: List[Dict] = []
+    added_rows: List[Dict] = []
 
-    # 2) Add noise-only rows
+    # Noise-only rows are now OPT-IN
     if args.mode in {"noise_only", "both"}:
-        new_rows.extend(
-            add_noise_only_rows(
-                base_rows=base_rows,
-                noise_chunks=noise_chunks,
-                noise_ratio=float(args.noise_ratio),
-                n_noise=args.n_noise,
-                seed=int(args.seed),
+        if not args.enable_noise_only_rows:
+            print("[INFO] Noise-only rows requested by --mode, but they are DISABLED by default.")
+            print("       If you really want them, add: --enable_noise_only_rows")
+        else:
+            added_rows.extend(
+                add_noise_only_rows(
+                    base_rows=base_rows,
+                    noise_chunks=noise_chunks,
+                    noise_ratio=float(args.noise_ratio),
+                    n_noise=args.n_noise,
+                    seed=int(args.seed),
+                )
             )
-        )
 
-    # 3) Mix noise into speech (optional)
+    # Mixing
     if args.mode in {"mix", "both"}:
         if not args.out_mix_dir:
             raise ValueError("--out_mix_dir is required when mode is mix or both")
         out_mix_dir = Path(args.out_mix_dir)
-        new_rows.extend(
+        added_rows.extend(
             mix_noise_into_speech(
                 base_rows=base_rows,
                 noise_chunks=noise_chunks,
@@ -731,10 +768,12 @@ def main() -> int:
                 target_files=target_files,
                 seed=int(args.seed),
                 workers=int(args.workers),
+                max_bad_to_good_ratio=float(args.max_bad_to_good_ratio),
+                good_floor_db=float(args.good_floor_db),
             )
         )
 
-    out_rows = list(base_rows) + list(new_rows)
+    out_rows = list(base_rows) + list(added_rows)
 
     if args.shuffle:
         random.shuffle(out_rows)
@@ -743,11 +782,12 @@ def main() -> int:
 
     print("\nDone")
     print(f"  Base rows:     {len(base_rows)}")
-    print(f"  Added rows:    {len(new_rows)}")
+    print(f"  Added rows:    {len(added_rows)}")
     print(f"  Output rows:   {len(out_rows)}")
     print(f"  Output file:   {out_manifest}")
     print(f"  Noise chunks:  {len(noise_chunks)} (index at {out_noise_dir / 'noise_chunks_index.jsonl'})")
 
+    beep()
     return 0
 
 
