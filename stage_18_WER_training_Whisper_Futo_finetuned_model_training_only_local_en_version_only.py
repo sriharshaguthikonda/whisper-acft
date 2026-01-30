@@ -18,6 +18,7 @@
 
 import os, json, time, shutil, hashlib, gc, math, winsound, sys, atexit, tempfile
 from concurrent.futures import ThreadPoolExecutor
+from typing import Optional, Dict
 
 import numpy as np
 import torch
@@ -138,7 +139,7 @@ def save_run_state(state: dict):
     atomic_write_json(RUN_STATE_PATH, state)
 
 
-def load_pending_plan() -> dict | None:
+def load_pending_plan() -> Optional[Dict]:
     if not os.path.exists(PENDING_PLAN_PATH):
         return None
     try:
@@ -1335,6 +1336,7 @@ def build_loader_from_rows(rows_for_epoch):
             "raw_transcription": r.get("raw_transcription", ""),
             "audio_path_orig": r.get("audio_path"),
             "key": r.get("key") or canonical_audio_key(r.get("audio_path")),
+            "uid": r.get("uid"),  # Fix: Add uid for meta_uid tracking in collate_batch
         })
 
     ds = Dataset.from_list(slim)
