@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""stage_11_a_randomize_manifest.py
+"""stage_15_a_randomize_manifest.py
 
 Goal
 ----
@@ -23,7 +23,7 @@ Key design choices
 
 Usage
 -----
-i:\\Whisper-training-env\\Scripts\\python.exe i:\\whisper-acft\\stage_11_a_randomize_manifest.py `
+i:\\Whisper-training-env\\Scripts\\python.exe i:\\whisper-acft\\stage_15_a_randomize_manifest.py `
   --input_manifest "I:\\Record_chunks\\pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered.jsonl" `
   --output_manifest "I:\\Record_chunks\\pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized.jsonl" `
   --seed 1337

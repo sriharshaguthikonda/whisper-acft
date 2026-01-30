@@ -16,7 +16,7 @@
 
 #!pip -q install -U "transformers>=4.38" datasets accelerate soundfile tqdm
 
-import os, json, time, shutil, hashlib, gc, math, winsound, sys, atexit
+import os, json, time, shutil, hashlib, gc, math, winsound, sys, atexit, tempfile
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -34,15 +34,137 @@ from transformers import (
     GenerationConfig,
 )
 
+# =============================
+# PATCH 1) Durable IO + keys
+# =============================
+
+def canonical_audio_key(p: str) -> str:
+    """Stable key across Windows path casing and slash variants."""
+    if not p:
+        return ""
+    p = os.path.normpath(p)
+    p = p.replace("\\", "/").lower()
+    return p
+
+
+def read_jsonl(path: str):
+    """Tolerant JSONL reader (skips partial/corrupt lines instead of blowing up)."""
+    rows = []
+    if not os.path.exists(path):
+        return rows
+    with open(path, "r", encoding="utf-8", errors="replace") as f:
+        for ln, line in enumerate(f, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                rows.append(json.loads(line))
+            except json.JSONDecodeError:
+                print(f"[warn] bad jsonl line {ln} in {path}; skipping")
+    return rows
+
+
+def append_jsonl(path: str, rows):
+    """Append JSONL with flush+fsync so crashes don't lose buffered data."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8", errors="replace", buffering=1) as f:
+        for r in rows:
+            f.write(json.dumps(r, ensure_ascii=False) + "\n")
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except Exception:
+            # Some filesystems may not support fsync well; flush still helps.
+            pass
+
+
+def atomic_write_json(path: str, obj):
+    """Atomic JSON write (write temp in same dir, then os.replace)."""
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    d = os.path.dirname(path)
+    fd, tmp = tempfile.mkstemp(prefix=".tmp_", suffix=".json", dir=d)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(obj, f, ensure_ascii=False, indent=2)
+            f.flush()
+            try:
+                os.fsync(f.fileno())
+            except Exception:
+                pass
+        os.replace(tmp, path)
+    finally:
+        try:
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception:
+            pass
+
 # ============================================
 # CELL 2/9 — Settings
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "I:/Record_chunks/pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized_train.jsonl"
+MANIFEST_PATH = "I:/Record_chunks/pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized_train_randomized.jsonl"
 TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage1.jsonl"
 
-CHECKPOINT_DIR = "i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_7"
+CHECKPOINT_DIR = "i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_8"
+
+# =============================
+# PATCH 2) Run state + pending epoch plan
+# =============================
+RUN_STATE_PATH = os.path.join(CHECKPOINT_DIR, "run_state.json")
+PENDING_PLAN_PATH = os.path.join(CHECKPOINT_DIR, "pending_epoch_plan.json")
+
+
+def manifest_signature(path: str) -> str:
+    st = os.stat(path)
+    return f"{os.path.abspath(path)}|{st.st_size}|{int(st.st_mtime)}"
+
+
+def load_run_state() -> dict:
+    if not os.path.exists(RUN_STATE_PATH):
+        return {}
+    try:
+        with open(RUN_STATE_PATH, "r", encoding="utf-8") as f:
+            return json.load(f) or {}
+    except Exception as e:
+        print("[warn] could not read run_state.json; ignoring:", repr(e))
+        return {}
+
+
+def save_run_state(state: dict):
+    state = dict(state)
+    state["updated_ts"] = time.time()
+    atomic_write_json(RUN_STATE_PATH, state)
+
+
+def load_pending_plan() -> dict | None:
+    if not os.path.exists(PENDING_PLAN_PATH):
+        return None
+    try:
+        with open(PENDING_PLAN_PATH, "r", encoding="utf-8") as f:
+            return json.load(f)
+    except Exception as e:
+        print("[warn] could not read pending plan; deleting:", repr(e))
+        try:
+            os.remove(PENDING_PLAN_PATH)
+        except Exception:
+            pass
+        return None
+
+
+def save_pending_plan(plan: dict):
+    plan = dict(plan)
+    plan["created_ts"] = time.time()
+    atomic_write_json(PENDING_PLAN_PATH, plan)
+
+
+def clear_pending_plan():
+    try:
+        if os.path.exists(PENDING_PLAN_PATH):
+            os.remove(PENDING_PLAN_PATH)
+    except Exception:
+        pass
 
 # ===== Console Logging Setup =====
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -159,7 +281,7 @@ N_SAMPLES_PER_EPOCH = 5016
 MAX_EPOCHS = 999999
 
 # --- Training knobs ---
-BATCH_SIZE = 16  # Reduced from 24 to prevent CUDA OOM
+BATCH_SIZE = 8  # Reduced from 24 to prevent CUDA OOM
 GRAD_ACCUM_STEPS = 4  # Increased from 2 to maintain effective batch size
 MIN_BATCH_SIZE = 4  # Minimum batch size for very large files
 MAX_BATCH_SIZE = 40  # Maximum batch size for small files
@@ -362,25 +484,6 @@ if USE_LOCAL_CACHE:
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
 
-def read_jsonl(path: str):
-    rows = []
-    if not os.path.exists(path):
-        return rows
-    with open(path, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if line:
-                rows.append(json.loads(line))
-    return rows
-
-
-def append_jsonl(path: str, rows):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        for r in rows:
-            f.write(json.dumps(r, ensure_ascii=False) + "\n")
-
-
 def stable_local_name(src_path: str) -> str:
     h = hashlib.sha1(src_path.encode("utf-8")).hexdigest()[:10]
     base = os.path.basename(src_path)
@@ -408,7 +511,14 @@ def cleanup_old_epoch_dirs(root: str, keep_last_k: int = 2):
 
 def load_trained_set(path: str) -> set:
     rows = read_jsonl(path)
-    return {r.get("audio_path") for r in rows if r.get("audio_path")}
+    out = set()
+    for r in rows:
+        key = (r.get("key") or r.get("uid") or "").strip()
+        if not key:
+            key = canonical_audio_key(r.get("audio_path"))
+        if key:
+            out.add(key)
+    return out
 
 
 # Load manifest (slim)
@@ -422,9 +532,13 @@ with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
         ap = obj.get("audio_path")
         if not ap:
             continue
+        uid = (obj.get("uid") or obj.get("id") or "").strip()
+        key = uid if uid else canonical_audio_key(ap)
         manifest_rows.append({
             "audio_path": ap,
             "raw_transcription": obj.get("raw_transcription", ""),
+            "uid": uid,
+            "key": key,
         })
 
 trained_set = load_trained_set(TRAINED_JSONL_PATH)
@@ -481,17 +595,21 @@ def select_epoch_rows(pointer: int, trained_set: set, need: int, manifest_rows: 
 
             ap = r.get("audio_path")
             txt = (r.get("raw_transcription") or "").strip()
+            
+            key = r.get("key") or canonical_audio_key(ap)
 
             if not ap:
                 continue
-            if ap in trained_set:
+            if key in trained_set:
                 stats["trained_skipped"] += 1
+                continue
+            if not txt:
                 continue
             if not os.path.exists(ap):
                 stats["missing"] += 1
                 continue
 
-            block.append({"audio_path": ap, "raw_transcription": txt})
+            block.append({"audio_path": ap, "raw_transcription": txt, "key": key})
 
         if not block:
             continue
@@ -538,7 +656,8 @@ def prepare_epoch_cache(pointer: int, trained_set: set, need: int, manifest_rows
 
         if not ap:
             continue
-        if ap in trained_set:
+        key = r.get("key") or canonical_audio_key(ap)
+        if key in trained_set:
             continue
         if not txt:
             continue
@@ -548,7 +667,7 @@ def prepare_epoch_cache(pointer: int, trained_set: set, need: int, manifest_rows
         if VALIDATE_AUDIO_IN_SELECTOR and not audio_header_ok(ap):
             continue
 
-        candidates.append({"audio_path": ap, "raw_transcription": txt})
+        candidates.append({"audio_path": ap, "raw_transcription": txt, "key": key})
 
     def task(row):
         src = row["audio_path"]
@@ -638,6 +757,10 @@ def collate_batch(examples):
     meta_row_index = []
     meta_text = []
 
+    # PATCH 6: Track keys and audio used
+    keys_used = []
+    audio_used = []
+
     for ex in examples:
         txt = (ex.get("raw_transcription") or "").strip()
         if not txt:
@@ -671,10 +794,14 @@ def collate_batch(examples):
         texts.append(txt)
 
         meta_audio.append(ap)
-        meta_audio_orig.append(ex.get("audio_orig") or ap)
+        meta_audio_orig.append(ex.get("audio_path_orig") or ap)
         meta_uid.append(ex.get("uid"))
         meta_row_index.append(ex.get("_epoch_row_index"))
         meta_text.append(txt)
+
+        # PATCH 6: Track keys and audio used for each accepted sample
+        keys_used.append(ex.get("key") or canonical_audio_key(ex.get("audio_path_orig") or ap))
+        audio_used.append(ex.get("audio_path_orig") or ap)
 
     if not waveforms_30s:
         return None
@@ -713,6 +840,8 @@ def collate_batch(examples):
         "meta_uid": meta_uid,
         "meta_row_index": meta_row_index,
         "meta_text": meta_text,
+        "keys": keys_used,  # PATCH 6: Return keys used
+        "audio_used": audio_used,  # PATCH 6: Return audio paths used
     }
 
 
@@ -1200,16 +1329,13 @@ def build_loader_from_rows(rows_for_epoch):
         audio_paths = [r["audio_path"] for r in rows_for_epoch]
 
     slim = []
-    for _i, (ap, r) in enumerate(zip(audio_paths, rows_for_epoch)):
-        slim.append(
-            {
-                "audio": ap,  # path actually used to load audio
-                "audio_orig": r.get("audio_path"),  # original manifest path (even when using cache)
-                "uid": r.get("uid") or r.get("row_uid"),
-                "_epoch_row_index": int(_i),
-                "raw_transcription": r.get("raw_transcription", ""),
-            }
-        )
+    for ap_use, r in zip(audio_paths, rows_for_epoch):
+        slim.append({
+            "audio": ap_use,
+            "raw_transcription": r.get("raw_transcription", ""),
+            "audio_path_orig": r.get("audio_path"),
+            "key": r.get("key") or canonical_audio_key(r.get("audio_path")),
+        })
 
     ds = Dataset.from_list(slim)
 
@@ -1247,6 +1373,10 @@ def train_one_epoch(epoch_num: int, loader):
 
     # NEW: count *successful* micro-batches for grad accumulation
     accum_ok = 0
+    
+    # PATCH 7: Track trained keys for this epoch
+    trained_keys_epoch = set()
+    accum_keys = []
 
     pbar = tqdm(loader, desc=f"Epoch {epoch_num}")
 
@@ -1304,6 +1434,7 @@ def train_one_epoch(epoch_num: int, loader):
                 )
                 optimizer.zero_grad(set_to_none=True)
                 accum_ok = 0
+                accum_keys = []  # PATCH 7: Reset accum_keys when skipping batch
                 continue
 
             decoder_input_ids = shift_tokens_right(
@@ -1373,6 +1504,7 @@ def train_one_epoch(epoch_num: int, loader):
 
                     optimizer.zero_grad(set_to_none=True)
                     accum_ok = 0
+                    accum_keys = []  # PATCH 7: Reset accum_keys when skipping batch
                     continue
 
                 if CE_SPIKE_THRESHOLD is not None and float(loss_ce.item()) >= float(CE_SPIKE_THRESHOLD):
@@ -1423,6 +1555,7 @@ def train_one_epoch(epoch_num: int, loader):
                     print("Non-finite total loss. Skipping batch.")
                     optimizer.zero_grad(set_to_none=True)
                     accum_ok = 0
+                    accum_keys = []  # PATCH 7: Reset accum_keys when skipping batch
                     continue
 
             # Backward (can OOM) — keep inside try
@@ -1433,6 +1566,9 @@ def train_one_epoch(epoch_num: int, loader):
 
             accum_ok += 1
             did_opt_step = False
+            
+            # PATCH 7: Track keys from this batch for potential training
+            accum_keys.extend(batch.get("keys") or [])
 
             if accum_ok >= GRAD_ACCUM_STEPS:
                 if use_grad_scaler:
@@ -1449,6 +1585,10 @@ def train_one_epoch(epoch_num: int, loader):
                 optimizer.zero_grad(set_to_none=True)
                 accum_ok = 0
                 did_opt_step = True
+                
+                # PATCH 7: Update trained_keys_epoch with keys from this optimizer step
+                trained_keys_epoch.update(accum_keys)
+                accum_keys = []
 
                 if scheduler is not None:
                     scheduler.step()
@@ -1475,6 +1615,7 @@ def train_one_epoch(epoch_num: int, loader):
                 print(f"[mem] OOM -> skipping batch {batch_idx} | bs={bs} n_ctx={n_ctx} | {e}")
                 optimizer.zero_grad(set_to_none=True)
                 accum_ok = 0
+                accum_keys = []  # PATCH 7: Reset accum_keys when skipping batch
                 cleanup_memory(f"after OOM batch {batch_idx}")
                 continue
             raise
@@ -1512,7 +1653,7 @@ def train_one_epoch(epoch_num: int, loader):
                             pass
 
     cleanup_memory(f"end epoch {epoch_num}")
-    return running / max(1, steps)
+    return running / max(1, steps), trained_keys_epoch
 
 
 # ============================================
@@ -1552,17 +1693,33 @@ def cleanup_trained_drive_audio(drive_paths, mode: str, allowed_prefix: str, arc
     print(f"Drive cleanup done (mode={mode}). moved={moved}, deleted={deleted}, missing={missing}, skipped={skipped}")
 
 
-pointer = 0
-while pointer < len(manifest_rows) and manifest_rows[pointer]["audio_path"] in trained_set:
-    pointer += 1
+# PATCH 8: Pointer persistence with run state and manifest signature checking
+sig = manifest_signature(MANIFEST_PATH)
+run_state = load_run_state()
+
+if run_state.get("manifest_sig") and run_state.get("manifest_sig") != sig:
+    print("[warn] manifest changed since last run; resetting pointer/epoch and clearing pending plan")
+    run_state = {}
+    clear_pending_plan()
+
+pointer = int(run_state.get("pointer", 0) or 0)
+epoch = int(run_state.get("epoch", epoch_num_start) or epoch_num_start)
+
+# bump pointer forward if it lands on already-trained keys
+while pointer < len(manifest_rows):
+    k = manifest_rows[pointer].get("key") or canonical_audio_key(manifest_rows[pointer].get("audio_path"))
+    if k and k in trained_set:
+        pointer += 1
+        continue
+    break
+
+save_run_state({"manifest_sig": sig, "pointer": pointer, "epoch": epoch})
 
 if pointer >= len(manifest_rows):
     print("All files are trained.")
     raise SystemExit(0)
 
 print("Starting pointer:", pointer)
-
-epoch = epoch_num_start
 
 prefetch_exec = ThreadPoolExecutor(max_workers=max(1, int(PREFETCH_THREADS)))
 prefetch_future = None
@@ -1572,17 +1729,21 @@ try:
         if USE_LOCAL_CACHE:
             cleanup_old_epoch_dirs(LOCAL_EPOCH_CACHE_ROOT, keep_last_k=KEEP_LAST_LOCAL_EPOCH_DIRS)
 
-        if prefetch_future is not None and prefetch_future.done():
-            current_rows, new_pointer, meta = prefetch_future.result()
-            pointer = new_pointer
-            prefetch_future = None
-            print(f"\nEpoch {epoch} ready: kept={len(current_rows)} | {meta}")
+        # PATCH 8: Pending plan resume logic
+        pending = load_pending_plan()
+        if pending and pending.get("manifest_sig") == sig and int(pending.get("epoch", -1)) == int(epoch):
+            print(f"\n[resume] Using pending epoch plan for epoch {epoch} (pointer {pending.get('pointer_start')} -> {pending.get('pointer_end')})")
+            current_rows = pending.get("rows") or []
+            pointer_end = int(pending.get("pointer_end", pointer))
+            meta = pending.get("meta") or {}
         else:
+            pointer_start = int(pointer)
+            # your existing selection/caching code, BUT store the returned pointer separately:
             if USE_LOCAL_CACHE:
                 epoch_dir = os.path.join(LOCAL_EPOCH_CACHE_ROOT, f"epoch_{epoch:06d}")
                 print(f"\nPreparing epoch {epoch} cache -> {epoch_dir}")
-                current_rows, pointer, meta = prepare_epoch_cache(
-                    pointer=pointer,
+                current_rows, pointer_end, meta = prepare_epoch_cache(
+                    pointer=pointer_start,
                     trained_set=trained_set,
                     need=N_SAMPLES_PER_EPOCH,
                     manifest_rows=manifest_rows,
@@ -1591,50 +1752,68 @@ try:
                 print(f"Epoch {epoch} cache ready: kept={len(current_rows)} | {meta}")
             else:
                 print(f"\nSelecting epoch {epoch} rows (no cache) ...")
-                current_rows, pointer, meta = select_epoch_rows(
-                    pointer=pointer,
+                current_rows, pointer_end, meta = select_epoch_rows(
+                    pointer=pointer_start,
                     trained_set=trained_set,
                     need=N_SAMPLES_PER_EPOCH,
                     manifest_rows=manifest_rows,
                 )
                 print(f"Epoch {epoch} rows ready: kept={len(current_rows)} | {meta}")
+            save_pending_plan({
+                "manifest_sig": sig,
+                "epoch": int(epoch),
+                "pointer_start": int(pointer_start),
+                "pointer_end": int(pointer_end),
+                "rows": current_rows,
+                "meta": meta,
+            })
+
+        if prefetch_future is not None and prefetch_future.done():
+            prefetch_future.result()  # consume but ignore, we're using pending plan
+            prefetch_future = None
+        else:
+            if prefetch_future is None:
+                if USE_LOCAL_CACHE:
+                    next_epoch_dir = os.path.join(LOCAL_EPOCH_CACHE_ROOT, f"epoch_{(epoch+1):06d}")
+                    print(f"Prefetching epoch {epoch+1} (copy-cache) -> {next_epoch_dir}")
+                    prefetch_future = prefetch_exec.submit(
+                        prepare_epoch_cache,
+                        pointer_end,  # Use pointer_end for next epoch
+                        trained_set,
+                        N_SAMPLES_PER_EPOCH,
+                        manifest_rows,
+                        next_epoch_dir,
+                    )
+                else:
+                    print(f"Prefetching epoch {epoch+1} (no cache) ...")
+                    prefetch_future = prefetch_exec.submit(
+                        select_epoch_rows,
+                        pointer_end,  # Use pointer_end for next epoch
+                        trained_set,
+                        N_SAMPLES_PER_EPOCH,
+                        manifest_rows,
+                    )
 
         if not current_rows:
             print("No more usable samples. Stopping.")
             break
 
-        if prefetch_future is None:
-            if USE_LOCAL_CACHE:
-                next_epoch_dir = os.path.join(LOCAL_EPOCH_CACHE_ROOT, f"epoch_{(epoch+1):06d}")
-                print(f"Prefetching epoch {epoch+1} (copy-cache) -> {next_epoch_dir}")
-                prefetch_future = prefetch_exec.submit(
-                    prepare_epoch_cache,
-                    pointer,
-                    trained_set,
-                    N_SAMPLES_PER_EPOCH,
-                    manifest_rows,
-                    next_epoch_dir,
-                )
-            else:
-                print(f"Prefetching epoch {epoch+1} (no cache) ...")
-                prefetch_future = prefetch_exec.submit(
-                    select_epoch_rows,
-                    pointer,
-                    trained_set,
-                    N_SAMPLES_PER_EPOCH,
-                    manifest_rows,
-                )
-
         loader = build_loader_from_rows(current_rows)
-        avg_loss = train_one_epoch(epoch, loader)
+        avg_loss, trained_keys_epoch = train_one_epoch(epoch, loader)
         print(f"Epoch {epoch} avg loss: {avg_loss:.6f}")
 
-        trained_to_append = [{"audio_path": r["audio_path"]} for r in current_rows if r.get("audio_path")]
+        # PATCH 8: append only keys that actually contributed to optimiser steps
+        trained_to_append = [{"key": k, "epoch": int(epoch), "ts": time.time()} for k in sorted(trained_keys_epoch)]
         append_jsonl(TRAINED_JSONL_PATH, trained_to_append)
-        for r in trained_to_append:
-            trained_set.add(r["audio_path"])
+        trained_set.update(trained_keys_epoch)
 
-        save_checkpoint(epoch, subset_start_idx=-1, subset_count=len(current_rows))
+        save_checkpoint(epoch, subset_start_idx=-1, subset_count=len(trained_keys_epoch))
+
+        # PATCH 8: COMMIT pointer + advance epoch only after successful checkpoint + trained write
+        pointer = int(pointer_end)
+        clear_pending_plan()
+        epoch += 1
+        save_run_state({"manifest_sig": sig, "pointer": pointer, "epoch": epoch})
 
         if DELETE_TRAINED_FROM_DRIVE:
             drive_paths = [r.get("audio_path") for r in current_rows if r.get("audio_path")]
@@ -1643,8 +1822,6 @@ try:
         del loader
         del current_rows
         cleanup_memory(f"after epoch {epoch}")
-
-        epoch += 1
 
 finally:
     try:
@@ -1656,6 +1833,34 @@ finally:
             pass
 
 print("Done.")
+
+# =============================
+# OPTIONAL: one-off repair of trained_stage1.jsonl
+# =============================
+
+def repair_trained_jsonl(in_path: str, out_path: str):
+    """Deduplicate + convert older {audio_path: ...} lines into {key: ...} lines."""
+    rows = read_jsonl(in_path)
+    seen = set()
+    fixed = []
+    for r in rows:
+        key = (r.get("key") or r.get("uid") or "").strip()
+        if not key:
+            key = canonical_audio_key(r.get("audio_path"))
+        if not key or key in seen:
+            continue
+        seen.add(key)
+        fixed.append({"key": key, "epoch": r.get("epoch"), "ts": r.get("ts")})
+
+    append_jsonl(out_path, fixed)
+    print(f"Wrote {len(fixed)} unique trained keys -> {out_path}")
+
+
+# Usage (Windows paths example):
+# repair_trained_jsonl(
+#   in_path="i:/Record_chunks/trained_stage1.jsonl",
+#   out_path="i:/Record_chunks/trained_stage1_repaired.jsonl",
+# )
 beep_notification(1000, 500)
 time.sleep(0.1)
 beep_notification(1200, 500)
