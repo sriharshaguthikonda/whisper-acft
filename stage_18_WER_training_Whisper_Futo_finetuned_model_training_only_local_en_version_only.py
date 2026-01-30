@@ -43,13 +43,18 @@ MANIFEST_PATH = "I:/Record_chunks/pairs_pending_stereo_english_only_filtered_wit
 TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage1.jsonl"
 
 CHECKPOINT_DIR = "i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_7"
-FAILED_JSONL_PATH = os.path.join(CHECKPOINT_DIR, "failed_train_rows.jsonl")
-EPOCH_SUBSET_DIR = os.path.join(CHECKPOINT_DIR, "epoch_subsets")
-os.makedirs(EPOCH_SUBSET_DIR, exist_ok=True)
 
 # ===== Console Logging Setup =====
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 LOG_PATH = os.path.join(CHECKPOINT_DIR, "console.log")
+
+# ===== Debug: pinpoint which file causes non-finite / bad CE loss =====
+DEBUG_NONFINITE_CE = True
+NONFINITE_CE_LOG_JSONL = os.path.join(CHECKPOINT_DIR, "debug_nonfinite_ce.jsonl")
+NONFINITE_CE_TOPK = 5              # how many worst samples to log per bad batch
+NONFINITE_CE_SAVE_TENSORS = False  # set True to also dump a .pt with tensors (can get big)
+NONFINITE_CE_TENSOR_DIR = os.path.join(CHECKPOINT_DIR, "debug_tensors")
+CE_SPIKE_THRESHOLD = None          # e.g. 50.0 to log extreme-but-finite CE spikes
 
 
 class _Tee:
@@ -376,29 +381,6 @@ def append_jsonl(path: str, rows):
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
 
 
-def save_epoch_subset(epoch_num: int, rows_for_epoch):
-    """Persist the exact subset selected for this epoch so restart uses same rows."""
-    p = os.path.join(EPOCH_SUBSET_DIR, f"epoch_{epoch_num:06d}.jsonl")
-    if os.path.exists(p):
-        return p
-    append_jsonl(p, rows_for_epoch)
-    return p
-
-
-def load_epoch_subset(epoch_num: int):
-    p = os.path.join(EPOCH_SUBSET_DIR, f"epoch_{epoch_num:06d}.jsonl")
-    if not os.path.exists(p):
-        return None
-    out = []
-    with open(p, "r", encoding="utf-8") as f:
-        for line in f:
-            line = line.strip()
-            if not line:
-                continue
-            out.append(json.loads(line))
-    return out
-
-
 def stable_local_name(src_path: str) -> str:
     h = hashlib.sha1(src_path.encode("utf-8")).hexdigest()[:10]
     base = os.path.basename(src_path)
@@ -648,55 +630,60 @@ def collate_batch(examples):
     waveforms_30s = []
     lengths_sec = []
     texts = []
-    audio_paths = []
+
+    # Keep meta so we can pinpoint the exact file when CE loss blows up.
+    meta_audio = []
+    meta_audio_orig = []
+    meta_uid = []
+    meta_row_index = []
+    meta_text = []
 
     for ex in examples:
         txt = (ex.get("raw_transcription") or "").strip()
-        if txt is None or not str(txt).strip():
+        if not txt:
             continue
 
         ap = ex.get("audio")
         if not ap:
             continue
-        
-        audio_paths.append(ap)
 
         wav, sr = decode_mono_16k(ap)
         if wav is None:
             continue
-        
-        # Sanitise waveforms (NaN/inf can produce NaNs downstream)
-        wav = np.nan_to_num(wav, nan=0.0, posinf=0.0, neginf=0.0)
-        # Hard clamp just in case augmentation produced crazy values
-        wav = np.clip(wav, -1.0, 1.0)
 
         dur = float(wav.shape[0]) / float(sr)
         if dur > MAX_AUDIO_SECONDS:
             continue
 
+        w30 = pad_or_trim_to_30s(wav)
+        if not np.isfinite(w30).all():
+            # decode_mono_16k already nan_to_num()s, so this should be rare.
+            print(f"BAD AUDIO (non-finite) at: {ap}")
+            print(f"  - Audio shape: {w30.shape}")
+            print(f"  - Contains NaN: {np.isnan(w30).any()}")
+            print(f"  - Contains Inf: {np.isinf(w30).any()}")
+            print(f"  - Min/Max values: [{np.nanmin(w30):.6f}, {np.nanmax(w30):.6f}]")
+            print(f"  - Text: '{txt[:100]}...'")
+            continue
+
         lengths_sec.append(dur)
-        waveforms_30s.append(pad_or_trim_to_30s(wav))
+        waveforms_30s.append(w30)
         texts.append(txt)
+
+        meta_audio.append(ap)
+        meta_audio_orig.append(ex.get("audio_orig") or ap)
+        meta_uid.append(ex.get("uid"))
+        meta_row_index.append(ex.get("_epoch_row_index"))
+        meta_text.append(txt)
 
     if not waveforms_30s:
         return None
 
-    for i, w in enumerate(waveforms_30s):
-        if not np.isfinite(w).all():
-            audio_path = examples[i].get("audio", "unknown")
-            print(f"BAD AUDIO (non-finite) at: {audio_path}")
-            print(f"  - Audio shape: {w.shape}")
-            print(f"  - Contains NaN: {np.isnan(w).any()}")
-            print(f"  - Contains Inf: {np.isinf(w).any()}")
-            print(f"  - Min/Max values: [{np.nanmin(w):.6f}, {np.nanmax(w):.6f}]")
-            print(f"  - Text: '{examples[i].get('raw_transcription', '')[:100]}...'")
-            return None
 
     feats = processor.feature_extractor(
         waveforms_30s,
         sampling_rate=TARGET_SR,
         return_tensors="pt",
-        device="cpu",  # <-- force CPU in workers
     )
 
     if feats.input_features.shape[-1] != NB_MAX_FRAMES:
@@ -721,8 +708,209 @@ def collate_batch(examples):
         "input_features": feats.input_features,
         "labels": labels,
         "attention_mask": tok["attention_mask"],
-        "audio_paths": audio_paths,
+        "meta_audio": meta_audio,
+        "meta_audio_orig": meta_audio_orig,
+        "meta_uid": meta_uid,
+        "meta_row_index": meta_row_index,
+        "meta_text": meta_text,
     }
+
+
+# ============================================
+# Debug helpers: log the exact sample(s) behind NaN/Inf CE loss
+# ============================================
+
+def _safe_snip(s, max_len: int = 180) -> str:
+    if s is None:
+        return ""
+    s = str(s).replace("\r", " ").replace("\n", " ")
+    return s[:max_len]
+
+
+def _append_jsonl_line(path: str, obj: dict):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "a", encoding="utf-8", errors="replace") as f:
+        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+
+
+def _tensor_stats(x: torch.Tensor) -> dict:
+    # Safe summary that won't crash on NaNs/Infs
+    try:
+        xf = torch.nan_to_num(x.detach().float(), nan=0.0, posinf=0.0, neginf=0.0)
+        return {
+            "shape": list(x.shape),
+            "dtype": str(x.dtype),
+            "min": float(xf.min().item()),
+            "max": float(xf.max().item()),
+            "mean": float(xf.mean().item()),
+        }
+    except Exception:
+        return {"shape": list(getattr(x, "shape", [])), "dtype": str(getattr(x, "dtype", ""))}
+
+
+def diagnose_nonfinite_ce_samples(
+    logits: torch.Tensor,
+    labels: torch.Tensor,
+    meta_audio: list,
+    meta_audio_orig: list,
+    meta_text: list,
+    meta_uid: list,
+    meta_row_index: list,
+    topk: int = 5,
+):
+    """Return top-k suspicious samples (per-sample CE, NaN flags, invalid labels, etc.)."""
+    out = []
+    if logits is None or labels is None:
+        return out
+
+    with torch.no_grad():
+        bs, t, v = logits.shape
+        logits_det = logits.detach()
+        labels_det = labels.detach()
+
+        # Flags
+        nonfinite_logits = (~torch.isfinite(logits_det)).any(dim=(1, 2))
+        invalid_labels = ((labels_det != -100) & ((labels_det < 0) | (labels_det >= v))).any(dim=1)
+        empty_labels = (labels_det != -100).sum(dim=1) == 0
+
+        # Per-sample CE (float32, reduction=mean)
+        losses = torch.full((bs,), float("nan"), device=logits_det.device, dtype=torch.float32)
+        for i in range(bs):
+            if bool(invalid_labels[i]) or bool(empty_labels[i]):
+                continue
+            m = labels_det[i] != -100
+            if not bool(m.any()):
+                continue
+            li = logits_det[i, m].float()
+            ti = labels_det[i, m]
+            try:
+                losses[i] = F.cross_entropy(li, ti, reduction="mean")
+            except Exception:
+                # leave as NaN
+                pass
+
+        losses_cpu = losses.detach().float().cpu().numpy()
+
+        def sort_key(i: int):
+            li = losses_cpu[i]
+            bad = bool(nonfinite_logits[i]) or bool(invalid_labels[i]) or bool(empty_labels[i]) or (not np.isfinite(li))
+            # bad first; then NaN; then Inf; then largest finite
+            return (
+                0 if bad else 1,
+                0 if np.isnan(li) else 1,
+                0 if np.isinf(li) else 1,
+                -(li if np.isfinite(li) else 0.0),
+            )
+
+        idxs = list(range(bs))
+        idxs.sort(key=sort_key)
+
+        take = idxs[: max(1, int(topk))]
+        for i in take:
+            li = float(losses_cpu[i]) if np.isfinite(losses_cpu[i]) else None
+            # logits range for that sample (safe)
+            try:
+                lf = torch.nan_to_num(logits_det[i].float(), nan=0.0, posinf=0.0, neginf=0.0)
+                lmin = float(lf.min().item())
+                lmax = float(lf.max().item())
+            except Exception:
+                lmin = lmax = None
+
+            out.append(
+                {
+                    "i": int(i),
+                    "audio": meta_audio[i] if i < len(meta_audio) else None,
+                    "audio_orig": meta_audio_orig[i] if i < len(meta_audio_orig) else None,
+                    "uid": meta_uid[i] if i < len(meta_uid) else None,
+                    "epoch_row_index": meta_row_index[i] if i < len(meta_row_index) else None,
+                    "text": _safe_snip(meta_text[i] if i < len(meta_text) else "", 220),
+                    "token_count": int((labels_det[i] != -100).sum().item()),
+                    "nonfinite_logits": bool(nonfinite_logits[i].item()),
+                    "invalid_labels": bool(invalid_labels[i].item()),
+                    "empty_labels": bool(empty_labels[i].item()),
+                    "ce": li,
+                    "logits_min": lmin,
+                    "logits_max": lmax,
+                }
+            )
+    return out
+
+
+def log_nonfinite_ce_batch(
+    *,
+    kind: str,
+    epoch_num: int,
+    batch_idx: int,
+    global_step: int,
+    n_ctx: int | None,
+    lr: float | None,
+    meta_audio: list,
+    meta_audio_orig: list,
+    meta_text: list,
+    meta_uid: list,
+    meta_row_index: list,
+    lengths: torch.Tensor | None,
+    labels: torch.Tensor | None,
+    attn_mask: torch.Tensor | None,
+    logits: torch.Tensor | None,
+    loss_ce: torch.Tensor | None,
+    extra: dict | None = None,
+):
+    if not DEBUG_NONFINITE_CE:
+        return
+
+    rec = {
+        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "kind": kind,
+        "epoch": int(epoch_num),
+        "batch_idx": int(batch_idx),
+        "global_step": int(global_step),
+        "n_ctx": int(n_ctx) if n_ctx is not None else None,
+        "lr": float(lr) if lr is not None else None,
+        "loss_ce": (float(loss_ce.item()) if (loss_ce is not None and torch.isfinite(loss_ce)) else None),
+        "lengths_stats": _tensor_stats(lengths) if lengths is not None else None,
+        "labels_stats": _tensor_stats(labels) if labels is not None else None,
+        "attn_mask_stats": _tensor_stats(attn_mask) if attn_mask is not None else None,
+        "logits_stats": _tensor_stats(logits) if logits is not None else None,
+        "top_samples": diagnose_nonfinite_ce_samples(
+            logits, labels, meta_audio, meta_audio_orig, meta_text, meta_uid, meta_row_index, topk=NONFINITE_CE_TOPK
+        )
+        if logits is not None and labels is not None
+        else [],
+        "extra": extra or {},
+    }
+
+    _append_jsonl_line(NONFINITE_CE_LOG_JSONL, rec)
+
+    if NONFINITE_CE_SAVE_TENSORS and logits is not None and labels is not None:
+        os.makedirs(NONFINITE_CE_TENSOR_DIR, exist_ok=True)
+        pt_path = os.path.join(
+            NONFINITE_CE_TENSOR_DIR,
+            f"bad_{kind}_e{epoch_num:06d}_b{batch_idx:06d}_gs{global_step:09d}.pt",
+        )
+        try:
+            torch.save(
+                {
+                    "epoch": int(epoch_num),
+                    "batch_idx": int(batch_idx),
+                    "global_step": int(global_step),
+                    "n_ctx": int(n_ctx) if n_ctx is not None else None,
+                    "lr": float(lr) if lr is not None else None,
+                    "meta_audio": meta_audio,
+                    "meta_audio_orig": meta_audio_orig,
+                    "meta_uid": meta_uid,
+                    "meta_row_index": meta_row_index,
+                    "meta_text": meta_text,
+                    "lengths": lengths.detach().cpu() if lengths is not None else None,
+                    "labels": labels.detach().cpu(),
+                    "attn_mask": attn_mask.detach().cpu() if attn_mask is not None else None,
+                    "logits": logits.detach().cpu(),
+                },
+                pt_path,
+            )
+            print(f"[debug] saved bad batch tensors -> {pt_path}")
+        except Exception as e:
+            print(f"[debug] FAILED to save tensors: {e}")
 
 
 # ============================================
@@ -773,12 +961,6 @@ def load_student_from_checkpoint_or_base(model_dir: str | None):
 
 
 latest_ckpt_epoch, latest_model_dir, latest_state_path = find_latest_checkpoint_epoch(CHECKPOINT_DIR)
-if latest_ckpt_epoch is not None:
-    # If model exists but matching state file does not, don't load optimizer/scaler/scheduler
-    expected_state = os.path.join(CHECKPOINT_DIR, f"training_state_epoch_{latest_ckpt_epoch:06d}.pt")
-    if not os.path.exists(expected_state):
-        print(f"[warn] Missing state for latest model epoch {latest_ckpt_epoch}. Will NOT resume optimizer/scaler.")
-        latest_state_path = None
 latest_state = None
 if latest_state_path:
     try:
@@ -1017,18 +1199,27 @@ def build_loader_from_rows(rows_for_epoch):
     else:
         audio_paths = [r["audio_path"] for r in rows_for_epoch]
 
-    slim = [{"audio": ap, "raw_transcription": r.get("raw_transcription", "")} for ap, r in zip(audio_paths, rows_for_epoch)]
+    slim = []
+    for _i, (ap, r) in enumerate(zip(audio_paths, rows_for_epoch)):
+        slim.append(
+            {
+                "audio": ap,  # path actually used to load audio
+                "audio_orig": r.get("audio_path"),  # original manifest path (even when using cache)
+                "uid": r.get("uid") or r.get("row_uid"),
+                "_epoch_row_index": int(_i),
+                "raw_transcription": r.get("raw_transcription", ""),
+            }
+        )
 
     ds = Dataset.from_list(slim)
 
     loader = DataLoader(
         ds,
         batch_size=BATCH_SIZE,
-        shuffle=False,
+        shuffle=True,
         collate_fn=collate_batch,
         num_workers=NUM_WORKERS,
         pin_memory=(device == "cuda"),
-        persistent_workers=False,
     )
 
     return loader
@@ -1056,20 +1247,12 @@ def train_one_epoch(epoch_num: int, loader):
 
     # NEW: count *successful* micro-batches for grad accumulation
     accum_ok = 0
-    
-    # NEW: track successful and failed paths
-    ok_paths = set()
-    failed_paths = []
-    pending_paths = []  # holds paths for the current grad-accum window
 
     pbar = tqdm(loader, desc=f"Epoch {epoch_num}")
 
     for batch_idx, batch in enumerate(pbar):
         if batch is None:
             continue
-        
-        # Get paths early
-        batch_paths = batch.get("audio_paths", [])
 
         # Optional: do a LIGHT cleanup now and then (does NOT skip)
         if (batch_idx + 1) % CLEANUP_EVERY_N_STEPS == 0:
@@ -1080,6 +1263,13 @@ def train_one_epoch(epoch_num: int, loader):
         bs = None
 
         try:
+            # Meta (kept on CPU; used only for debugging/logging)
+            meta_audio = batch.get("meta_audio", [])
+            meta_audio_orig = batch.get("meta_audio_orig", meta_audio)
+            meta_text = batch.get("meta_text", [])
+            meta_uid = batch.get("meta_uid", [])
+            meta_row_index = batch.get("meta_row_index", [])
+
             input_features = batch["input_features"].to(device, non_blocking=True)
             lengths = batch["lengths"].to(device, non_blocking=True)
             labels = batch["labels"].to(device, non_blocking=True)
@@ -1092,8 +1282,26 @@ def train_one_epoch(epoch_num: int, loader):
 
             if not torch.isfinite(input_features).all():
                 print("BAD FEATURES (non-finite). Skipping batch.")
-                failed_paths.extend(batch_paths)
-                pending_paths.clear()
+                cur_lr = float(optimizer.param_groups[0]["lr"])
+                log_nonfinite_ce_batch(
+                    kind="bad_features",
+                    epoch_num=epoch_num,
+                    batch_idx=batch_idx,
+                    global_step=global_step,
+                    n_ctx=n_ctx,
+                    lr=cur_lr,
+                    meta_audio=meta_audio,
+                    meta_audio_orig=meta_audio_orig,
+                    meta_text=meta_text,
+                    meta_uid=meta_uid,
+                    meta_row_index=meta_row_index,
+                    lengths=lengths,
+                    labels=labels,
+                    attn_mask=attn_mask,
+                    logits=None,
+                    loss_ce=None,
+                    extra={"reason": "input_features contains NaN/Inf"},
+                )
                 optimizer.zero_grad(set_to_none=True)
                 accum_ok = 0
                 continue
@@ -1127,12 +1335,67 @@ def train_one_epoch(epoch_num: int, loader):
                 )
 
                 if not torch.isfinite(loss_ce):
-                    print("Non-finite CE loss. Skipping batch.")
-                    failed_paths.extend(batch_paths)
-                    pending_paths.clear()
+                    print("Non-finite CE loss. Logging + skipping batch.")
+                    cur_lr = float(optimizer.param_groups[0]["lr"])
+                    log_nonfinite_ce_batch(
+                        kind="nonfinite_ce",
+                        epoch_num=epoch_num,
+                        batch_idx=batch_idx,
+                        global_step=global_step,
+                        n_ctx=n_ctx,
+                        lr=cur_lr,
+                        meta_audio=meta_audio,
+                        meta_audio_orig=meta_audio_orig,
+                        meta_text=meta_text,
+                        meta_uid=meta_uid,
+                        meta_row_index=meta_row_index,
+                        lengths=lengths,
+                        labels=labels,
+                        attn_mask=attn_mask,
+                        logits=logits,
+                        loss_ce=loss_ce,
+                        extra={"reason": "CE is NaN/Inf"},
+                    )
+                    # Print the top suspects immediately to console (so you don't have to open the jsonl).
+                    try:
+                        suspects = diagnose_nonfinite_ce_samples(
+                            logits, labels, meta_audio, meta_audio_orig, meta_text, meta_uid, meta_row_index, topk=NONFINITE_CE_TOPK
+                        )
+                        if suspects:
+                            print("[debug] Top suspect samples:")
+                            for s in suspects:
+                                print(
+                                    f"  - ce={s.get('ce')} | nonfinite_logits={s.get('nonfinite_logits')} | invalid_labels={s.get('invalid_labels')} | "
+                                    f"audio={s.get('audio_orig') or s.get('audio')} | uid={s.get('uid')} | text='{_safe_snip(s.get('text'), 120)}'"
+                                )
+                    except Exception as _e:
+                        print("[debug] Failed to compute suspects:", _e)
+
                     optimizer.zero_grad(set_to_none=True)
                     accum_ok = 0
                     continue
+
+                if CE_SPIKE_THRESHOLD is not None and float(loss_ce.item()) >= float(CE_SPIKE_THRESHOLD):
+                    cur_lr = float(optimizer.param_groups[0]["lr"])
+                    log_nonfinite_ce_batch(
+                        kind="ce_spike",
+                        epoch_num=epoch_num,
+                        batch_idx=batch_idx,
+                        global_step=global_step,
+                        n_ctx=n_ctx,
+                        lr=cur_lr,
+                        meta_audio=meta_audio,
+                        meta_audio_orig=meta_audio_orig,
+                        meta_text=meta_text,
+                        meta_uid=meta_uid,
+                        meta_row_index=meta_row_index,
+                        lengths=lengths,
+                        labels=labels,
+                        attn_mask=attn_mask,
+                        logits=logits,
+                        loss_ce=loss_ce,
+                        extra={"reason": "CE spike", "threshold": float(CE_SPIKE_THRESHOLD)},
+                    )
 
                 if want_acft:
                     with torch.no_grad():
@@ -1158,8 +1421,6 @@ def train_one_epoch(epoch_num: int, loader):
 
                 if not torch.isfinite(loss):
                     print("Non-finite total loss. Skipping batch.")
-                    failed_paths.extend(batch_paths)
-                    pending_paths.clear()
                     optimizer.zero_grad(set_to_none=True)
                     accum_ok = 0
                     continue
@@ -1172,9 +1433,6 @@ def train_one_epoch(epoch_num: int, loader):
 
             accum_ok += 1
             did_opt_step = False
-            
-            # Add batch paths to pending after successful backward
-            pending_paths.extend(batch_paths)
 
             if accum_ok >= GRAD_ACCUM_STEPS:
                 if use_grad_scaler:
@@ -1191,10 +1449,6 @@ def train_one_epoch(epoch_num: int, loader):
                 optimizer.zero_grad(set_to_none=True)
                 accum_ok = 0
                 did_opt_step = True
-                
-                # Commit pending paths as successfully trained
-                ok_paths.update(pending_paths)
-                pending_paths.clear()
 
                 if scheduler is not None:
                     scheduler.step()
@@ -1219,8 +1473,6 @@ def train_one_epoch(epoch_num: int, loader):
         except Exception as e:
             if _is_oom(e):
                 print(f"[mem] OOM -> skipping batch {batch_idx} | bs={bs} n_ctx={n_ctx} | {e}")
-                failed_paths.extend(batch_paths)
-                pending_paths.clear()
                 optimizer.zero_grad(set_to_none=True)
                 accum_ok = 0
                 cleanup_memory(f"after OOM batch {batch_idx}")
@@ -1260,7 +1512,7 @@ def train_one_epoch(epoch_num: int, loader):
                             pass
 
     cleanup_memory(f"end epoch {epoch_num}")
-    return running / max(1, steps), ok_paths, failed_paths
+    return running / max(1, steps)
 
 
 # ============================================
@@ -1339,23 +1591,12 @@ try:
                 print(f"Epoch {epoch} cache ready: kept={len(current_rows)} | {meta}")
             else:
                 print(f"\nSelecting epoch {epoch} rows (no cache) ...")
-                # If we already picked this epoch subset before (previous run), reuse it.
-                reused = load_epoch_subset(epoch)
-                if reused is not None and len(reused) > 0:
-                    current_rows = reused
-                    print(f"Reusing saved epoch {epoch} subset: {len(current_rows)} rows")
-                else:
-                    current_rows, pointer, meta = select_epoch_rows(
-                        pointer=pointer,
-                        trained_set=trained_set,
-                        need=N_SAMPLES_PER_EPOCH,
-                        manifest_rows=manifest_rows,
-                    )
-                    # Deterministic shuffle (so restart keeps same order)
-                    import random
-                    rng = random.Random(1337 + epoch)
-                    rng.shuffle(current_rows)
-                    save_epoch_subset(epoch, current_rows)
+                current_rows, pointer, meta = select_epoch_rows(
+                    pointer=pointer,
+                    trained_set=trained_set,
+                    need=N_SAMPLES_PER_EPOCH,
+                    manifest_rows=manifest_rows,
+                )
                 print(f"Epoch {epoch} rows ready: kept={len(current_rows)} | {meta}")
 
         if not current_rows:
@@ -1385,17 +1626,13 @@ try:
                 )
 
         loader = build_loader_from_rows(current_rows)
-        avg_loss, ok_paths, failed_paths = train_one_epoch(epoch, loader)
+        avg_loss = train_one_epoch(epoch, loader)
         print(f"Epoch {epoch} avg loss: {avg_loss:.6f}")
 
-        trained_to_append = [{"audio_path": p, "epoch": epoch} for p in sorted(ok_paths)]
+        trained_to_append = [{"audio_path": r["audio_path"]} for r in current_rows if r.get("audio_path")]
         append_jsonl(TRAINED_JSONL_PATH, trained_to_append)
         for r in trained_to_append:
             trained_set.add(r["audio_path"])
-        
-        if failed_paths:
-            append_jsonl(FAILED_JSONL_PATH, [{"audio_path": p, "epoch": epoch} for p in failed_paths])
-            print(f"[warn] epoch {epoch} failed batches: {len(failed_paths)} (not marked trained)")
 
         save_checkpoint(epoch, subset_start_idx=-1, subset_count=len(current_rows))
 
@@ -1418,10 +1655,7 @@ finally:
         except Exception:
             pass
 
-try:
-    import winsound
-    winsound.Beep(1200, 250)
-except Exception:
-    pass
-
 print("Done.")
+beep_notification(1000, 500)
+time.sleep(0.1)
+beep_notification(1200, 500)
