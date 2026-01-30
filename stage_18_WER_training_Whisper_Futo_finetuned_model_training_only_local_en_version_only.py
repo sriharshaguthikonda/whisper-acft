@@ -43,6 +43,9 @@ MANIFEST_PATH = "I:/Record_chunks/pairs_pending_stereo_english_only_filtered_wit
 TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage1.jsonl"
 
 CHECKPOINT_DIR = "i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_7"
+FAILED_JSONL_PATH = os.path.join(CHECKPOINT_DIR, "failed_train_rows.jsonl")
+EPOCH_SUBSET_DIR = os.path.join(CHECKPOINT_DIR, "epoch_subsets")
+os.makedirs(EPOCH_SUBSET_DIR, exist_ok=True)
 
 # ===== Console Logging Setup =====
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
@@ -151,7 +154,7 @@ N_SAMPLES_PER_EPOCH = 5016
 MAX_EPOCHS = 999999
 
 # --- Training knobs ---
-BATCH_SIZE = 24  # Reduced from 24 to prevent CUDA OOM
+BATCH_SIZE = 16  # Reduced from 24 to prevent CUDA OOM
 GRAD_ACCUM_STEPS = 4  # Increased from 2 to maintain effective batch size
 MIN_BATCH_SIZE = 4  # Minimum batch size for very large files
 MAX_BATCH_SIZE = 40  # Maximum batch size for small files
@@ -371,6 +374,29 @@ def append_jsonl(path: str, rows):
     with open(path, "a", encoding="utf-8") as f:
         for r in rows:
             f.write(json.dumps(r, ensure_ascii=False) + "\n")
+
+
+def save_epoch_subset(epoch_num: int, rows_for_epoch):
+    """Persist the exact subset selected for this epoch so restart uses same rows."""
+    p = os.path.join(EPOCH_SUBSET_DIR, f"epoch_{epoch_num:06d}.jsonl")
+    if os.path.exists(p):
+        return p
+    append_jsonl(p, rows_for_epoch)
+    return p
+
+
+def load_epoch_subset(epoch_num: int):
+    p = os.path.join(EPOCH_SUBSET_DIR, f"epoch_{epoch_num:06d}.jsonl")
+    if not os.path.exists(p):
+        return None
+    out = []
+    with open(p, "r", encoding="utf-8") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            out.append(json.loads(line))
+    return out
 
 
 def stable_local_name(src_path: str) -> str:
@@ -622,19 +648,27 @@ def collate_batch(examples):
     waveforms_30s = []
     lengths_sec = []
     texts = []
+    audio_paths = []
 
     for ex in examples:
         txt = (ex.get("raw_transcription") or "").strip()
-        if not txt:
+        if txt is None or not str(txt).strip():
             continue
 
         ap = ex.get("audio")
         if not ap:
             continue
+        
+        audio_paths.append(ap)
 
         wav, sr = decode_mono_16k(ap)
         if wav is None:
             continue
+        
+        # Sanitise waveforms (NaN/inf can produce NaNs downstream)
+        wav = np.nan_to_num(wav, nan=0.0, posinf=0.0, neginf=0.0)
+        # Hard clamp just in case augmentation produced crazy values
+        wav = np.clip(wav, -1.0, 1.0)
 
         dur = float(wav.shape[0]) / float(sr)
         if dur > MAX_AUDIO_SECONDS:
@@ -662,6 +696,7 @@ def collate_batch(examples):
         waveforms_30s,
         sampling_rate=TARGET_SR,
         return_tensors="pt",
+        device="cpu",  # <-- force CPU in workers
     )
 
     if feats.input_features.shape[-1] != NB_MAX_FRAMES:
@@ -686,6 +721,7 @@ def collate_batch(examples):
         "input_features": feats.input_features,
         "labels": labels,
         "attention_mask": tok["attention_mask"],
+        "audio_paths": audio_paths,
     }
 
 
@@ -737,6 +773,12 @@ def load_student_from_checkpoint_or_base(model_dir: str | None):
 
 
 latest_ckpt_epoch, latest_model_dir, latest_state_path = find_latest_checkpoint_epoch(CHECKPOINT_DIR)
+if latest_ckpt_epoch is not None:
+    # If model exists but matching state file does not, don't load optimizer/scaler/scheduler
+    expected_state = os.path.join(CHECKPOINT_DIR, f"training_state_epoch_{latest_ckpt_epoch:06d}.pt")
+    if not os.path.exists(expected_state):
+        print(f"[warn] Missing state for latest model epoch {latest_ckpt_epoch}. Will NOT resume optimizer/scaler.")
+        latest_state_path = None
 latest_state = None
 if latest_state_path:
     try:
@@ -982,10 +1024,11 @@ def build_loader_from_rows(rows_for_epoch):
     loader = DataLoader(
         ds,
         batch_size=BATCH_SIZE,
-        shuffle=True,
+        shuffle=False,
         collate_fn=collate_batch,
         num_workers=NUM_WORKERS,
         pin_memory=(device == "cuda"),
+        persistent_workers=False,
     )
 
     return loader
@@ -1013,12 +1056,20 @@ def train_one_epoch(epoch_num: int, loader):
 
     # NEW: count *successful* micro-batches for grad accumulation
     accum_ok = 0
+    
+    # NEW: track successful and failed paths
+    ok_paths = set()
+    failed_paths = []
+    pending_paths = []  # holds paths for the current grad-accum window
 
     pbar = tqdm(loader, desc=f"Epoch {epoch_num}")
 
     for batch_idx, batch in enumerate(pbar):
         if batch is None:
             continue
+        
+        # Get paths early
+        batch_paths = batch.get("audio_paths", [])
 
         # Optional: do a LIGHT cleanup now and then (does NOT skip)
         if (batch_idx + 1) % CLEANUP_EVERY_N_STEPS == 0:
@@ -1041,6 +1092,8 @@ def train_one_epoch(epoch_num: int, loader):
 
             if not torch.isfinite(input_features).all():
                 print("BAD FEATURES (non-finite). Skipping batch.")
+                failed_paths.extend(batch_paths)
+                pending_paths.clear()
                 optimizer.zero_grad(set_to_none=True)
                 accum_ok = 0
                 continue
@@ -1075,6 +1128,8 @@ def train_one_epoch(epoch_num: int, loader):
 
                 if not torch.isfinite(loss_ce):
                     print("Non-finite CE loss. Skipping batch.")
+                    failed_paths.extend(batch_paths)
+                    pending_paths.clear()
                     optimizer.zero_grad(set_to_none=True)
                     accum_ok = 0
                     continue
@@ -1103,6 +1158,8 @@ def train_one_epoch(epoch_num: int, loader):
 
                 if not torch.isfinite(loss):
                     print("Non-finite total loss. Skipping batch.")
+                    failed_paths.extend(batch_paths)
+                    pending_paths.clear()
                     optimizer.zero_grad(set_to_none=True)
                     accum_ok = 0
                     continue
@@ -1115,6 +1172,9 @@ def train_one_epoch(epoch_num: int, loader):
 
             accum_ok += 1
             did_opt_step = False
+            
+            # Add batch paths to pending after successful backward
+            pending_paths.extend(batch_paths)
 
             if accum_ok >= GRAD_ACCUM_STEPS:
                 if use_grad_scaler:
@@ -1131,6 +1191,10 @@ def train_one_epoch(epoch_num: int, loader):
                 optimizer.zero_grad(set_to_none=True)
                 accum_ok = 0
                 did_opt_step = True
+                
+                # Commit pending paths as successfully trained
+                ok_paths.update(pending_paths)
+                pending_paths.clear()
 
                 if scheduler is not None:
                     scheduler.step()
@@ -1155,6 +1219,8 @@ def train_one_epoch(epoch_num: int, loader):
         except Exception as e:
             if _is_oom(e):
                 print(f"[mem] OOM -> skipping batch {batch_idx} | bs={bs} n_ctx={n_ctx} | {e}")
+                failed_paths.extend(batch_paths)
+                pending_paths.clear()
                 optimizer.zero_grad(set_to_none=True)
                 accum_ok = 0
                 cleanup_memory(f"after OOM batch {batch_idx}")
@@ -1194,7 +1260,7 @@ def train_one_epoch(epoch_num: int, loader):
                             pass
 
     cleanup_memory(f"end epoch {epoch_num}")
-    return running / max(1, steps)
+    return running / max(1, steps), ok_paths, failed_paths
 
 
 # ============================================
@@ -1273,12 +1339,23 @@ try:
                 print(f"Epoch {epoch} cache ready: kept={len(current_rows)} | {meta}")
             else:
                 print(f"\nSelecting epoch {epoch} rows (no cache) ...")
-                current_rows, pointer, meta = select_epoch_rows(
-                    pointer=pointer,
-                    trained_set=trained_set,
-                    need=N_SAMPLES_PER_EPOCH,
-                    manifest_rows=manifest_rows,
-                )
+                # If we already picked this epoch subset before (previous run), reuse it.
+                reused = load_epoch_subset(epoch)
+                if reused is not None and len(reused) > 0:
+                    current_rows = reused
+                    print(f"Reusing saved epoch {epoch} subset: {len(current_rows)} rows")
+                else:
+                    current_rows, pointer, meta = select_epoch_rows(
+                        pointer=pointer,
+                        trained_set=trained_set,
+                        need=N_SAMPLES_PER_EPOCH,
+                        manifest_rows=manifest_rows,
+                    )
+                    # Deterministic shuffle (so restart keeps same order)
+                    import random
+                    rng = random.Random(1337 + epoch)
+                    rng.shuffle(current_rows)
+                    save_epoch_subset(epoch, current_rows)
                 print(f"Epoch {epoch} rows ready: kept={len(current_rows)} | {meta}")
 
         if not current_rows:
@@ -1308,13 +1385,17 @@ try:
                 )
 
         loader = build_loader_from_rows(current_rows)
-        avg_loss = train_one_epoch(epoch, loader)
+        avg_loss, ok_paths, failed_paths = train_one_epoch(epoch, loader)
         print(f"Epoch {epoch} avg loss: {avg_loss:.6f}")
 
-        trained_to_append = [{"audio_path": r["audio_path"]} for r in current_rows if r.get("audio_path")]
+        trained_to_append = [{"audio_path": p, "epoch": epoch} for p in sorted(ok_paths)]
         append_jsonl(TRAINED_JSONL_PATH, trained_to_append)
         for r in trained_to_append:
             trained_set.add(r["audio_path"])
+        
+        if failed_paths:
+            append_jsonl(FAILED_JSONL_PATH, [{"audio_path": p, "epoch": epoch} for p in failed_paths])
+            print(f"[warn] epoch {epoch} failed batches: {len(failed_paths)} (not marked trained)")
 
         save_checkpoint(epoch, subset_start_idx=-1, subset_count=len(current_rows))
 
@@ -1337,7 +1418,10 @@ finally:
         except Exception:
             pass
 
+try:
+    import winsound
+    winsound.Beep(1200, 250)
+except Exception:
+    pass
+
 print("Done.")
-beep_notification(1000, 500)
-time.sleep(0.1)
-beep_notification(1200, 500)

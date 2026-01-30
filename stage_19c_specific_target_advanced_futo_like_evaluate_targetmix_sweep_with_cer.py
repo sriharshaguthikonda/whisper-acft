@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-r"""stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep.py
+r"""stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py
 
 Stage 19 evaluation (TARGET vs OTHER mixtures) with SWEPT conditions.
 
@@ -31,7 +31,7 @@ Resume-safe
 
 usage
 ---------------------------------------------------
-i:\Whisper-training-env\Scripts\python.exe stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep.py ^ 
+i:\Whisper-training-env\Scripts\python.exe stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py ^ 
   --test_manifest "I:\Record_chunks\pairs_manifest_local_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_bottom_filtered_test.jsonl" ^
   --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores_sorted.csv" ^
   --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx6" ^
@@ -777,10 +777,13 @@ def compute_metrics_from_items(items: List[dict], normalize_mode: str) -> Dict:
             "wer_micro_other": None,
             "cer_micro_target": None,
             "cer_micro_other": None,
+            "cer_macro_target": None,
+            "cer_macro_other": None,
             "wer_macro_target": None,
             "wer_macro_other": None,
             "win_rate_target_closer": None,
             "avg_margin_other_minus_target": None,
+            "avg_margin_cer_other_minus_target": None,
             "wer_by_duration_target": {"0-1s": None, "1-2s": None, "2-5s": None, "5-10s": None, "10-30s": None},
             "wer_by_duration_other": {"0-1s": None, "1-2s": None, "2-5s": None, "5-10s": None, "10-30s": None},
         }
@@ -803,25 +806,36 @@ def compute_metrics_from_items(items: List[dict], normalize_mode: str) -> Dict:
     cer_micro_o = float(jiwer.cer(orefs, preds))
 
     # per-utt WER (macro)
-    wer_utt_t = [float(x.get("wer_target")) for x in items]
-    wer_utt_o = [float(x.get("wer_other")) for x in items]
+    wer_utt_t = [float(x.get("wer_target")) for x in items if x.get("wer_target") is not None]
+    wer_utt_o = [float(x.get("wer_other")) for x in items if x.get("wer_other") is not None]
     wer_macro_t = float(np.mean(wer_utt_t)) if wer_utt_t else None
     wer_macro_o = float(np.mean(wer_utt_o)) if wer_utt_o else None
 
+    # per-utt CER (macro) - only available if per-item CER was computed
+    cer_utt_t = [float(x.get("cer_target")) for x in items if x.get("cer_target") is not None]
+    cer_utt_o = [float(x.get("cer_other")) for x in items if x.get("cer_other") is not None]
+    cer_macro_t = float(np.mean(cer_utt_t)) if cer_utt_t else None
+    cer_macro_o = float(np.mean(cer_utt_o)) if cer_utt_o else None
+
     wins = sum(1 for x in items if bool(x.get("win_target_closer")))
     win_rate = float(wins) / float(len(items))
-    avg_margin = float(np.mean(np.array(wer_utt_o) - np.array(wer_utt_t)))
+
+    avg_margin = float(np.mean(np.array(wer_utt_o) - np.array(wer_utt_t))) if (wer_utt_t and wer_utt_o) else None
+    avg_margin_cer = float(np.mean(np.array(cer_utt_o) - np.array(cer_utt_t))) if (cer_utt_t and cer_utt_o) else None
 
     return {
         "samples": len(items),
         "wer_micro_target": wer_micro_t,
         "cer_micro_target": cer_micro_t,
         "wer_macro_target": wer_macro_t,
+        "cer_macro_target": cer_macro_t,
         "wer_micro_other": wer_micro_o,
         "cer_micro_other": cer_micro_o,
         "wer_macro_other": wer_macro_o,
+        "cer_macro_other": cer_macro_o,
         "win_rate_target_closer": win_rate,
         "avg_margin_other_minus_target": avg_margin,
+        "avg_margin_cer_other_minus_target": avg_margin_cer,
         "wer_by_duration_target": _wer_by_duration(items, "wer_target"),
         "wer_by_duration_other": _wer_by_duration(items, "wer_other"),
     }
@@ -956,7 +970,9 @@ def eval_one_model(
                             oref_n = _basic_whisperish_normalize(oref) if cfg.normalize_mode in {"whisper_basic", "basic"} else oref
 
                             wt = float(jiwer.wer(tref_n, pred_n))
+                            ct = float(jiwer.cer(tref_n, pred_n))
                             wo = float(jiwer.wer(oref_n, pred_n))
+                            co = float(jiwer.cer(oref_n, pred_n))
 
                             rec = {
                                 "mix_key": key,
@@ -972,7 +988,9 @@ def eval_one_model(
                                 "other_ref": oref,
                                 "pred": pred,
                                 "wer_target": wt,
+                                "cer_target": ct,
                                 "wer_other": wo,
+                                "cer_other": co,
                                 "win_target_closer": bool(wt < wo),
                                 "vad": vad_info,
                                 "mix": mix_meta,
@@ -996,6 +1014,11 @@ def eval_one_model(
                             all_predictions[key]["predictions"][model_name] = {
                                 "pred": pred,
                                 "duration_sec_eval": 0.0,
+                                "wer_target": wt,
+                                "wer_other": wo,
+                                "cer_target": ct,
+                                "cer_other": co,
+                                "win_target_closer": bool(wt < wo),
                                 "vad": vad_info,
                                 "mix": mix_meta,
                             }
@@ -1068,7 +1091,9 @@ def eval_one_model(
                             pred_n, tref_n, oref_n = pred, tref, oref
 
                         wt = float(jiwer.wer(tref_n, pred_n))
+                        ct = float(jiwer.cer(tref_n, pred_n))
                         wo = float(jiwer.wer(oref_n, pred_n))
+                        co = float(jiwer.cer(oref_n, pred_n))
 
                         rec = {
                             "mix_key": c["mix_key"],
@@ -1084,7 +1109,9 @@ def eval_one_model(
                             "other_ref": oref,
                             "pred": pred,
                             "wer_target": wt,
+                            "cer_target": ct,
                             "wer_other": wo,
+                            "cer_other": co,
                             "win_target_closer": bool(wt < wo),
                             "vad": c.get("vad", {"vad_applied": False}),
                             "mix": c.get("mix", {}),
@@ -1108,6 +1135,11 @@ def eval_one_model(
                         all_predictions[c["mix_key"]]["predictions"][model_name] = {
                             "pred": pred,
                             "duration_sec_eval": c.get("duration_sec_eval"),
+                            "wer_target": wt,
+                            "wer_other": wo,
+                            "cer_target": ct,
+                            "cer_other": co,
+                            "win_target_closer": bool(wt < wo),
                             "vad": c.get("vad", {"vad_applied": False}),
                             "mix": c.get("mix", {}),
                         }
@@ -1167,7 +1199,9 @@ def eval_one_model(
                         pred_n, tref_n, oref_n = pred, tref, oref
 
                     wt = float(jiwer.wer(tref_n, pred_n))
+                    ct = float(jiwer.cer(tref_n, pred_n))
                     wo = float(jiwer.wer(oref_n, pred_n))
+                    co = float(jiwer.cer(oref_n, pred_n))
 
                     rec = {
                         "mix_key": c["mix_key"],
@@ -1183,7 +1217,9 @@ def eval_one_model(
                         "other_ref": oref,
                         "pred": pred,
                         "wer_target": wt,
+                        "cer_target": ct,
                         "wer_other": wo,
+                        "cer_other": co,
                         "win_target_closer": bool(wt < wo),
                         "vad": c.get("vad", {"vad_applied": False}),
                         "mix": c.get("mix", {}),
@@ -1207,6 +1243,11 @@ def eval_one_model(
                     all_predictions[c["mix_key"]]["predictions"][model_name] = {
                         "pred": pred,
                         "duration_sec_eval": c.get("duration_sec_eval"),
+                        "wer_target": wt,
+                        "wer_other": wo,
+                        "cer_target": ct,
+                        "cer_other": co,
+                        "win_target_closer": bool(wt < wo),
                         "vad": c.get("vad", {"vad_applied": False}),
                         "mix": c.get("mix", {}),
                     }
@@ -1248,7 +1289,19 @@ def recompute_metrics_from_saved_predictions(all_predictions: dict, model_name: 
             pred_n, tref_n, oref_n = pred, tref, oref
 
         wt = float(jiwer.wer(tref_n, pred_n))
+        ct = float(jiwer.cer(tref_n, pred_n))
         wo = float(jiwer.wer(oref_n, pred_n))
+        co = float(jiwer.cer(oref_n, pred_n))
+
+        # Store per-sample metrics back into all_predictions (helps later analysis)
+        try:
+            preds[model_name]["wer_target"] = wt
+            preds[model_name]["wer_other"] = wo
+            preds[model_name]["cer_target"] = ct
+            preds[model_name]["cer_other"] = co
+            preds[model_name]["win_target_closer"] = bool(wt < wo)
+        except Exception:
+            pass
 
         items.append(
             {
@@ -1263,7 +1316,9 @@ def recompute_metrics_from_saved_predictions(all_predictions: dict, model_name: 
                 "other_ref": oref,
                 "pred": pred,
                 "wer_target": wt,
+                "cer_target": ct,
                 "wer_other": wo,
+                "cer_other": co,
                 "win_target_closer": bool(wt < wo),
             }
         )
@@ -1603,6 +1658,7 @@ def main() -> None:
 
         print(f"samples={overall.get('samples')} skipped={overall.get('skipped')}")
         print(f"WER target micro={overall.get('wer_micro_target')} | WER other micro={overall.get('wer_micro_other')}")
+        print(f"CER target micro={overall.get('cer_micro_target')} | CER other micro={overall.get('cer_micro_other')}")
         print(f"win_rate(target closer)={overall.get('win_rate_target_closer')} avg_margin(other-target)={overall.get('avg_margin_other_minus_target')}")
 
     print("\nDone.")
