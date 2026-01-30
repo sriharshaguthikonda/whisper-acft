@@ -117,6 +117,38 @@ def _basename(p: str) -> str:
 
 
 # ----------------------------
+# Deterministic subsampling helpers
+# ----------------------------
+
+def _stable_u64(s: str) -> int:
+    """Stable 64-bit hash for deterministic sampling across runs."""
+    h = hashlib.sha1((s or "").encode("utf-8", errors="ignore")).digest()
+    return int.from_bytes(h[:8], "big", signed=False)
+
+
+def _deterministic_subsample(items: List[dict], key_fn, percentage: float, seed: int) -> List[dict]:
+    """Return a deterministic subset (exact count) based on stable hashing + sorting."""
+    if percentage >= 100.0:
+        return list(items)
+    if percentage <= 0.0:
+        return []
+
+    tagged = [(_stable_u64(f"{int(seed)}||{key_fn(x)}"), x) for x in items]
+    tagged.sort(key=lambda t: t[0])
+    k = max(1, int(len(tagged) * (float(percentage) / 100.0)))
+    return [x for _, x in tagged[:k]]
+
+
+def _deterministic_cap(items: List[dict], key_fn, max_n: int, seed: int) -> List[dict]:
+    """Return a deterministic cap (first N after stable hash sort)."""
+    if max_n <= 0 or len(items) <= max_n:
+        return list(items)
+    tagged = [(_stable_u64(f"{int(seed)}||{key_fn(x)}"), x) for x in items]
+    tagged.sort(key=lambda t: t[0])
+    return [x for _, x in tagged[: int(max_n)]]
+
+
+# ----------------------------
 # CSV: speaker_sort_scores.csv
 # ----------------------------
 
@@ -609,6 +641,8 @@ def build_target_other_base_pairs(
     mix_per_target: int,
     pairing_mode: str,
     seed: int,
+    target_percentage: float = 100.0,
+    target_max: int = 0,
 ) -> Tuple[List[dict], Dict]:
     labelled: List[Tuple[dict, str]] = []
     unknown = 0
@@ -631,10 +665,39 @@ def build_target_other_base_pairs(
         "others": len(others),
     }
 
-    if not targets:
-        raise RuntimeError("No TARGET rows found in test manifest after CSV matching.")
     if not others:
         raise RuntimeError("No OTHER rows found in test manifest after CSV matching.")
+
+    # Optional: deterministic subsample of TARGET rows BEFORE pairing.
+    # This gives you "X% of TARGET samples" (and then each kept TARGET will still be paired mix_per_target times).
+    targets_before = len(targets)
+    if float(target_percentage) < 100.0:
+        targets = _deterministic_subsample(
+            targets,
+            key_fn=lambda r: _norm_windows_key(str(r.get("audio_path", ""))),
+            percentage=float(target_percentage),
+            seed=int(seed),
+        )
+    if int(target_max) > 0:
+        targets = _deterministic_cap(
+            targets,
+            key_fn=lambda r: _norm_windows_key(str(r.get("audio_path", ""))),
+            max_n=int(target_max),
+            seed=int(seed),
+        )
+    info.update(
+        {
+            "target_percentage": float(target_percentage),
+            "target_max": int(target_max),
+            "targets_before_subsample": int(targets_before),
+            "targets_after_subsample": int(len(targets)),
+        }
+    )
+
+    if not targets:
+        raise RuntimeError(
+            "No TARGET rows left after --target_percentage/--target_max subsampling. Increase percentage/max." 
+        )
 
     rng = random.Random(int(seed))
 
@@ -1269,10 +1332,17 @@ def eval_one_model(
 # Force-resume metric recompute
 # ----------------------------
 
-def recompute_metrics_from_saved_predictions(all_predictions: dict, model_name: str, normalize_mode: str) -> Tuple[Dict, Dict[str, Dict]]:
+def recompute_metrics_from_saved_predictions(
+    all_predictions: dict,
+    model_name: str,
+    normalize_mode: str,
+    active_keys: Optional[set] = None,
+) -> Tuple[Dict, Dict[str, Dict]]:
     items: List[dict] = []
 
     for key, blob in all_predictions.items():
+        if active_keys is not None and key not in active_keys:
+            continue
         preds = blob.get("predictions", {})
         if model_name not in preds:
             continue
@@ -1382,7 +1452,9 @@ def main() -> None:
     ap.add_argument("--test_manifest", required=True, type=Path)
     ap.add_argument("--speaker_scores_csv", required=True, type=Path)
     ap.add_argument("--checkpoint_dir", required=True, type=Path)
-    ap.add_argument("--percentage", type=float, default=100.0)
+    ap.add_argument("--percentage", type=float, default=100.0, help="Subsample BASE PAIRS after pairing (percentage of pairs).")
+    ap.add_argument("--target_percentage", type=float, default=100.0, help="Subsample TARGET rows before pairing (percentage of TARGET samples).")
+    ap.add_argument("--target_max", type=int, default=0, help="Optional cap on number of TARGET rows after target subsampling. 0=disabled")
 
     ap.add_argument("--base_model", default="futo-org/acft-whisper-tiny.en")
     ap.add_argument("--compare_openai_tiny", action="store_true")
@@ -1449,6 +1521,10 @@ def main() -> None:
 
     if not (0.0 <= args.percentage <= 100.0):
         raise ValueError("--percentage must be 0..100")
+    if not (0.0 <= args.target_percentage <= 100.0):
+        raise ValueError("--target_percentage must be 0..100")
+    if args.target_max < 0:
+        raise ValueError("--target_max must be >= 0")
 
     rows = load_jsonl(args.test_manifest)
     labels = load_speaker_sort_scores(args.speaker_scores_csv)
@@ -1459,13 +1535,18 @@ def main() -> None:
         mix_per_target=int(args.mix_per_target),
         pairing_mode=str(args.pairing_mode),
         seed=int(args.seed),
+        target_percentage=float(args.target_percentage),
+        target_max=int(args.target_max),
     )
 
     # Subsample base pairs BEFORE sweep
     if args.percentage < 100.0:
-        rng = random.Random(int(args.seed))
-        k = max(1, int(len(base_pairs) * (args.percentage / 100.0)))
-        base_pairs = rng.sample(base_pairs, k)
+        base_pairs = _deterministic_subsample(
+            base_pairs,
+            key_fn=lambda bp: str(bp.get("base_key", "")),
+            percentage=float(args.percentage),
+            seed=int(args.seed),
+        )
 
     snr_list = parse_float_list(args.sweep_snr_db) or [10.0]
     if args.disable_overlap_sweep:
@@ -1577,6 +1658,9 @@ def main() -> None:
                 "mix_per_target": cfg.mix_per_target,
                 "pairing_mode": cfg.pairing_mode,
                 "seed": cfg.seed,
+                "target_percentage": float(args.target_percentage),
+                "target_max": int(args.target_max),
+                "percentage_pairs": float(args.percentage),
             },
             "mixing": {
                 "other_offset_mode": cfg.other_offset_mode,
@@ -1599,6 +1683,14 @@ def main() -> None:
 
     print(f"Device: {args.device}")
     print(f"Test manifest rows: {len(rows)}")
+    if pair_info:
+        try:
+            print(
+                f"Targets: {pair_info.get('targets')} (kept {pair_info.get('targets_after_subsample')} after target subsample) | "
+                f"Others: {pair_info.get('others')} | Unknown: {pair_info.get('rows_unknown')}"
+            )
+        except Exception:
+            pass
     print(f"Base pairs (TARGET-OTHER): {len(base_pairs)}")
     print(f"Conditions: {len(conditions)}")
     print(f"Total eval pairs (base * conditions): {len(pair_rows)}")
@@ -1638,7 +1730,10 @@ def main() -> None:
             has_predictions = any(model_name in v.get("predictions", {}) for v in all_predictions.values())
             if has_predictions:
                 print(f"📊 Recalculating metrics from existing predictions for {model_name}")
-                overall, by_cond = recompute_metrics_from_saved_predictions(all_predictions, model_name, cfg.normalize_mode)
+                active_keys = {pr["mix_key"] for pr in pair_rows}
+                overall, by_cond = recompute_metrics_from_saved_predictions(
+                    all_predictions, model_name, cfg.normalize_mode, active_keys=active_keys
+                )
                 results["models"].append({"model": m, "metrics_overall": overall, "metrics_by_condition": by_cond})
                 save_incremental_results(results, all_predictions, out_json)
                 continue
