@@ -1,8 +1,11 @@
 """
+Stage 4: Delete common filler words and segments from manifest
 
+Usage:
+python stage_4_Delete_common_fillers_words_from_manifest.py --input I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only.jsonl --output I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered.jsonl --state-file I:\Transcriptions_patched_corrected\Most_common_segments_state.json --min-frequency 4
 
-python Stage_4_Delete_common_fillers_words_from_manifest.py --input I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only.jsonl --output I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered.jsonl
-
+This script removes 90% of manifest lines whose raw_transcription matches segments 
+from the state file with frequency >= min_frequency (keeps 10% for diversity).
 """
 
 
@@ -14,98 +17,6 @@ from pathlib import Path
 
 from tqdm import tqdm
 
-# Built-in exact matches (normalized forms)
-DEFAULT_TRIVIAL_PHRASES = {
-    # Core acknowledgement junk
-    "ok",
-    "okay",
-    "ok doctor",
-    "okay doctor",
-    "ok doc",
-    "okay doc",
-    "ok dr",
-    "okay dr",
-    "yes",
-    "yeah",
-    "yep",
-    "ya",
-    "yes doctor",
-    "yeah doctor",
-    "yep doctor",
-    "yes doc",
-    "yeah doc",
-    "yes dr",
-    "yeah dr",
-    "no",
-    "nope",
-    "nah",
-    "no doctor",
-    "no doc",
-    "no dr",
-    "right",
-    "alright",
-    "all right",
-    "sure",
-    "fine",
-    # From your frequency list
-    "hello",
-    "hello doctor",
-    "hello there",
-    "hello there doctor",
-    "thank you",
-    "thank you doctor",
-    "thank you very much",
-    "okay all right",
-    "okay alright",
-    "okay thank you",
-    "yes yes",
-    "yeah yeah",
-    "yeah yeah yeah",
-    "no no",
-    "no no no",
-    "nothing",
-    "nothing else",
-    "no nothing",
-    "normal",
-    "i dont know",
-    "i dont know doctor",
-    "i dont think so",
-    "i dont think so doctor",
-    "i see",
-    "i understand",
-    "oh",
-    # single-word junk that often becomes its own cue
-    "and",
-    "so",
-    "you",
-    # station/meta cues
-    "enter the room",
-    "two minutes remaining",
-    "move on to the next station",
-    "begin",
-    # repeated prompts you listed (treat as junk by same policy)
-    "could you please confirm your age for me",
-    "could you please confirm your name and age for me",
-    "what would you like me to call you",
-    "any allergies",
-    "any allergies by any chance",
-    "any fever",
-    "do you smoke",
-    "do you drink alcohol",
-    "does that make sense",
-    "is that okay",
-    "could you tell me a little bit more",
-    "what do you do for a living",
-    "what do you want to know",
-    "thats it",
-    "thats good",
-    "not exactly",
-    "like what",
-    "what is that",
-    "what is that doctor",
-    "like what doctor",
-}
-
 
 def normalize_text(text: str) -> str:
     """Lowercase, strip, remove punctuation, and collapse internal whitespace."""
@@ -115,6 +26,32 @@ def normalize_text(text: str) -> str:
     # Collapse multiple whitespace
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+
+def load_segments_from_state(state_path: Path, min_frequency: int = 4) -> set[str]:
+    """Load segments from state file with frequency >= min_frequency."""
+    if not state_path.exists():
+        print(f"Warning: State file not found: {state_path}")
+        return set()
+    
+    try:
+        with open(state_path, 'r', encoding='utf-8') as f:
+            state_data = json.load(f)
+        
+        counts = state_data.get('counts', {})
+        segments = set()
+        
+        for segment, count in counts.items():
+            if count >= min_frequency:
+                normalized = normalize_text(segment)
+                segments.add(normalized)
+        
+        print(f"Loaded {len(segments)} segments from {state_path} with frequency >= {min_frequency}")
+        return segments
+    
+    except Exception as e:
+        print(f"Error loading state file {state_path}: {e}")
+        return set()
 
 
 def filter_manifest(input_path: Path, output_path: Path, trivial_phrases: set[str]) -> tuple[int, int]:
@@ -154,6 +91,17 @@ def parse_args() -> argparse.Namespace:
         type=Path,
         help="Path to write cleaned manifest. Defaults to <input>.filtered.jsonl.",
     )
+    parser.add_argument(
+        "--state-file",
+        type=Path,
+        help="Path to state file containing segment counts.",
+    )
+    parser.add_argument(
+        "--min-frequency",
+        type=int,
+        default=4,
+        help="Minimum frequency for segments to be included (default: 4).",
+    )
     return parser.parse_args()
 
 
@@ -165,7 +113,14 @@ def main() -> None:
     if not input_path.exists():
         raise FileNotFoundError(f"Input file not found: {input_path}")
 
-    kept, removed = filter_manifest(input_path, output_path, DEFAULT_TRIVIAL_PHRASES)
+    # Load segments from state file if provided
+    trivial_phrases = set()
+    if args.state_file:
+        trivial_phrases = load_segments_from_state(args.state_file, args.min_frequency)
+    else:
+        print("No state file provided. No filtering will be applied.")
+
+    kept, removed = filter_manifest(input_path, output_path, trivial_phrases)
     print(f"Completed. Kept {kept} lines, removed {removed}. Output: {output_path}")
     try:
         # Windows beep when done (frequency, duration ms)

@@ -22,7 +22,7 @@ You can change the group_key() function if you want a different rule.
 
 Usage
 -----
-python stage_13_group_split_train_test.py --input_manifest "I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_filtered.jsonl" --test_manifest "I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_filtered_test.jsonl" --train_manifest "I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_filtered_train.jsonl" --test_ratio 0.1 --seed 1337
+python stage_13_group_split_train_test.py --input_manifest "I:\Record_chunks\pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized.jsonl" --test_manifest "I:\Record_chunks\pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized_test.jsonl" --train_manifest "I:\Record_chunks\pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized_train.jsonl" --test_ratio 0.1 --seed 1337
 
 Optional:
   --dry_run

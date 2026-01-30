@@ -1,3 +1,21 @@
+"""
+
+
+i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\common_segments_analyzer.py" --input-dir "i:\Transcriptions_patched_corrected" --state-file "i:\Transcriptions_patched_corrected\Most_common_segments_state.json" --top-k 250 --min-count 1 --workers 0 --output-json "i:\Transcriptions_patched_corrected\Most_common_segments_counts.json"
+
+
+"""
+
+
+
+
+
+
+
+
+
+
+
 import argparse
 import json
 from collections import Counter

@@ -33,12 +33,13 @@ usage
 ---------------------------------------------------
 i:\Whisper-training-env\Scripts\python.exe stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep.py ^ 
   --test_manifest "I:\Record_chunks\pairs_manifest_local_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_bottom_filtered_test.jsonl" ^
-  --speaker_scores_csv "I:\Record_chunks\speaker_sort_scores_sorted.csv" ^
+  --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores_sorted.csv" ^
   --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx6" ^
   --mix_per_target 1 ^
   --other_peak_ratio 1.0 ^
   --sweep_snr_db "20,10,5,0,-5" ^
   --sweep_overlap "0,0.25,0.5,0.75,1" ^
+  --auto_batch 0
   --resume
 
 
@@ -1343,7 +1344,7 @@ def main() -> None:
 
     # batching
     ap.add_argument("--batch_size", type=int, default=0, help="0=auto default (GPU:8, CPU:1)")
-    ap.add_argument("--auto_batch", type=int, default=1)
+    ap.add_argument("--auto_batch", type=int, default=0)
     ap.add_argument("--batch_min", type=int, default=1)
     ap.add_argument("--batch_max", type=int, default=64)
 

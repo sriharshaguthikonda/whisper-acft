@@ -43,11 +43,11 @@ Usage
 
 
 i:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\stage_9_add_reverb.py `
-  --in_manifest "I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain.jsonl" `
+  --in_manifest "I:\Record_chunks\pairs_pending_stereo_english_only_filtered_with_others_voice_mix.jsonl" `
   --input_audio_dir "I:\Record_chunks" `
   --rir_dir "I:\noise\RIRS_NOISES\real_rirs_isotropic_noises" `
   --out_audio_dir "I:\Record_chunks_aug_rir_real" `
-  --out_manifest "I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered_with_noises_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real.jsonl" `
+  --out_manifest "I:\Record_chunks\pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real.jsonl" `
   --copies 1 --p 0.1 `
   --wet_min 0.25 --wet_max 0.9 `
   --trim_leading_silence --silence_thresh 1e-4 `
