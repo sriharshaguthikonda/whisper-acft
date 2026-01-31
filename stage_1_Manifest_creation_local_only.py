@@ -103,6 +103,34 @@ def load_processed_jsons_from_manifest(path: str) -> set:
     return processed
 
 
+def load_processed_jsons_cached(manifest_path: str, cache_path: str) -> set:
+    """Load processed JSONs from manifest with caching based on manifest mtime/size."""
+    import json
+    from pathlib import Path
+
+    manifest_path = Path(manifest_path)
+    cache_path = Path(cache_path)
+
+    if not manifest_path.exists():
+        return set()
+
+    st = manifest_path.stat()
+    if cache_path.exists():
+        try:
+            cache = json.loads(cache_path.read_text(encoding="utf-8"))
+            if cache.get("mtime") == st.st_mtime and cache.get("size") == st.st_size:
+                return set(cache.get("processed", []))
+        except Exception:
+            pass  # rebuild cache
+
+    processed = load_processed_jsons_from_manifest(str(manifest_path))
+    cache_path.write_text(
+        json.dumps({"mtime": st.st_mtime, "size": st.st_size, "processed": sorted(processed)}),
+        encoding="utf-8"
+    )
+    return processed
+
+
 def write_jsonl_overwrite(path: str, rows: list) -> None:
     pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -483,7 +511,7 @@ def compute_centered_window(audio_total: float, core_start: float, core_end: flo
 TRANSCRIPT_DIR_P = pathlib.Path(TRANSCRIPT_DIR)
 json_files = sorted(TRANSCRIPT_DIR_P.glob("*.json"))
 
-processed_jsons = load_processed_jsons_from_manifest(MANIFEST_PATH)
+processed_jsons = load_processed_jsons_cached(MANIFEST_PATH, str(CHUNKS_DIR_P / "processed_cache.json"))
 audio_stems = build_audio_stem_set(AUDIO_SOURCE_DIR_P)
 
 # Load transcripts that were part of a previous pending plan
