@@ -1,4 +1,4 @@
-"""stage_3_sort_audio_files_by_speaker_target_other.py
+r"""stage_3_sort_audio_files_by_speaker_target_other.py
 
 Sort audio files by whether they match a TARGET speaker, optionally using an OTHERS folder
 as a negative reference cohort.
@@ -25,18 +25,18 @@ Usage (PowerShell)
 ------------------
 I:\Whisper-training-env\Scripts\Activate.ps1
 
-python "i:\whisper-acft\stage_3_sort_audio_files_by_speaker_target_other.py" `
-  --in "I:\Record_chunks" `
-  --target_ref_dir "I:\Record_only_by_harsha" `
-  --other_ref_dir "I:\Record_others_compacted" `
-  --target_out "I:\Record_chunks_sorted\target" `
-  --other_out "I:\Record_chunks_sorted\other" `
-  --threshold 0.10 `
-  --device cuda `
-  --dry_run `
-  --progress print `
-  --batch_size 8 `
-  --workers 4
+python "i:\whisper-acft\stage_3_sort_audio_files_by_speaker_target_other.py" 
+  --in "I:\Record_chunks" 
+  --target_ref_dir "I:\Record_only_by_harsha" 
+  --other_ref_dir "I:\Record_others_compacted" 
+  --target_out "I:\Record_chunks_sorted\target" 
+  --other_out "I:\Record_chunks_sorted\other" 
+  --threshold 0.10 
+  --device cuda 
+  --dry_run 
+  --progress print 
+  --batch_size 1 `
+  --workers 1
 
 Then run again without --dry_run to actually move/copy.
 
@@ -105,21 +105,52 @@ def require_ffmpeg() -> None:
 
 
 def ffmpeg_to_wav_16k_mono(src: Path, dst: Path) -> None:
-    cmd = ["ffmpeg", "-y", "-i", str(src), "-ac", "1", "-ar", "16000", "-vn", str(dst)]
+    cmd = [
+        "ffmpeg",
+        "-hide_banner",
+        "-loglevel",
+        "error",
+        "-nostdin",
+        "-y",
+        "-i",
+        str(src),
+        "-ac",
+        "1",
+        "-ar",
+        "16000",
+        "-vn",
+        str(dst),
+    ]
     p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
     if p.returncode != 0:
         raise RuntimeError(f"ffmpeg failed for {src}:\n{p.stderr}")
 
 
+DIRECT_LIBROSA_EXTS = {".wav", ".flac"}  # boring + reliable on Windows
+
+
 def load_audio_direct(audio_path: Path) -> Optional[np.ndarray]:
-    """Load audio directly using librosa if possible."""
-    if not HAS_LIBROSA:
+    """
+    Load audio directly using librosa ONLY for formats that SoundFile/libsndfile
+    tends to handle cleanly.
+
+    For MP3/M4A/etc we return None so we fall back to ffmpeg.
+    """
+    if (not HAS_LIBROSA) or (audio_path.suffix.lower() not in DIRECT_LIBROSA_EXTS):
         return None
     try:
         audio, _sr = librosa.load(str(audio_path), sr=16000, mono=True)
-        return audio
+        if audio is None or len(audio) == 0:
+            return None
+        return np.asarray(audio, dtype=np.float32)
     except Exception:
         return None
+
+
+def _tmp_wav_path(tmp_dir: Path, af: Path) -> Path:
+    """Stable temp path without collisions (avoid built-in hash() + modulo)."""
+    h = hashlib.sha1(str(af).encode("utf-8", "ignore")).hexdigest()[:16]
+    return tmp_dir / f"in_{h}.wav"
 
 
 def get_duration_fast(audio_path: Path) -> Optional[float]:
@@ -310,10 +341,14 @@ def process_audio_batch(audio_files: List[Path], tmp_dir: Path, workers: int = 4
         audio = load_audio_direct(af)
         if audio is not None:
             return af, audio, None
-        wav_path = tmp_dir / f"in_{af.stem}_{abs(hash(str(af))) % 10_000_000}.wav"
+        wav_path = _tmp_wav_path(tmp_dir, af)
         try:
             ffmpeg_to_wav_16k_mono(af, wav_path)
             audio, _ = sf.read(str(wav_path), dtype="float32")
+            try:
+                wav_path.unlink(missing_ok=True)
+            except Exception:
+                pass
             return af, audio, None
         except Exception as e:
             return af, None, str(e)

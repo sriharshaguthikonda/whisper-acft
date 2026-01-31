@@ -2,7 +2,7 @@
 Stage 4: Delete common filler words and segments from manifest
 
 Usage:
-python stage_4_Delete_common_fillers_words_from_manifest.py --input I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only.jsonl --output I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only_filtered.jsonl --state-file I:\Transcriptions_patched_corrected\Most_common_segments_state.json --min-frequency 4
+python stage_4_Delete_common_fillers_words_from_manifest.py --input I:\Record_chunks\pairs_manifest_stereo_english_only.jsonl --output I:\Record_chunks\pairs_manifest_stereo_english_only_filtered.jsonl --state-file I:\Transcriptions_patched_corrected\Most_common_segments_state.json --min-frequency 3
 
 This script removes 90% of manifest lines whose raw_transcription matches segments 
 from the state file with frequency >= min_frequency (keeps 10% for diversity).

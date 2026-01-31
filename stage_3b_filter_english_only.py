@@ -2,7 +2,7 @@
 Stage 3b: Filter manifest to keep only English language entries
 
 Usage:
-python stage_3b_filter_english_only.py --input I:\Record_chunks\pairs_manifest_sorted_by_scores.jsonl --output I:\Record_chunks\pairs_manifest_sorted_by_scores_english_only.jsonl
+python stage_3b_filter_english_only.py --input I:\Record_chunks\pairs_manifest_stereo.jsonl --output I:\Record_chunks\pairs_manifest_stereo_english_only.jsonl
 """
 
 import argparse
