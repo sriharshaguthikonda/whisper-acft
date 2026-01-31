@@ -3,6 +3,14 @@ import numpy as np
 from tqdm.auto import tqdm
 from transformers import WhisperProcessor
 
+# Try to use orjson for faster JSON parsing if available
+try:
+    import orjson
+    HAS_ORJSON = True
+except ImportError:
+    HAS_ORJSON = False
+    orjson = None
+
 # ----------------------------
 # USER SETTINGS
 # ----------------------------
@@ -94,11 +102,14 @@ def load_processed_jsons_from_manifest(path: str) -> set:
             if not line:
                 continue
             try:
-                obj = json.loads(line)
+                if HAS_ORJSON:
+                    obj = orjson.loads(line)
+                else:
+                    obj = json.loads(line)
                 tj = obj.get("transcript_json")
                 if tj:
                     processed.add(tj)
-            except json.JSONDecodeError:
+            except (json.JSONDecodeError, ValueError if not HAS_ORJSON else orjson.JSONDecodeError):
                 continue
     return processed
 
@@ -117,17 +128,24 @@ def load_processed_jsons_cached(manifest_path: str, cache_path: str) -> set:
     st = manifest_path.stat()
     if cache_path.exists():
         try:
-            cache = json.loads(cache_path.read_text(encoding="utf-8"))
-            if cache.get("mtime") == st.st_mtime and cache.get("size") == st.st_size:
-                return set(cache.get("processed", []))
+            if HAS_ORJSON:
+                cache_data = orjson.loads(cache_path.read_bytes())
+            else:
+                cache_data = json.loads(cache_path.read_text(encoding="utf-8"))
+            if cache_data.get("mtime") == st.st_mtime and cache_data.get("size") == st.st_size:
+                return set(cache_data.get("processed", []))
         except Exception:
             pass  # rebuild cache
 
     processed = load_processed_jsons_from_manifest(str(manifest_path))
-    cache_path.write_text(
-        json.dumps({"mtime": st.st_mtime, "size": st.st_size, "processed": sorted(processed)}),
-        encoding="utf-8"
-    )
+    cache_content = {"mtime": st.st_mtime, "size": st.st_size, "processed": sorted(processed)}
+    if HAS_ORJSON:
+        cache_path.write_bytes(orjson.dumps(cache_content))
+    else:
+        cache_path.write_text(
+            json.dumps(cache_content),
+            encoding="utf-8"
+        )
     return processed
 
 
@@ -135,7 +153,10 @@ def write_jsonl_overwrite(path: str, rows: list) -> None:
     pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
         for obj in rows:
-            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            if HAS_ORJSON:
+                f.write(orjson.dumps(obj, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE).decode() + "\n")
+            else:
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
 def append_manifest_jsonl(path: str, rows: list) -> None:
@@ -144,7 +165,10 @@ def append_manifest_jsonl(path: str, rows: list) -> None:
     pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
     with open(path, "a", encoding="utf-8") as f:
         for obj in rows:
-            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+            if HAS_ORJSON:
+                f.write(orjson.dumps(obj, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE).decode() + "\n")
+            else:
+                f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
 def read_jsonl(path: str) -> list:
@@ -156,7 +180,13 @@ def read_jsonl(path: str) -> list:
             line = line.strip()
             if not line:
                 continue
-            rows.append(json.loads(line))
+            try:
+                if HAS_ORJSON:
+                    rows.append(orjson.loads(line))
+                else:
+                    rows.append(json.loads(line))
+            except (json.JSONDecodeError, ValueError if not HAS_ORJSON else orjson.JSONDecodeError):
+                continue
     return rows
 
 
@@ -549,7 +579,10 @@ for jf in tqdm(new_json_files, desc="Planning segment-level chunks"):
     jf_str = str(jf)
 
     try:
-        obj = json.loads(jf.read_text(encoding="utf-8"))
+        if HAS_ORJSON:
+            obj = orjson.loads(jf.read_bytes())
+        else:
+            obj = json.loads(jf.read_text(encoding="utf-8"))
         audio_path_from_json = obj["input_file"]["path"]
         segments = obj["groq_response"]["segments"]
     except Exception:
