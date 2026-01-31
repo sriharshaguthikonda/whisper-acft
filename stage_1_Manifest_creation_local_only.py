@@ -151,11 +151,15 @@ def load_processed_jsons_cached(manifest_path: str, cache_path: str) -> set:
 
 def write_jsonl_overwrite(path: str, rows: list) -> None:
     pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "w", encoding="utf-8") as f:
-        for obj in rows:
-            if HAS_ORJSON:
-                f.write(orjson.dumps(obj, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE).decode() + "\n")
-            else:
+    # JSONL/NDJSON MUST be 1 JSON object per line (no pretty-print / multi-line objects).
+    # Also: OPT_APPEND_NEWLINE already adds a newline, so don't add another one.
+    if HAS_ORJSON:
+        with open(path, "wb") as f:
+            for obj in rows:
+                f.write(orjson.dumps(obj, option=orjson.OPT_APPEND_NEWLINE))
+    else:
+        with open(path, "w", encoding="utf-8") as f:
+            for obj in rows:
                 f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
@@ -163,11 +167,13 @@ def append_manifest_jsonl(path: str, rows: list) -> None:
     if not rows:
         return
     pathlib.Path(path).parent.mkdir(parents=True, exist_ok=True)
-    with open(path, "a", encoding="utf-8") as f:
-        for obj in rows:
-            if HAS_ORJSON:
-                f.write(orjson.dumps(obj, option=orjson.OPT_INDENT_2 | orjson.OPT_APPEND_NEWLINE).decode() + "\n")
-            else:
+    if HAS_ORJSON:
+        with open(path, "ab") as f:
+            for obj in rows:
+                f.write(orjson.dumps(obj, option=orjson.OPT_APPEND_NEWLINE))
+    else:
+        with open(path, "a", encoding="utf-8") as f:
+            for obj in rows:
                 f.write(json.dumps(obj, ensure_ascii=False) + "\n")
 
 
