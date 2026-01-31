@@ -1,17 +1,18 @@
 import os, json, pathlib, subprocess, hashlib, wave, threading
 import numpy as np
 from tqdm.auto import tqdm
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
+from transformers import WhisperProcessor
 
 # ----------------------------
 # USER SETTINGS
 # ----------------------------
 ACFT_MODEL_ID = "futo-org/acft-whisper-tiny.en"     # weights
 BASE_PROCESSOR_ID = "openai/whisper-tiny.en"        # processor (feature extractor + tokenizer)
+LOAD_MODEL_FOR_DEBUG = False  # Stage 1 normally shouldn't load model weights.
 
 TRANSCRIPT_DIR = r"I:\Transcriptions_patched_corrected"
-CHUNKS_DIR = "i:\\Record_others_chunks"
-AUDIO_SOURCE_DIR = "i:\\Record_others"  # directory containing full-length audios to include
+CHUNKS_DIR = "i:\\Record_chunks"
+AUDIO_SOURCE_DIR = "i:\\Record_harsha"  # directory containing full-length audios to include
 
 TARGET_SR = 16000
 MAX_OUT_SECONDS = 30.0
@@ -28,9 +29,30 @@ MERGE_GAP_FOR_SHORT = 0.5    # only merge short segments if the gap is <= this
 MERGE_SHORT_SEGMENTS = False  # set True to merge short segments; False keeps every segment standalone
 KEEP_TINY_SEGMENTS = True     # keep very short segments even if under MIN_SEG_SEC
 
-# Groq no_speech_prob is often not reliable for filtering. Leave disabled.
-# If YOUR metadata is reliable, set something like 0.95.
-NO_SPEECH_PROB_DROP = None
+# ----------------------------
+# Segment-quality filtering (Groq / Whisper verbose metrics)
+#
+# You asked for these heuristics:
+#   no_speech_prob:   keep <0.2, review 0.2–0.6, drop >=0.6
+#   avg_logprob:      keep >-0.3, review -0.5..-0.3, drop <-0.5
+#   compression_ratio: keep <2.0, review 2.0–2.4, drop >2.4
+#
+# Default policy below:
+#   - drop only the hard-drop segments
+#   - keep review segments but tag them
+#   - flip INCLUDE_REVIEW_SEGMENTS=False if you want SAFE-ONLY training data
+# ----------------------------
+APPLY_SEGMENT_QUALITY_FILTERS = True
+INCLUDE_REVIEW_SEGMENTS = True
+
+NO_SPEECH_PROB_SAFE_MAX = 0.20
+NO_SPEECH_PROB_DROP_MIN = 0.60
+
+AVG_LOGPROB_SAFE_MIN = -0.30
+AVG_LOGPROB_DROP_MAX = -0.50
+
+COMPRESSION_RATIO_SAFE_MAX = 2.00
+COMPRESSION_RATIO_DROP_MIN = 2.40
 
 # Output files
 CHUNKS_DIR_P = pathlib.Path(CHUNKS_DIR)
@@ -47,8 +69,11 @@ PENDING_TASKS_PATH = str(CHUNKS_DIR_P / "tasks_pending.jsonl")
 # Use the *base* processor (has preprocessor_config.json etc.)
 processor = WhisperProcessor.from_pretrained(BASE_PROCESSOR_ID)
 
-# If you actually want to run inference with the ACFT weights:
-model = WhisperForConditionalGeneration.from_pretrained(ACFT_MODEL_ID)
+# Stage 1 is manifest planning only. Loading model weights is wasted time.
+model = None
+if LOAD_MODEL_FOR_DEBUG:
+    from transformers import WhisperForConditionalGeneration
+    model = WhisperForConditionalGeneration.from_pretrained(ACFT_MODEL_ID)
 
 
 
@@ -150,9 +175,11 @@ def is_useless_segment(seg: dict) -> bool:
     if txt in {"", ".", "…"}:
         return True
 
-    if NO_SPEECH_PROB_DROP is not None:
-        nsp = seg.get("no_speech_prob", None)
-        if nsp is not None and float(nsp) >= float(NO_SPEECH_PROB_DROP):
+    if APPLY_SEGMENT_QUALITY_FILTERS:
+        tier, _reasons, _metrics = assess_quality_from_segment(seg)
+        if tier == "drop":
+            return True
+        if tier == "review" and not INCLUDE_REVIEW_SEGMENTS:
             return True
 
     s = seg.get("start", None)
@@ -163,6 +190,64 @@ def is_useless_segment(seg: dict) -> bool:
         return True
 
     return False
+
+
+def assess_quality_from_metrics(
+    no_speech_prob: float | None,
+    avg_logprob: float | None,
+    compression_ratio: float | None,
+) -> tuple[str, list[str], dict]:
+    """Return (tier, reasons, metrics).
+
+    tier: "safe" | "review" | "drop"
+    Conservative: any hard-drop => drop.
+    """
+
+    metrics = {
+        "no_speech_prob": None if no_speech_prob is None else float(no_speech_prob),
+        "avg_logprob": None if avg_logprob is None else float(avg_logprob),
+        "compression_ratio": None if compression_ratio is None else float(compression_ratio),
+    }
+
+    reasons: list[str] = []
+
+    # Hard-drop checks
+    nsp = metrics["no_speech_prob"]
+    if nsp is not None and nsp >= NO_SPEECH_PROB_DROP_MIN:
+        reasons.append(f"no_speech_prob>={NO_SPEECH_PROB_DROP_MIN}")
+
+    alp = metrics["avg_logprob"]
+    if alp is not None and alp < AVG_LOGPROB_DROP_MAX:
+        reasons.append(f"avg_logprob<{AVG_LOGPROB_DROP_MAX}")
+
+    cr = metrics["compression_ratio"]
+    if cr is not None and cr > COMPRESSION_RATIO_DROP_MIN:
+        reasons.append(f"compression_ratio>{COMPRESSION_RATIO_DROP_MIN}")
+
+    if reasons:
+        return "drop", reasons, metrics
+
+    # Review checks
+    review_reasons: list[str] = []
+    if nsp is not None and nsp >= NO_SPEECH_PROB_SAFE_MAX:
+        review_reasons.append(f"no_speech_prob>={NO_SPEECH_PROB_SAFE_MAX}")
+    if alp is not None and alp <= AVG_LOGPROB_SAFE_MIN:
+        review_reasons.append(f"avg_logprob<={AVG_LOGPROB_SAFE_MIN}")
+    if cr is not None and cr >= COMPRESSION_RATIO_SAFE_MAX:
+        review_reasons.append(f"compression_ratio>={COMPRESSION_RATIO_SAFE_MAX}")
+
+    if review_reasons:
+        return "review", review_reasons, metrics
+    return "safe", [], metrics
+
+
+def assess_quality_from_segment(seg: dict) -> tuple[str, list[str], dict]:
+    """Assess quality using segment fields when present."""
+    return assess_quality_from_metrics(
+        seg.get("no_speech_prob", None),
+        seg.get("avg_logprob", None),
+        seg.get("compression_ratio", None),
+    )
 
 
 POSSIBLE_EXTENSIONS = ['.m4a', '.wav', '.mp3', '.flac', '.ogg']
@@ -273,6 +358,29 @@ def build_segment_level_chunks(segments: list) -> list:
         texts = [txt]
         tok_sum = seg_tok[i]
 
+        # Track (worst) quality metrics across merged segments (conservative).
+        used_idxs = [i]
+        nsp_max = None
+        alp_min = None
+        cr_max = None
+
+        def _accumulate_metrics(_seg: dict):
+            nonlocal nsp_max, alp_min, cr_max
+            _nsp = _seg.get("no_speech_prob", None)
+            _alp = _seg.get("avg_logprob", None)
+            _cr = _seg.get("compression_ratio", None)
+            if _nsp is not None:
+                _nsp = float(_nsp)
+                nsp_max = _nsp if nsp_max is None else max(nsp_max, _nsp)
+            if _alp is not None:
+                _alp = float(_alp)
+                alp_min = _alp if alp_min is None else min(alp_min, _alp)
+            if _cr is not None:
+                _cr = float(_cr)
+                cr_max = _cr if cr_max is None else max(cr_max, _cr)
+
+        _accumulate_metrics(seg)
+
         # If too short, merge forward cautiously—only when allowed.
         if MERGE_SHORT_SEGMENTS:
             while (cur_e - cur_s) < MIN_SEG_SEC and (i + 1) < n:
@@ -305,6 +413,8 @@ def build_segment_level_chunks(segments: list) -> list:
                 texts.append(ntext)
                 tok_sum += ntoks
                 cur_e = ne
+                used_idxs.append(i + 1)
+                _accumulate_metrics(nxt)
                 i += 1
 
         core_span = cur_e - cur_s
@@ -314,11 +424,29 @@ def build_segment_level_chunks(segments: list) -> list:
 
         target_out = float(min(MAX_OUT_SECONDS, core_span + 2.0 * CONTEXT_PAD))
 
+        # Compute final chunk quality
+        if APPLY_SEGMENT_QUALITY_FILTERS:
+            tier, reasons, _metrics = assess_quality_from_metrics(nsp_max, alp_min, cr_max)
+            if tier == "drop":
+                i += 1
+                continue
+            if tier == "review" and not INCLUDE_REVIEW_SEGMENTS:
+                i += 1
+                continue
+        else:
+            tier, reasons = None, []
+
         chunks.append({
             "start": float(cur_s),
             "end": float(cur_e),
             "text": " ".join([t.strip() for t in texts]).strip(),
             "target_out_sec": target_out,
+            "quality_tier": tier,
+            "quality_reasons": reasons,
+            "no_speech_prob_max": nsp_max,
+            "avg_logprob_min": alp_min,
+            "compression_ratio_max": cr_max,
+            "segments_used": used_idxs,
         })
 
         i += 1
@@ -423,6 +551,13 @@ for jf in tqdm(new_json_files, desc="Planning segment-level chunks"):
             "duration_sec_target": target_out,
             "sr": TARGET_SR,
             "model": ACFT_MODEL_ID, # Changed from MODEL to ACFT_MODEL_ID
+
+            # Optional extra metadata (won't break downstream JSONL readers)
+            "quality_tier": ch.get("quality_tier", None),
+            "quality_reasons": ch.get("quality_reasons", []),
+            "no_speech_prob_max": ch.get("no_speech_prob_max", None),
+            "avg_logprob_min": ch.get("avg_logprob_min", None),
+            "compression_ratio_max": ch.get("compression_ratio_max", None),
         })
 
         # Only cut if the wav doesn't already exist

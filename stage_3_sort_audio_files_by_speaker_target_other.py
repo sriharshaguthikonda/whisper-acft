@@ -31,7 +31,7 @@ python "i:\whisper-acft\stage_3_sort_audio_files_by_speaker_target_other.py" `
   --other_ref_dir "I:\Record_others_compacted" `
   --target_out "I:\Record_chunks_sorted\target" `
   --other_out "I:\Record_chunks_sorted\other" `
-  --threshold 0.30 `
+  --threshold 0.10 `
   --device cuda `
   --dry_run `
   --progress print `
