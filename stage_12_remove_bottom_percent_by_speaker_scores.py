@@ -39,9 +39,27 @@ from __future__ import annotations
 import argparse
 import json
 import pandas as pd
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Tuple
 from tqdm import tqdm
+
+
+def canonical_key(p: str) -> str:
+    """Windows/Posix tolerant key so CSV and manifest match.
+
+    Goals:
+    - Make slashes consistent
+    - Case-insensitive matching (Windows)
+    - Remove duplicate separators
+    - Strip quotes/spaces
+    """
+    if not p:
+        return ""
+    p = str(p).strip().strip('"').strip("'")
+    p = p.replace('\\', '/')
+    p = re.sub(r"/+", "/", p)
+    return p.casefold()
 
 
 def load_speaker_scores(csv_path: Path) -> Dict[str, float]:
@@ -49,7 +67,7 @@ def load_speaker_scores(csv_path: Path) -> Dict[str, float]:
     print(f"Loading speaker scores from {csv_path}...")
     df = pd.read_csv(csv_path)
     
-    # Create a dictionary mapping file paths to scores
+    # Create a dictionary mapping file paths to scores using canonical_key for robust matching
     score_dict = {}
     for _, row in tqdm(df.iterrows(), total=len(df), desc="Processing scores"):
         file_path = row['file']
@@ -59,8 +77,9 @@ def load_speaker_scores(csv_path: Path) -> Dict[str, float]:
         if pd.isna(file_path) or not isinstance(file_path, str):
             continue
             
-        # Store score as float, keep NaN as special value
-        score_dict[file_path] = score
+        # Store score as float, keep NaN as special value, using canonical key
+        canonical_path = canonical_key(file_path)
+        score_dict[canonical_path] = score
     
     print(f"Loaded {len(score_dict)} file scores")
     return score_dict
@@ -107,8 +126,8 @@ def filter_manifest_by_scores(
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Filter manifest entries by speaker scores."""
     
-    # Normalize score dictionary keys to lowercase for case-insensitive matching
-    normalized_score_dict = {k.lower(): v for k, v in score_dict.items()}
+    # Normalize score dictionary keys using canonical_key for robust matching
+    normalized_score_dict = {canonical_key(k): v for k, v in score_dict.items()}
     
     # Collect scores for threshold calculation
     valid_scores = []
@@ -140,10 +159,10 @@ def filter_manifest_by_scores(
     }
     
     for entry in tqdm(manifest_rows, desc="Filtering entries"):
-        audio_path = entry.get('audio_path', '').lower()
+        audio_path_key = canonical_key(entry.get('audio_path',''))
         
-        if audio_path in normalized_score_dict:
-            score = normalized_score_dict[audio_path]
+        if audio_path_key in normalized_score_dict:
+            score = normalized_score_dict[audio_path_key]
             
             if pd.isna(score):
                 # NaN scores - remove these
@@ -257,10 +276,19 @@ def main() -> None:
     parser.add_argument(
         "--remove_no_score",
         action="store_true",
-        help="Remove entries that don't have speaker scores (default: keep them)"
+        default=True,
+        help="Remove entries that don't have speaker scores (default: True)"
+    )
+    parser.add_argument(
+        "--keep_no_score",
+        action="store_true",
+        help="Override and keep entries with no score match"
     )
     
     args = parser.parse_args()
+    
+    # Determine remove_no_score logic
+    remove_no_score = args.remove_no_score and not args.keep_no_score
     
     # Validate inputs
     if not args.input_manifest.exists():
@@ -281,7 +309,7 @@ def main() -> None:
     print(f"Bottom percentage to remove: {args.bottom_percent}%")
     if args.min_score is not None:
         print(f"Minimum score threshold: {args.min_score}")
-    print(f"Remove no-score entries: {args.remove_no_score}")
+    print(f"Remove no-score entries: {remove_no_score}")
     print(f"Dry run: {args.dry_run}")
     print("=" * 60)
     
@@ -296,7 +324,7 @@ def main() -> None:
     # Filter manifest
     print("Filtering manifest by speaker scores...")
     kept_entries, stats = filter_manifest_by_scores(
-        manifest_rows, score_dict, args.bottom_percent, args.min_score, args.remove_no_score
+        manifest_rows, score_dict, args.bottom_percent, args.min_score, remove_no_score
     )
     
     # Print statistics

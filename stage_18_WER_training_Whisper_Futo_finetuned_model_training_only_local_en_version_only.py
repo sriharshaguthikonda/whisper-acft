@@ -18,6 +18,7 @@
 
 import os, json, time, shutil, hashlib, gc, math, winsound, sys, atexit, tempfile
 from concurrent.futures import ThreadPoolExecutor
+from datetime import datetime
 from typing import Optional, Dict
 
 import numpy as np
@@ -106,15 +107,22 @@ def atomic_write_json(path: str, obj):
 
 # --- Data ---
 MANIFEST_PATH = "I:/Record_chunks/pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized_train_randomized.jsonl"
-TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage1.jsonl"
 
-CHECKPOINT_DIR = "i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_8"
+# Make each run isolated. If you want fixed naming, set RUN_TAG manually.
+RUN_TAG = os.environ.get('WHISPER_RUN_TAG') or datetime.now().strftime('%Y%m%d_%H%M%S')
+CHECKPOINT_DIR = f"i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_8/runs/{RUN_TAG}"
+
+# Put run-state files INSIDE the checkpoint directory so runs do not poison each other.
+TRAINED_JSONL_PATH = os.path.join(CHECKPOINT_DIR, "trained_stage18.jsonl")
 
 # =============================
 # PATCH 2) Run state + pending epoch plan
 # =============================
 RUN_STATE_PATH = os.path.join(CHECKPOINT_DIR, "run_state.json")
 PENDING_PLAN_PATH = os.path.join(CHECKPOINT_DIR, "pending_epoch_plan.json")
+
+# --- Add a 'start fresh' option ---
+START_FRESH = bool(int(os.environ.get('WHISPER_START_FRESH', '0')))
 
 
 def manifest_signature(path: str) -> str:
@@ -167,8 +175,16 @@ def clear_pending_plan():
     except Exception:
         pass
 
-# ===== Console Logging Setup =====
+# Console Logging Setup
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+
+# In main(), right after ensuring CHECKPOINT_DIR exists:
+if START_FRESH and os.path.isdir(CHECKPOINT_DIR) and any(d.startswith('model_epoch_') for d in os.listdir(CHECKPOINT_DIR)):
+    raise SystemExit(
+        f"Refusing to start in a non-empty checkpoint dir: {CHECKPOINT_DIR}\n"
+        "Either delete/rename it, or set WHISPER_START_FRESH=0 to resume deliberately."
+    )
+
 LOG_PATH = os.path.join(CHECKPOINT_DIR, "console.log")
 
 # ===== Debug: pinpoint which file causes non-finite / bad CE loss =====
@@ -301,6 +317,10 @@ DECAY_GAMMA = 0.7           # per-epoch decay multiplier after warmup
 USE_SCHEDULER = True
 RESUME_OVERRIDE_LR = True   # IMPORTANT: force LR_START even when resuming optimizer state
 
+# --- Fix the dangerous behaviour: NEVER bump LR UP on resume ---
+# Replace it with a clamp-only policy:
+RESUME_CLAMP_LR = True
+
 # Keep old name so existing code that logs LR still works
 LR = LR_START
 
@@ -348,6 +368,12 @@ if torch.cuda.is_available():
     except AttributeError:
         pass
     torch.backends.cudnn.benchmark = True
+
+
+def clamp_optimizer_lr(optimizer, max_lr: float):
+    """Clamp LR DOWN to max_lr; never increases it."""
+    for pg in optimizer.param_groups:
+        pg['lr'] = min(float(pg.get('lr', max_lr)), float(max_lr))
 
 
 def estimate_opt_steps_per_epoch(n_samples: int, batch_size: int, grad_accum: int) -> int:
@@ -1175,8 +1201,14 @@ if latest_state is not None:
     except Exception as e:
         print("WARNING: failed to resume optimizer/scaler:", repr(e))
 
-# Force LR on resume (critical if you changed LR_START)
-if RESUME_OVERRIDE_LR:
+# Force LR on resume (critical if you changed LR_START) - SAFE VERSION
+if RESUME_CLAMP_LR:
+    clamp_optimizer_lr(optimizer, LR_START)
+    # Also make sure scheduler base_lrs don't exceed LR_START
+    if scheduler is not None and hasattr(scheduler, 'base_lrs'):
+        scheduler.base_lrs = [min(float(b), float(LR_START)) for b in scheduler.base_lrs]
+    print(f"[lr] Clamped LR to LR_START on resume: {LR_START} (global_step={global_step})")
+elif RESUME_OVERRIDE_LR:
     for pg in optimizer.param_groups:
         pg["lr"] = LR_START
     if scheduler is not None:
@@ -1596,6 +1628,34 @@ def train_one_epoch(epoch_num: int, loader):
                     scheduler.step()
 
                 global_step += 1
+
+            # Practical guardrail: quick sanity decode every N steps to detect repetition collapse
+            if global_step % 200 == 0:
+                try:
+                    # Simple repetition check on recent logits
+                    with torch.no_grad():
+                        # Check if any token repeats excessively in the last batch
+                        if hasattr(logits, 'argmax'):
+                            predicted_tokens = logits.argmax(dim=-1)
+                            # Look for excessive repetition in sequence dimension
+                            for seq_idx in range(predicted_tokens.shape[0]):
+                                seq_tokens = predicted_tokens[seq_idx].cpu().numpy()
+                                # Count consecutive repeats
+                                max_consecutive = 1
+                                current_consecutive = 1
+                                for i in range(1, len(seq_tokens)):
+                                    if seq_tokens[i] == seq_tokens[i-1] and seq_tokens[i] != 0:  # ignore padding
+                                        current_consecutive += 1
+                                        max_consecutive = max(max_consecutive, current_consecutive)
+                                    else:
+                                        current_consecutive = 1
+                                
+                                if max_consecutive > 20:
+                                    raise SystemExit(f'Detected repetition collapse: token repeated {max_consecutive} times consecutively. Stopping to protect checkpoint.')
+                except Exception as e:
+                    if 'repetition collapse' in str(e):
+                        raise e
+                    print(f"[warn] Repetition check failed: {e}")
 
             running += float(loss.item())
             steps += 1
