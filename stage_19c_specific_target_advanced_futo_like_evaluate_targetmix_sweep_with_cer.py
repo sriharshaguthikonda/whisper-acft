@@ -34,7 +34,7 @@ usage
 i:\Whisper-training-env\Scripts\python.exe stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py ^ 
   --test_manifest "I:\Record_chunks\pairs_manifest_local_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_bottom_filtered_test.jsonl" ^
   --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores_sorted.csv" ^
-  --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx6" ^
+  --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_8" ^
   --mix_per_target 1 ^
   --other_peak_ratio 1.0 ^
   --sweep_snr_db "20,10,5,0,-5" ^
@@ -620,6 +620,43 @@ def _pad_stack_input_features(features_list: List[torch.Tensor]) -> torch.Tensor
     return out
 
 
+def _pad_stack_input_features_and_mask(
+    features_list: List[torch.Tensor],
+    masks_list: List[Optional[torch.Tensor]],
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Pad/stack Whisper log-mel features and matching attention_mask.
+
+    - features_list: list of (1, 80, T)
+    - masks_list:    list of (1, T) or None
+
+    Returns:
+    - feats_out: (B, 80, Tmax)
+    - mask_out:  (B, Tmax) with 1 for real frames, 0 for padding
+    """
+    ts = [t.squeeze(0) for t in features_list]
+    max_t = max(int(t.shape[-1]) for t in ts)
+
+    feats_out = torch.zeros((len(ts), 80, max_t), dtype=ts[0].dtype)
+    mask_out = torch.zeros((len(ts), max_t), dtype=torch.long)
+
+    for i, (feat, m) in enumerate(zip(ts, masks_list)):
+        T = int(feat.shape[-1])
+        feats_out[i, :, :T] = feat
+
+        if m is None:
+            mask_out[i, :T] = 1
+        else:
+            mm = m.squeeze(0)
+            if mm.numel() < T:
+                # Defensive: if mask is shorter than features, treat remaining as real
+                mask_out[i, : mm.numel()] = mm.to(mask_out.dtype)
+                mask_out[i, mm.numel() : T] = 1
+            else:
+                mask_out[i, :T] = mm[:T].to(mask_out.dtype)
+
+    return feats_out, mask_out
+
+
 def _cuda_mem_ratio() -> float:
     if not torch.cuda.is_available():
         return 0.0
@@ -847,6 +884,7 @@ def compute_metrics_from_items(items: List[dict], normalize_mode: str) -> Dict:
             "win_rate_target_closer": None,
             "avg_margin_other_minus_target": None,
             "avg_margin_cer_other_minus_target": None,
+            "likely_hit_max_token_cap_rate": None,
             "wer_by_duration_target": {"0-1s": None, "1-2s": None, "2-5s": None, "5-10s": None, "10-30s": None},
             "wer_by_duration_other": {"0-1s": None, "1-2s": None, "2-5s": None, "5-10s": None, "10-30s": None},
         }
@@ -886,6 +924,11 @@ def compute_metrics_from_items(items: List[dict], normalize_mode: str) -> Dict:
     avg_margin = float(np.mean(np.array(wer_utt_o) - np.array(wer_utt_t))) if (wer_utt_t and wer_utt_o) else None
     avg_margin_cer = float(np.mean(np.array(cer_utt_o) - np.array(cer_utt_t))) if (cer_utt_t and cer_utt_o) else None
 
+    # sanity: "not stopping" / repetition detector
+    cap_flags = [x.get("likely_hit_max_token_cap") for x in items]
+    cap_flags = [bool(v) for v in cap_flags if v is not None]
+    cap_rate = float(np.mean(cap_flags)) if cap_flags else None
+
     return {
         "samples": len(items),
         "wer_micro_target": wer_micro_t,
@@ -899,6 +942,7 @@ def compute_metrics_from_items(items: List[dict], normalize_mode: str) -> Dict:
         "win_rate_target_closer": win_rate,
         "avg_margin_other_minus_target": avg_margin,
         "avg_margin_cer_other_minus_target": avg_margin_cer,
+        "likely_hit_max_token_cap_rate": cap_rate,
         "wer_by_duration_target": _wer_by_duration(items, "wer_target"),
         "wer_by_duration_other": _wer_by_duration(items, "wer_other"),
     }
@@ -938,6 +982,25 @@ def eval_one_model(
         pass
 
     gen_kwargs = build_generate_kwargs(cfg)
+
+    # Used for the "hit token cap" sanity metric.
+    eos_id = None
+    try:
+        eos_id = getattr(model.generation_config, "eos_token_id", None)
+    except Exception:
+        eos_id = None
+    if eos_id is None:
+        try:
+            eos_id = getattr(model.config, "eos_token_id", None)
+        except Exception:
+            eos_id = None
+    if eos_id is None:
+        try:
+            eos_id = getattr(processor.tokenizer, "eos_token_id", None)
+        except Exception:
+            eos_id = None
+    if eos_id is None:
+        eos_id = 50256  # Whisper
 
     per_item: List[dict] = []
     skipped: List[dict] = []
@@ -1093,11 +1156,19 @@ def eval_one_model(
 
                 dur_eval = seconds_from_audio(audio_eval, 16000)
 
-                inputs = processor(audio_eval, sampling_rate=16000, return_tensors="pt")
+                inputs = processor(
+                    audio_eval,
+                    sampling_rate=16000,
+                    return_tensors="pt",
+                    return_attention_mask=True,
+                )
                 input_features = inputs["input_features"]
+                attn_mask = inputs.get("attention_mask")  # (1, T)
 
                 if cfg.dynamic_audio_ctx:
                     input_features = crop_input_features_for_duration(input_features, dur_eval)
+                    if attn_mask is not None:
+                        attn_mask = attn_mask[:, : input_features.shape[-1]]
 
                 batch_buf.append(
                     {
@@ -1115,6 +1186,7 @@ def eval_one_model(
                         "vad": vad_info,
                         "mix": mix_meta,
                         "input_features": input_features,
+                        "attention_mask": attn_mask,
                     }
                 )
 
@@ -1134,17 +1206,29 @@ def eval_one_model(
 
                 try:
                     feats = [c["input_features"] for c in chunk]
-                    batch_feats = _pad_stack_input_features(feats).to(cfg.device, non_blocking=True)
+                    masks = [c.get("attention_mask") for c in chunk]
+                    batch_feats, batch_mask = _pad_stack_input_features_and_mask(feats, masks)
+                    batch_feats = batch_feats.to(cfg.device, non_blocking=True)
+                    batch_mask = batch_mask.to(cfg.device, non_blocking=True)
                     if use_cuda and cfg.fp16:
                         batch_feats = batch_feats.half()
 
-                    generated_ids = model.generate(input_features=batch_feats, **gen_kwargs)
-                    texts = processor.batch_decode(generated_ids, skip_special_tokens=True)
+                    generated_ids = model.generate(
+                        input_features=batch_feats,
+                        attention_mask=batch_mask,
+                        **gen_kwargs,
+                    )
+                    generated_ids_cpu = generated_ids.detach().cpu()
+                    texts = processor.batch_decode(generated_ids_cpu, skip_special_tokens=True)
 
-                    for c, text_out in zip(chunk, texts):
+                    for c, text_out, seq in zip(chunk, texts, generated_ids_cpu):
                         pred = (text_out or "").strip()
                         tref = (c.get("target_ref") or "").strip()
                         oref = (c.get("other_ref") or "").strip()
+
+                        ended_by_eos = bool((seq == int(eos_id)).any().item()) if eos_id is not None else True
+                        likely_hit_cap = (not ended_by_eos)
+                        pred_token_len = int(seq.numel())
 
                         if cfg.normalize_mode in {"whisper_basic", "basic"}:
                             pred_n = _basic_whisperish_normalize(pred)
@@ -1176,6 +1260,9 @@ def eval_one_model(
                             "wer_other": wo,
                             "cer_other": co,
                             "win_target_closer": bool(wt < wo),
+                            "ended_by_eos": ended_by_eos,
+                            "likely_hit_max_token_cap": likely_hit_cap,
+                            "pred_token_len": pred_token_len,
                             "vad": c.get("vad", {"vad_applied": False}),
                             "mix": c.get("mix", {}),
                         }
@@ -1203,6 +1290,9 @@ def eval_one_model(
                             "cer_target": ct,
                             "cer_other": co,
                             "win_target_closer": bool(wt < wo),
+                            "ended_by_eos": ended_by_eos,
+                            "likely_hit_max_token_cap": likely_hit_cap,
+                            "pred_token_len": pred_token_len,
                             "vad": c.get("vad", {"vad_applied": False}),
                             "mix": c.get("mix", {}),
                         }
@@ -1243,16 +1333,28 @@ def eval_one_model(
             while pending:
                 chunk = pending[:cur_bs]
                 feats = [c["input_features"] for c in chunk]
-                batch_feats = _pad_stack_input_features(feats).to(cfg.device, non_blocking=True)
+                masks = [c.get("attention_mask") for c in chunk]
+                batch_feats, batch_mask = _pad_stack_input_features_and_mask(feats, masks)
+                batch_feats = batch_feats.to(cfg.device, non_blocking=True)
+                batch_mask = batch_mask.to(cfg.device, non_blocking=True)
                 if use_cuda and cfg.fp16:
                     batch_feats = batch_feats.half()
-                generated_ids = model.generate(input_features=batch_feats, **gen_kwargs)
-                texts = processor.batch_decode(generated_ids, skip_special_tokens=True)
+                generated_ids = model.generate(
+                    input_features=batch_feats,
+                    attention_mask=batch_mask,
+                    **gen_kwargs,
+                )
+                generated_ids_cpu = generated_ids.detach().cpu()
+                texts = processor.batch_decode(generated_ids_cpu, skip_special_tokens=True)
 
-                for c, text_out in zip(chunk, texts):
+                for c, text_out, seq in zip(chunk, texts, generated_ids_cpu):
                     pred = (text_out or "").strip()
                     tref = (c.get("target_ref") or "").strip()
                     oref = (c.get("other_ref") or "").strip()
+
+                    ended_by_eos = bool((seq == int(eos_id)).any().item()) if eos_id is not None else True
+                    likely_hit_cap = (not ended_by_eos)
+                    pred_token_len = int(seq.numel())
 
                     if cfg.normalize_mode in {"whisper_basic", "basic"}:
                         pred_n = _basic_whisperish_normalize(pred)
@@ -1284,6 +1386,9 @@ def eval_one_model(
                         "wer_other": wo,
                         "cer_other": co,
                         "win_target_closer": bool(wt < wo),
+                        "ended_by_eos": ended_by_eos,
+                        "likely_hit_max_token_cap": likely_hit_cap,
+                        "pred_token_len": pred_token_len,
                         "vad": c.get("vad", {"vad_applied": False}),
                         "mix": c.get("mix", {}),
                     }
@@ -1311,6 +1416,9 @@ def eval_one_model(
                         "cer_target": ct,
                         "cer_other": co,
                         "win_target_closer": bool(wt < wo),
+                        "ended_by_eos": ended_by_eos,
+                        "likely_hit_max_token_cap": likely_hit_cap,
+                        "pred_token_len": pred_token_len,
                         "vad": c.get("vad", {"vad_applied": False}),
                         "mix": c.get("mix", {}),
                     }

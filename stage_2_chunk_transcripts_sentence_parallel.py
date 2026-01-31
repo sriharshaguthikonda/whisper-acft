@@ -23,11 +23,11 @@ Resumable:
   usage
 
 I:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\stage_2_chunk_transcripts_sentence_parallel.py ^
-  --tasks_pending_path "I:\Record_chunks\tasks_pending.jsonl" ^
-  --pairs_pending_path "I:\Record_chunks\pairs_pending.jsonl" ^
-  --out_pairs_path "I:\Record_chunks\pairs_pending.stereo.jsonl" ^
+  --tasks_pending_path "I:\Record_others_chunks\tasks_pending.jsonl" ^
+  --pairs_pending_path "I:\Record_others_chunks\pairs_pending.jsonl" ^
+  --out_pairs_path "I:\Record_others_chunks\pairs_manifest_stereo.jsonl" ^
   --ffmpeg_workers 4 --task_workers 4 --ffmpeg_threads 1 ^
-  --stereo_policy split_drop_dupes
+  --stereo_policy none
 
 
 

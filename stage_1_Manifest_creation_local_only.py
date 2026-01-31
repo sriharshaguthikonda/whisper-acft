@@ -10,8 +10,8 @@ ACFT_MODEL_ID = "futo-org/acft-whisper-tiny.en"     # weights
 BASE_PROCESSOR_ID = "openai/whisper-tiny.en"        # processor (feature extractor + tokenizer)
 
 TRANSCRIPT_DIR = r"I:\Transcriptions_patched_corrected"
-CHUNKS_DIR = "i:\\Record_chunks"
-AUDIO_SOURCE_DIR = "i:\\Record_harsha"  # directory containing full-length audios to include
+CHUNKS_DIR = "i:\\Record_others_chunks"
+AUDIO_SOURCE_DIR = "i:\\Record_others"  # directory containing full-length audios to include
 
 TARGET_SR = 16000
 MAX_OUT_SECONDS = 30.0

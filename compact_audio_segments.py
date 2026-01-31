@@ -7,8 +7,9 @@ Compacts audio by extracting only the segments where speech is present.
 import json
 import os
 import sys
+import re
 from pathlib import Path
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import argparse
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from tqdm import tqdm
@@ -29,6 +30,49 @@ def load_transcription(transcription_path: Path) -> Dict:
     except Exception as e:
         logger.error(f"Error loading transcription {transcription_path}: {e}")
         return None
+
+def find_matching_transcription(audio_path: Path, transcription_dir: Path) -> Optional[Path]:
+    """
+    Find matching transcription file for an audio file.
+    Handles various naming patterns:
+    - Exact match: audio.wav -> audio.json
+    - With suffix: audio_sent0128.wav -> audio.json
+    - With chunk suffix: audio_chunk0000.wav -> audio.json
+    - With other suffixes: audio__L.wav -> audio.json
+    """
+    audio_stem = audio_path.stem
+    
+    # Try exact match first
+    exact_match = transcription_dir / f"{audio_stem}.json"
+    if exact_match.exists():
+        return exact_match
+    
+    # Try removing common suffixes
+    patterns_to_remove = [
+        r'_sent\d+$',           # _sent0128
+        r'_chunk\d+$',          # _chunk0000
+        r'__L$',                # __L
+        r'_Trim\d+$',           # _Trim1
+        r'_\w+_\w+_\w+_\w+_\w+_\w+$',  # __c3231fec39_chunk0000
+    ]
+    
+    for pattern in patterns_to_remove:
+        cleaned_stem = re.sub(pattern, '', audio_stem)
+        if cleaned_stem != audio_stem:
+            match_path = transcription_dir / f"{cleaned_stem}.json"
+            if match_path.exists():
+                logger.info(f"Matched {audio_path.name} -> {match_path.name}")
+                return match_path
+    
+    # Try fuzzy matching - find files that start with the base name
+    base_name = re.split(r'[_-]', audio_stem)[0]
+    for json_file in transcription_dir.glob("*.json"):
+        json_stem = json_file.stem
+        if json_stem.startswith(base_name):
+            logger.info(f"Fuzzy matched {audio_path.name} -> {json_file.name}")
+            return json_file
+    
+    return None
 
 def get_speech_segments(transcription_data: Dict) -> List[Tuple[float, float]]:
     """Extract speech segments from transcription data."""
@@ -116,11 +160,11 @@ def create_compact_audio(input_audio: Path, output_audio: Path, segments: List[T
 def process_audio_file(audio_path: Path, transcription_dir: Path, output_dir: Path, 
                       gap_threshold: float = 0.5) -> Tuple[bool, str]:
     """Process a single audio file."""
-    # Find corresponding transcription file
-    transcription_path = transcription_dir / f"{audio_path.stem}.json"
+    # Find corresponding transcription file with enhanced matching
+    transcription_path = find_matching_transcription(audio_path, transcription_dir)
     
-    if not transcription_path.exists():
-        return False, f"Transcription file not found: {transcription_path}"
+    if not transcription_path:
+        return False, f"No matching transcription file found for: {audio_path.name}"
     
     # Load transcription
     transcription_data = load_transcription(transcription_path)
