@@ -1149,37 +1149,10 @@ else:
 
 optimizer = torch.optim.AdamW(model_train.parameters(), lr=LR_START)
 
-# Track optimizer steps globally (NEW)
+# Track optimizer steps globally (optimizer-step count, not micro-batches)
 global_step = 0
 
-# Scheduler (warmup + epoch decay) (NEW)
-scheduler = None
-if USE_SCHEDULER:
-    def lr_mult(step: int) -> float:
-        # warmup
-        if step < WARMUP_STEPS:
-            return float(step) / max(1.0, float(WARMUP_STEPS))
-
-        # epoch-based decay after warmup
-        post = step - WARMUP_STEPS
-        epoch_i = int(post // max(1, OPT_STEPS_PER_EPOCH))
-        mult = (DECAY_GAMMA ** epoch_i)
-
-        # floor
-        floor_mult = float(LR_FLOOR) / float(LR_START)
-        if mult < floor_mult:
-            mult = floor_mult
-        return float(mult)
-
-    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_mult)
-    print("[lr] Scheduler enabled: warmup + epoch decay")
-else:
-    print("[lr] Scheduler disabled: constant LR")
-
-# Add gradient clipping for stability
-MAX_GRAD_NORM = 1.0
-
-# Resume optimizer/scaler/scheduler/global_step
+# -------- Resume optimizer + scaler + global_step FIRST --------
 if latest_state is not None:
     try:
         if latest_state.get("optimizer") is not None:
@@ -1188,38 +1161,108 @@ if latest_state is not None:
         if use_grad_scaler and latest_state.get("scaler") is not None:
             scaler.load_state_dict(latest_state["scaler"])
             print("Resumed GradScaler state.")
-
         global_step = int(latest_state.get("global_step", 0) or 0)
-
-        if scheduler is not None and latest_state.get("scheduler") is not None:
-            try:
-                scheduler.load_state_dict(latest_state["scheduler"])
-                print("Resumed scheduler state.")
-            except Exception as e:
-                print("WARNING: failed to resume scheduler:", repr(e))
-
     except Exception as e:
         print("WARNING: failed to resume optimizer/scaler:", repr(e))
 
-# Force LR on resume (critical if you changed LR_START) - SAFE VERSION
-if RESUME_CLAMP_LR:
-    clamp_optimizer_lr(optimizer, LR_START)
-    # Also make sure scheduler base_lrs don't exceed LR_START
-    if scheduler is not None and hasattr(scheduler, 'base_lrs'):
-        scheduler.base_lrs = [min(float(b), float(LR_START)) for b in scheduler.base_lrs]
-    print(f"[lr] Clamped LR to LR_START on resume: {LR_START} (global_step={global_step})")
-elif RESUME_OVERRIDE_LR:
+# -------- Scheduler definition (warmup + epoch decay) --------
+def lr_mult(step: int) -> float:
+    # warmup
+    if step < WARMUP_STEPS:
+        return float(step) / max(1.0, float(WARMUP_STEPS))
+
+    # epoch-based decay after warmup
+    post = step - WARMUP_STEPS
+    epoch_i = int(post // max(1, OPT_STEPS_PER_EPOCH))
+    mult = (DECAY_GAMMA ** epoch_i)
+
+    # floor
+    floor_mult = float(LR_FLOOR) / float(LR_START)
+    if mult < floor_mult:
+        mult = floor_mult
+    return float(mult)
+
+
+def _expected_last_epoch_from_global_step(gs: int) -> int:
+    # In THIS script: scheduler.step() happens, THEN global_step += 1
+    # Therefore after gs optimizer steps, scheduler.last_epoch should be gs-1.
+    return max(-1, int(gs) - 1)
+
+
+def _recompute_lr_from_last_epoch(last_epoch: int):
+    # If last_epoch=-1: keep base LR (LR_START)
+    if last_epoch < 0:
+        mult = 1.0
+    else:
+        mult = float(lr_mult(int(last_epoch)))
+
+    # Apply to all param groups.
+    # Prefer each group's initial_lr if present; otherwise LR_START.
     for pg in optimizer.param_groups:
-        pg["lr"] = LR_START
-    if scheduler is not None:
-        # Ensure scheduler base_lrs reflect LR_START
-        scheduler.base_lrs = [LR_START for _ in optimizer.param_groups]
+        base = float(pg.get("initial_lr", LR_START))
+        pg["lr"] = base * mult
+
+
+# Build scheduler AFTER optimizer.load_state_dict so param_groups/base_lrs match resume.
+scheduler = None
+if USE_SCHEDULER:
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_mult)
+    print("[lr] Scheduler enabled: warmup + epoch decay")
+else:
+    print("[lr] Scheduler disabled: constant LR")
+
+# -------- Resume scheduler state and ALIGN to global_step --------
+if scheduler is not None:
+    if latest_state is not None and latest_state.get("scheduler") is not None:
         try:
-            # Align scheduler to global_step
-            scheduler.last_epoch = max(-1, global_step - 1)
+            scheduler.load_state_dict(latest_state["scheduler"])
+            print("Resumed scheduler state.")
+        except Exception as e:
+            print("WARNING: failed to resume scheduler state; will reconstruct from global_step:", repr(e))
+            scheduler_state_ok = False
+        else:
+            scheduler_state_ok = True
+    else:
+        scheduler_state_ok = False
+
+    expected_last = _expected_last_epoch_from_global_step(global_step)
+
+    # If scheduler state missing/corrupt OR last_epoch inconsistent, fix it.
+    if (not scheduler_state_ok) or (int(getattr(scheduler, "last_epoch", -999999)) != int(expected_last)):
+        got_last = int(getattr(scheduler, "last_epoch", -999999))
+        print(f"[lr] Aligning scheduler to global_step: global_step={global_step} expected_last_epoch={expected_last} (was {got_last})")
+        try:
+            scheduler.last_epoch = int(expected_last)
+        except Exception as e:
+            print("WARNING: could not set scheduler.last_epoch:", repr(e))
+
+        # Ensure base_lrs reflect the real base LR for each group
+        try:
+            scheduler.base_lrs = [float(pg.get("initial_lr", LR_START)) for pg in optimizer.param_groups]
         except Exception:
             pass
-    print(f"[lr] Forced LR_START on resume: {LR_START} (global_step={global_step})")
+
+        # Recompute optimizer lr to match the aligned scheduler position
+        _recompute_lr_from_last_epoch(int(expected_last))
+
+# Optional: ONLY use this if you deliberately changed LR_START mid-run.
+# If you want strict resume behaviour, keep this False.
+if RESUME_OVERRIDE_LR:
+    print("[lr] RESUME_OVERRIDE_LR=True: overriding resumed LR and scheduler base_lrs (NOT strict resume).")
+    for pg in optimizer.param_groups:
+        pg["lr"] = float(LR_START)
+        pg["initial_lr"] = float(LR_START)
+    if scheduler is not None:
+        scheduler.base_lrs = [float(LR_START) for _ in optimizer.param_groups]
+        try:
+            scheduler.last_epoch = _expected_last_epoch_from_global_step(global_step)
+        except Exception:
+            pass
+
+# Add gradient clipping for stability
+MAX_GRAD_NORM = 1.0
+
+print(f"[lr] resume summary | global_step={global_step} | lr_now={optimizer.param_groups[0]['lr']:.2e} | scheduler_last_epoch={(scheduler.last_epoch if scheduler is not None else None)}")
 
 cleanup_memory("after model load")
 
