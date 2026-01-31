@@ -313,9 +313,12 @@ def resolve_audio_path(audio_path_from_json: str, fallback_dir: pathlib.Path | N
 def build_audio_stem_set(audio_dir: pathlib.Path) -> set:
     stems = set()
     audio_exts = {".m4a", ".wav", ".mp3", ".flac", ".ogg"}
-    for entry in audio_dir.glob("*"):
-        if entry.is_file() and entry.suffix.lower() in audio_exts:
-            stems.add(entry.stem.lower())
+    with os.scandir(str(audio_dir)) as entries:
+        for entry in entries:
+            if entry.is_file():
+                suffix = pathlib.Path(entry.name).suffix.lower()
+                if suffix in audio_exts:
+                    stems.add(pathlib.Path(entry.name).stem.lower())
     return stems
 
 
@@ -509,7 +512,12 @@ def compute_centered_window(audio_total: float, core_start: float, core_end: flo
 # ----------------------------
 
 TRANSCRIPT_DIR_P = pathlib.Path(TRANSCRIPT_DIR)
-json_files = sorted(TRANSCRIPT_DIR_P.glob("*.json"))
+json_files = []
+with os.scandir(str(TRANSCRIPT_DIR_P)) as entries:
+    for entry in entries:
+        if entry.is_file() and entry.name.endswith(".json"):
+            json_files.append(pathlib.Path(entry.path))
+json_files.sort()
 
 processed_jsons = load_processed_jsons_cached(MANIFEST_PATH, str(CHUNKS_DIR_P / "processed_cache.json"))
 audio_stems = build_audio_stem_set(AUDIO_SOURCE_DIR_P)
