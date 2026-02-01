@@ -22,7 +22,9 @@ You can change the group_key() function if you want a different rule.
 
 Usage
 -----
-python stage_13_group_split_train_test.py --input_manifest "I:\Record_chunks\pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized.jsonl" --test_manifest "I:\Record_chunks\pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized_test.jsonl" --train_manifest "I:\Record_chunks\pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized_train.jsonl" --test_ratio 0.1 --seed 1337
+
+
+python stage_13_group_split_train_test.py --input_manifest "I:\Record_chunks\pairs_manifest_stage7_plus_stage9_reverb_bottom_filtered.jsonl" --test_manifest "I:\Record_chunks\pairs_manifest_stage7_plus_stage9_reverb_bottom_filtered_test.jsonl" --train_manifest "I:\Record_chunks\pairs_manifest_stage7_plus_stage9_reverb_bottom_filtered_train.jsonl" --test_ratio 0.1 --seed 1337
 
 Optional:
   --dry_run
@@ -41,6 +43,22 @@ import re
 from collections import defaultdict
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Tuple
+
+
+def _canon_pathish(x: Any) -> str:
+    """Canonicalise Windows paths so different slash styles don't create different groups."""
+    s = str(x)
+    return s.replace("\\", "/").strip().lower()
+
+
+_UID_FROM_STEM_RE = re.compile(r"^([0-9a-f]{8,40})_[0-9a-f]{8,40}__", re.IGNORECASE)
+
+
+def _base_uid_from_filename(ap: str) -> str | None:
+    """Best-effort: for files like '<baseuid>_<auguuid>__stage__copy00.wav' return <baseuid>."""
+    stem = Path(str(ap)).stem
+    m = _UID_FROM_STEM_RE.match(stem)
+    return m.group(1).lower() if m else None
 
 
 def read_jsonl(path: Path) -> List[Dict[str, Any]]:
@@ -82,20 +100,62 @@ def _strip_aug_suffixes(stem: str) -> str:
 def group_key(row: Dict[str, Any]) -> str:
     """Return a stable group key so all augmented variants stay together."""
 
+    # 0) If your pipeline has stable IDs, ALWAYS use them first.
+    #    This is the most reliable way to avoid leakage across augmentations.
+    bu = row.get("base_uid")
+    if bu:
+        return f"uid::{str(bu).lower()}"
+
+    pu = row.get("parent_uid")
+    if pu:
+        return f"uid::{str(pu).lower()}"
+
     tj = row.get("transcript_json")
     ci = row.get("chunk_index")
     if tj and ci is not None:
-        return f"tj::{str(tj).lower()}::ci::{int(ci)}"
+        return f"tj::{_canon_pathish(tj)}::ci::{int(ci)}"
 
     sa = row.get("source_audio")
     if sa and ci is not None:
-        return f"sa::{str(sa).lower()}::ci::{int(ci)}"
+        return f"sa::{_canon_pathish(sa)}::ci::{int(ci)}"
 
     # Fallback: strip known augmentation suffixes from audio_path basename
-    ap = row.get("audio_path") or ""
+    ap = row.get("audio_path") or row.get("out_wav") or ""
+
+    # If this looks like your idempotent-augmentation naming, group by the embedded base uid.
+    bu2 = _base_uid_from_filename(str(ap))
+    if bu2:
+        return f"uid::{bu2}"
+
     p = Path(str(ap))
     base = _strip_aug_suffixes(p.stem.lower())
+    base = re.sub(r"__copy\d+$", "", base)  # common tail
     return f"ap::{base}"
+
+
+def underlying_key_for_leak_audit(row: Dict[str, Any]) -> str:
+    """A stricter key used only to detect leakage after splitting."""
+    # Prefer stable ids
+    for k in ("base_uid", "parent_uid", "uid"):
+        v = row.get(k)
+        if v:
+            return f"uid::{str(v).lower()}"
+
+    # Next best: transcript_json/source_audio + chunk_index (with canonicalised path)
+    ci = row.get("chunk_index")
+    tj = row.get("transcript_json")
+    if tj and ci is not None:
+        return f"tj::{_canon_pathish(tj)}::ci::{int(ci)}"
+    sa = row.get("source_audio")
+    if sa and ci is not None:
+        return f"sa::{_canon_pathish(sa)}::ci::{int(ci)}"
+
+    # Last resort: try embedded uid from filename, else stem
+    ap = row.get("audio_path") or row.get("out_wav") or ""
+    bu = _base_uid_from_filename(str(ap))
+    if bu:
+        return f"uid::{bu}"
+    return f"ap::{Path(str(ap)).stem.lower()}"
 
 
 def split_groups(
@@ -143,6 +203,16 @@ def main() -> None:
     print(f"Loaded {len(rows):,} rows from {args.input_manifest}")
 
     train_rows, test_rows = split_groups(rows, args.test_ratio, args.seed)
+
+    # Hard fail if we detect the same underlying chunk in both sets.
+    train_u = {underlying_key_for_leak_audit(r) for r in train_rows}
+    test_u = {underlying_key_for_leak_audit(r) for r in test_rows}
+    overlap = train_u & test_u
+    if overlap:
+        ex = list(sorted(overlap))[:10]
+        print("\n[LEAK DETECTED] Underlying groups appear in BOTH train and test.")
+        print(f"Examples (up to 10): {ex}")
+        raise SystemExit(2)
 
     # Group counts (for sanity)
     uniq_groups = len({group_key(r) for r in rows})

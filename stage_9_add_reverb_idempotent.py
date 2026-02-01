@@ -3,6 +3,23 @@
 
 Idempotent Stage 9: apply RIR convolution (reverb) to selected rows.
 
+
+
+
+& "I:\Whisper-training-env\Scripts\python.exe" "I:\whisper-acft\stage_9_add_reverb_idempotent.py" `
+  --in_manifest  "I:\Record_chunks\pairs_manifest_stereo_english_only_filtered.jsonl" `
+  --out_manifest "I:\Record_chunks\pairs_manifest_stage7_plus_stage9_reverb.jsonl" `
+  --rir_dir "I:\RIRS_NOISES\real_rirs_isotropic_noises\RIRS_NOISES\simulated_rirs" `
+  --out_dir "I:\Record_chunks_reverb" `
+  --ratio 0.3 `
+  --copies 1 `
+  --workers 4 `
+  --stage_name reverb `
+  --seen_db "I:\Record_chunks\seen_stage9_reverb.sqlite"
+
+
+
+
 Assumptions:
 - Input audio is already 16 kHz mono WAV (recommended)
 - RIR files are WAV/FLAC/OGG (usually 16 kHz)

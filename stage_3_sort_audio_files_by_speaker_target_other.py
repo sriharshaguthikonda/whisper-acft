@@ -223,22 +223,73 @@ def cosine_sim(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.dot(a, b))  # assumes both l2-normalized
 
 
-def load_state(state_file: Path) -> Dict[str, object]:
-    if state_file.exists():
-        try:
-            with open(state_file, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception as e:
-            print(f"Warning: Could not load state file {state_file}: {e}", flush=True)
-    return {}
-
-
-def save_state(state_file: Path, state: Dict[str, object]) -> None:
+def load_state(path: Path) -> dict:
+    """Best-effort state load. If corrupt, we can still resume from the CSV."""
+    if not path.exists():
+        return {}
     try:
-        with open(state_file, "w", encoding="utf-8") as f:
-            json.dump(state, f, indent=2, ensure_ascii=False)
+        with path.open("r", encoding="utf-8") as f:
+            return json.load(f) or {}
     except Exception as e:
-        print(f"Warning: Could not save state file {state_file}: {e}", flush=True)
+        print(f"Warning: failed to load state file {path}: {e}. Will fall back to CSV resume.")
+        # Optional: rename the corrupt file so we don't keep re-reading it.
+        try:
+            backup = path.with_suffix(path.suffix + ".corrupt")
+            if not backup.exists():
+                os.replace(path, backup)
+        except Exception:
+            pass
+        return {}
+
+
+def save_state(path: Path, state: dict) -> None:
+    """Atomic write to reduce the chance of a corrupt JSON file on crash/kill."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    with tmp.open("w", encoding="utf-8", newline="") as f:
+        json.dump(state, f, indent=2, ensure_ascii=False)
+        f.flush()
+        try:
+            os.fsync(f.fileno())
+        except Exception:
+            pass
+    os.replace(tmp, path)
+
+
+def _canon_path(p: str) -> str:
+    """Normalise paths for reliable resume on Windows (case-insensitive + normalised)."""
+    try:
+        return os.path.normcase(os.path.abspath(os.path.normpath(p)))
+    except Exception:
+        return os.path.normcase(p)
+
+def load_processed_files_from_csv(csv_path: Path):
+    """Return a set of already-processed file paths from the output CSV."""
+    processed = set()
+    if not csv_path.exists():
+        return processed
+    try:
+        with csv_path.open("r", encoding="utf-8", newline="") as f:
+            # Peek at the first line to decide DictReader vs raw reader
+            first_line = f.readline()
+            f.seek(0)
+            if "file" in first_line.lower():
+                reader = csv.DictReader(f)
+                for row in reader:
+                    fp = (row.get("file") or "").strip()
+                    if fp:
+                        processed.add(_canon_path(fp))
+            else:
+                reader = csv.reader(f)
+                for row in reader:
+                    if not row:
+                        continue
+                    fp = str(row[0]).strip()
+                    if fp and fp.lower() != "file":
+                        processed.add(_canon_path(fp))
+    except Exception as e:
+        print(f"Warning: failed reading CSV for resume {csv_path}: {e}")
+    return processed
 
 
 def compute_signature(payload: Dict[str, object]) -> str:
@@ -605,8 +656,15 @@ def main() -> None:
 
     ensure_csv_header(csv_path, fieldnames)
 
-    existing_state = load_state(state_file) if not args.no_resume else {}
-    processed_files = set(existing_state.get("processed_files", []))
+    no_resume = getattr(args, "no_resume", False)
+    existing_state = load_state(state_file) if not no_resume else {}
+    processed_files = {_canon_path(p) for p in existing_state.get("processed_files", [])}
+
+    # CSV is a durable source of truth: use it to recover progress if state.json is corrupt/missing
+    processed_from_csv = load_processed_files_from_csv(csv_path) if not no_resume else set()
+    if processed_from_csv:
+        print(f"Resume: found {len(processed_from_csv)} processed file(s) in CSV -> skipping them.")
+        processed_files |= processed_from_csv
 
     # Signature to prevent mixing runs
     sig_payload = {
@@ -629,7 +687,7 @@ def main() -> None:
             f"state_file: {state_file}"
         )
 
-    remaining_files = [f for f in audio_files if str(f) not in processed_files]
+    remaining_files = [f for f in audio_files if _canon_path(str(f)) not in processed_files]
     if not remaining_files:
         print("All files have already been processed!", flush=True)
         return
@@ -652,7 +710,7 @@ def main() -> None:
     progress_upd = make_progress(args.progress, total=len(remaining_files))
 
     # Track state
-    current_processed_files = list(processed_files)
+    current_processed_files = sorted(processed_files)
 
     with tempfile.TemporaryDirectory() as td:
         tmp = Path(td)
@@ -720,7 +778,7 @@ def main() -> None:
                             }
                         )
                     append_csv_row(csv_path, fieldnames, row)
-                    current_processed_files.append(str(af))
+                    current_processed_files.append(_canon_path(str(af)))
                     progress_upd(start + batch_files.index(af) + 1, af.name)
                 else:
                     to_process.append(af)
@@ -751,7 +809,7 @@ def main() -> None:
                             }
                         )
                     append_csv_row(csv_path, fieldnames, row)
-                    current_processed_files.append(str(af))
+                    current_processed_files.append(_canon_path(str(af)))
                     progress_upd(start + batch_files.index(af) + 1, af.name)
                 else:
                     good_files.append(af)
@@ -788,7 +846,7 @@ def main() -> None:
                             }
                         )
                     append_csv_row(csv_path, fieldnames, row)
-                    current_processed_files.append(str(af))
+                    current_processed_files.append(_canon_path(str(af)))
                     progress_upd(start + batch_files.index(af) + 1, af.name)
 
                 save_state(state_file, {"processed_files": current_processed_files, "run_signature": run_sig})

@@ -12,7 +12,7 @@ from tqdm import tqdm
 
 def move_test_chunks():
     # Paths
-    manifest_path = r"I:\Record_chunks\pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized_test.jsonl"
+    manifest_path = r"I:\Record_chunks\pairs_manifest_stage7_plus_stage9_reverb_bottom_filtered_test.jsonl"
     target_dir = r"I:\Record_test_chunks"
     backup_manifest = manifest_path + ".backup"
     

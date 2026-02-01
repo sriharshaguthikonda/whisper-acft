@@ -11,6 +11,23 @@ Key properties
 - SQLite seen index prevents duplicates on resume/re-run
 - Stable filenames with embedded uid
 
+usage
+--------------
+& "I:\Whisper-training-env\Scripts\python.exe" "I:\whisper-acft\stage_7_add_others_voices_to_my_audio_fast_idempotent.py" `
+  --in_manifest  "I:\Record_chunks\pairs_manifest_stereo_english_only_filtered.jsonl" `
+  --out_manifest "I:\Record_chunks\pairs_manifest_stereo_english_only_filtered_others_voices_mixed.jsonl" `
+  --other_voices_dir "I:\Record_others_compacted" `
+  --out_dir "I:\Record_chunks_others_voices_mixed" `
+  --ratio 0.3 `
+  --copies 1 `
+  --scores_csv "I:\whisper-acft\speaker_sort_scores.csv" `
+  --workers 4 `
+  --stage_name voice_mix `
+  --seen_db "I:\Record_chunks\seen_stage7_voice_mix.sqlite"
+
+
+
+
 Notes
 -----
 - Best performance is to preconvert OTHER voices to 16 kHz mono WAV.

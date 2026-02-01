@@ -106,14 +106,14 @@ def atomic_write_json(path: str, obj):
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "I:/Record_chunks/pairs_pending_stereo_english_only_filtered_with_others_voice_mix_aug_rir_real_bottom_filtered_randomized_train_randomized.jsonl"
+MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_stage7_plus_stage9_reverb_bottom_filtered_train.jsonl"
 
 # Make each run isolated. If you want fixed naming, set RUN_TAG manually.
 RUN_TAG = os.environ.get('WHISPER_RUN_TAG') or datetime.now().strftime('%Y%m%d_%H%M%S')
-CHECKPOINT_DIR = f"i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_8/runs/{RUN_TAG}"
+CHECKPOINT_DIR = f"i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_9/{RUN_TAG}"
 
 # Put run-state files INSIDE the checkpoint directory so runs do not poison each other.
-TRAINED_JSONL_PATH = os.path.join(CHECKPOINT_DIR, "trained_stage18.jsonl")
+TRAINED_JSONL_PATH = os.path.join(CHECKPOINT_DIR, "trained_stage1.jsonl")
 
 # =============================
 # PATCH 2) Run state + pending epoch plan
