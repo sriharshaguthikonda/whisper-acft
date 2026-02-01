@@ -697,15 +697,41 @@ def process_one_task(
                     "model": "",
                 }
             
-            # Generate base UID for this chunk
-            chunk_index = int(r.get("chunk_index") or 0)
-            base_uid = make_base_uid(src, chunk_index, float(task.core_start), float(task.core_end))
-            
-            # Set required UID fields
-            r["uid"] = base_uid  # For original chunks, uid == base_uid
+            # --- UID model ---
+            # * base_uid identifies the ORIGINAL (non-augmented) chunk.
+            # * For original rows: uid == base_uid
+            # * For augmented rows (later stages): uid != base_uid, parent_uid == base_uid, aug_stage != ""
+            #
+            # IMPORTANT:
+            #   Do NOT mark stage-2 outputs as augmented. Stage-7/9 only select original rows
+            #   (uid==base_uid and aug_stage empty). If you set aug_stage here, later stages
+            #   will treat everything as already-augmented and select 0 rows.
+
+            # Prefer any existing chunk_index, otherwise parse from filename.
+            ci = r.get("chunk_index")
+            if isinstance(ci, int):
+                chunk_index = ci
+            else:
+                # e.g. ...__chunk0000__L.wav / ...chunk0000.wav
+                import re
+
+                m = re.search(r"chunk(\d+)", str(audio_path))
+                chunk_index = int(m.group(1)) if m else 0
+
+            # Include channel in base_uid so true stereo L/R don't collide.
+            base_uid = make_base_uid(
+                src,
+                int(chunk_index),
+                float(task.core_start),
+                float(task.core_end),
+                extra=f"ch={channel}",
+            )
+
+            r["uid"] = base_uid
             r["base_uid"] = base_uid
-            r["aug_stage"] = "stage2"  # This is stage 2 processing
-            r["parent_uid"] = base_uid  # Original chunks have parent_uid == base_uid
+            r["aug_stage"] = ""         # ORIGINAL row
+            r["parent_uid"] = ""        # ORIGINAL row
+            r["aug_copy_idx"] = 0        # ORIGINAL row
             
             # Set other required fields
             r["audio_path"] = audio_path
@@ -1012,9 +1038,21 @@ def main() -> int:
     ffmpeg_sem = threading.Semaphore(int(args.ffmpeg_workers))
 
     # Output writer
-    # Truncate output if you want a clean rebuild; otherwise append.
-    # Here: we rebuild from scratch unless you explicitly want append.
-    out_pairs.write_bytes(b"")
+    # If we're resuming, DO NOT truncate the output manifest.
+    # Truncating + skipping done tasks produces an incomplete manifest.
+    #
+    # Safety: if state says there are done tasks but the output manifest is missing,
+    # reset done_set so we can rebuild the manifest (cuts will still be skipped by
+    # --skip_existing if the WAVs are already present).
+    if done_set and (not out_pairs.exists()):
+        print("[cut] WARNING: state has done tasks but out_pairs is missing; resetting done_set to rebuild manifest")
+        done_set = set()
+
+    if not done_set:
+        out_pairs.parent.mkdir(parents=True, exist_ok=True)
+        out_pairs.write_bytes(b"")
+    else:
+        print(f"[cut] resume: keeping existing out_pairs (append mode): {out_pairs}")
 
     q: "queue.Queue[Optional[bytes]]" = queue.Queue(maxsize=50000)
     wt = threading.Thread(target=writer_thread_main, args=(q, out_pairs), daemon=True)

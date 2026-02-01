@@ -86,12 +86,19 @@ def _ffmpeg_read_full_f32le(path: Path, target_sr: int) -> np.ndarray:
     ffmpeg = _find_ffmpeg()
     if not ffmpeg:
         raise RuntimeError("ffmpeg not found in PATH (or common locations)")
+
+    # Some recorders create broken/duplicated timestamps. For raw PCM output this can trigger:
+    # "Application provided invalid, non monotonically increasing dts..."
+    # We ask ffmpeg to ignore DTS and generate timestamps, and we also capture stderr so logs
+    # don't spam the terminal when the decode still succeeds.
     cmd = [
         ffmpeg,
         "-nostdin",
         "-hide_banner",
         "-loglevel",
         "error",
+        "-fflags",
+        "+genpts+igndts",
         "-i",
         str(path),
         "-vn",
@@ -103,7 +110,12 @@ def _ffmpeg_read_full_f32le(path: Path, target_sr: int) -> np.ndarray:
         "f32le",
         "pipe:1",
     ]
-    raw = subprocess.check_output(cmd)
+
+    p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    if p.returncode != 0:
+        err = (p.stderr or b"").decode("utf-8", errors="ignore")
+        raise RuntimeError(f"ffmpeg decode failed for {path}: {err[:2000]}")
+    raw = p.stdout or b""
     if not raw:
         return np.zeros((0,), dtype=np.float32)
     return np.frombuffer(raw, dtype=np.float32)
