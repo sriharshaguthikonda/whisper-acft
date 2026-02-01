@@ -11,8 +11,8 @@ from pathlib import Path
 from tqdm import tqdm
 
 def move_test_chunks():
-    # Paths
-    manifest_path = r"I:\Record_chunks\pairs_manifest_stage7_plus_stage9_reverb_bottom_filtered_test.jsonl"
+    # Paths - using the test manifest we just created
+    manifest_path = r"I:\Record_chunks\pairs_manifest_combined_all_datasets_randomized_test.jsonl"
     target_dir = r"I:\Record_test_chunks"
     backup_manifest = manifest_path + ".backup"
     

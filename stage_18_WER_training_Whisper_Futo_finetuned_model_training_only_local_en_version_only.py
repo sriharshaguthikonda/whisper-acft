@@ -106,11 +106,11 @@ def atomic_write_json(path: str, obj):
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_stage7_plus_stage9_reverb_bottom_filtered_train.jsonl"
+MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_combined_all_datasets_randomized_train.jsonl"
 
 # Make each run isolated. If you want fixed naming, set RUN_TAG manually.
 RUN_TAG = os.environ.get('WHISPER_RUN_TAG') or datetime.now().strftime('%Y%m%d_%H%M%S')
-CHECKPOINT_DIR = f"i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_9/{RUN_TAG}"
+CHECKPOINT_DIR = f"i:/Stage_2_shuffle_Dynamic_n_ctx_stage_7_9_checkpoints_partialctx_tiny_en_9/{RUN_TAG}"
 
 # Put run-state files INSIDE the checkpoint directory so runs do not poison each other.
 TRAINED_JSONL_PATH = os.path.join(CHECKPOINT_DIR, "trained_stage1.jsonl")
@@ -310,11 +310,11 @@ MAX_AUDIO_SECONDS = 30.0  # we pad features to 30s; this filters absurdly long c
 # Start here:
 # - If training is unstable or WER collapses after epoch_000001: reduce LR_START (e.g., 2e-6 -> 1e-6 -> 5e-7)
 # - If training is too slow / no learning: increase LR_START (e.g., 2e-6 -> 5e-6)
-LR_START = 2e-6
-LR_FLOOR = 2e-7
-WARMUP_STEPS = 200          # optimizer-steps (NOT micro-batches)
-DECAY_GAMMA = 0.7           # per-epoch decay multiplier after warmup
-USE_SCHEDULER = True
+LR_START = 1e-7
+LR_FLOOR = 1e-8
+WARMUP_STEPS = 1000         # optimizer-steps (NOT micro-batches)
+DECAY_GAMMA = 0.95          # per-epoch decay multiplier after warmup
+USE_SCHEDULER = False       # Disable scheduler temporarily for stability
 RESUME_OVERRIDE_LR = True   # IMPORTANT: force LR_START even when resuming optimizer state
 
 # --- Fix the dangerous behaviour: NEVER bump LR UP on resume ---

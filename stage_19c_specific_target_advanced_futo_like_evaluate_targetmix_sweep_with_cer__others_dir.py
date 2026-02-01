@@ -10,11 +10,11 @@ Place this next to the original stage_19c core script.
 
 
 I:\Whisper-training-env\Scripts\python.exe "I:\whisper-acft\stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer__others_dir.py" \
-  --test_manifest "I:\Record_chunks\pairs_manifest_stage7_plus_stage9_reverb_bottom_filtered_test.jsonl" \
+  --test_manifest "I:\Record_chunks\pairs_manifest_combined_all_datasets_randomized_test.jsonl" \
   --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores.csv" \
   --others_dir "I:\Record_others_chunks" \
   --others_manifest "I:\Record_others_chunks\pairs_pending_stereo.jsonl" \
-  --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_9" \
+  --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_stage_7_9_checkpoints_partialctx_tiny_en_9" \
   --mix_per_target 1 \
   --pairing_mode hash \
   --target_take 0 \

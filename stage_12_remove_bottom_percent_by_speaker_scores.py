@@ -65,7 +65,15 @@ def canonical_key(p: str) -> str:
 def load_speaker_scores(csv_path: Path) -> Dict[str, float]:
     """Load speaker scores from CSV file into a dictionary."""
     print(f"Loading speaker scores from {csv_path}...")
-    df = pd.read_csv(csv_path)
+    
+    # Read CSV with error handling for malformed lines
+    try:
+        df = pd.read_csv(csv_path)
+    except pd.errors.ParserError as e:
+        print(f"CSV parsing error: {e}")
+        print("Attempting to read with more robust settings...")
+        # Try with more robust settings
+        df = pd.read_csv(csv_path, on_bad_lines='skip', quoting=3)  # QUOTE_NONE for robust parsing
     
     # Create a dictionary mapping file paths to scores using canonical_key for robust matching
     score_dict = {}

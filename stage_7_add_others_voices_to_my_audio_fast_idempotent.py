@@ -44,9 +44,11 @@ import os
 import random
 import shutil
 import subprocess
-from concurrent.futures import ThreadPoolExecutor, as_completed
+import time
+from concurrent.futures import ThreadPoolExecutor, wait, FIRST_COMPLETED
 from pathlib import Path
 from typing import Any, Dict, Optional, Set, Tuple
+from collections import Counter
 
 import numpy as np
 import soundfile as sf
@@ -352,6 +354,7 @@ def main() -> None:
     ap.add_argument("--good_floor_db", type=float, default=-45.0)
     ap.add_argument("--target_sr", type=int, default=16000)
     ap.add_argument("--workers", type=int, default=8)
+    ap.add_argument("--heartbeat_sec", type=float, default=0.0, help="Heartbeat interval (seconds) to refresh progress when no tasks finish; 0 disables")
     ap.add_argument("--seen_db", default="")
     ap.add_argument("--allow_augmented_input", action="store_true")
     args = ap.parse_args()
@@ -376,57 +379,141 @@ def main() -> None:
     seen_db = args.seen_db or default_seen_db(out_path, args.stage_name)
     seen = SQLiteSeenSet(seen_db)
 
-    # Use a bounded queue to prevent memory explosion with large manifests
-    MAX_QUEUE_SIZE = int(args.workers) * 10  # Keep queue modestly sized
+    # Use a bounded queue to prevent memory explosion with large manifests,
+    # but still stream completions so you *see* progress immediately.
+    MAX_QUEUE_SIZE = max(1, int(args.workers) * 10)
     futures = []
     n_total = 0
     n_selected = 0
+    n_submitted = 0
+    n_done = 0
+    status_counts = Counter()
+
+    heartbeat_sec = float(getattr(args, "heartbeat_sec", 0.0) or 0.0)
+    if heartbeat_sec < 0:
+        heartbeat_sec = 0.0
 
     with in_path.open("r", encoding="utf-8") as f_in, out_path.open("a", encoding="utf-8") as f_out:
         with ThreadPoolExecutor(max_workers=int(args.workers)) as ex:
-            for line in f_in:
-                line = line.strip()
-                if not line:
-                    continue
-                row = json.loads(line)
-                n_total += 1
+            scan_pbar = tqdm(desc="scan", unit="rows")
+            aug_pbar = tqdm(total=0, desc=f"{args.stage_name} augment", unit="aug")
+            try:
+                last_total_refresh = 0
+                next_hb = time.monotonic() + heartbeat_sec if heartbeat_sec > 0 else None
+                last_done_ts = time.monotonic()
 
-                if not args.allow_augmented_input and not is_original_row(row):
-                    continue
+                def _refresh_total(force: bool = False) -> None:
+                    nonlocal last_total_refresh
+                    # Avoid a refresh for every single submit (tqdm refresh is not free).
+                    if force or (n_submitted - last_total_refresh) >= 200:
+                        aug_pbar.total = n_submitted
+                        aug_pbar.refresh()
+                        last_total_refresh = n_submitted
 
-                base_uid = row.get("base_uid") or row.get("uid")
-                if not base_uid:
-                    continue
+                def _maybe_heartbeat(force: bool = False) -> None:
+                    nonlocal next_hb
+                    if heartbeat_sec <= 0:
+                        return
+                    now = time.monotonic()
+                    if force or (next_hb is not None and now >= next_hb):
+                        okc = int(status_counts.get("ok", 0))
+                        skipc = int(
+                            status_counts.get("already-seen", 0)
+                            + status_counts.get("already-exists", 0)
+                            + status_counts.get("not-target", 0)
+                        )
+                        errc = int(max(0, n_done - okc - skipc))
+                        idle = max(0.0, now - last_done_ts)
+                        # refresh=False lets tqdm honour its own mininterval/maxinterval.
+                        aug_pbar.set_postfix(
+                            ok=okc,
+                            skip=skipc,
+                            err=errc,
+                            q=len(futures),
+                            idle_s=f"{idle:.1f}",
+                            refresh=False,
+                        )
+                        aug_pbar.refresh()
+                        next_hb = now + heartbeat_sec
 
-                if not should_select(base_uid, args.stage_name, float(args.ratio)):
-                    continue
+                def _drain_some() -> None:
+                    """Drain completed futures; if none complete, heartbeat (optional)."""
+                    nonlocal futures, n_done, last_done_ts
+                    if not futures:
+                        return
 
-                n_selected += 1
-                for copy_idx in range(1, int(args.copies) + 1):
-                    futures.append(
-                        ex.submit(process_one, row, args.stage_name, copy_idx, out_dir, args, other_files, seen)
-                    )
-                
-                # Process results as queue gets full to prevent memory buildup
-                if len(futures) >= MAX_QUEUE_SIZE:
-                    results = []
-                    for fut in as_completed(futures):
-                        results.append(fut.result())
-                    futures = []  # Reset queue
-                    for ok, out_row, status in results:
+                    timeout = heartbeat_sec if heartbeat_sec > 0 else None
+                    done_set, not_done_set = wait(futures, timeout=timeout, return_when=FIRST_COMPLETED)
+                    futures = list(not_done_set)
+
+                    if not done_set:
+                        _maybe_heartbeat(force=True)
+                        return
+
+                    for fut in done_set:
+                        ok, out_row, status = fut.result()
+                        status_counts[status] += 1
                         if out_row:
                             f_out.write(json.dumps(out_row, ensure_ascii=False) + "\n")
+                        n_done += 1
+                        aug_pbar.update(1)
+                        last_done_ts = time.monotonic()
 
-            # Process any remaining futures
-            if futures:
-                for fut in tqdm(as_completed(futures), total=len(futures), desc=f"{args.stage_name} augment"):
-                    ok, out_row, status = fut.result()
-                    if out_row:
-                        f_out.write(json.dumps(out_row, ensure_ascii=False) + "\n")
+                    _maybe_heartbeat()
+
+                for line in f_in:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    scan_pbar.update(1)
+
+                    row = json.loads(line)
+                    n_total += 1
+
+                    if not args.allow_augmented_input and not is_original_row(row):
+                        continue
+
+                    base_uid = row.get("base_uid") or row.get("uid")
+                    if not base_uid:
+                        continue
+
+                    if not should_select(base_uid, args.stage_name, float(args.ratio)):
+                        continue
+
+                    n_selected += 1
+                    for copy_idx in range(1, int(args.copies) + 1):
+                        futures.append(
+                            ex.submit(process_one, row, args.stage_name, copy_idx, out_dir, args, other_files, seen)
+                        )
+                        n_submitted += 1
+                        if (n_submitted % 200) == 0:
+                            _refresh_total()
+
+                    # Keep the queue bounded; drain incrementally so progress moves.
+                    while len(futures) >= MAX_QUEUE_SIZE:
+                        _refresh_total()
+                        _drain_some()
+
+                    if (n_total % 5000) == 0:
+                        scan_pbar.set_postfix(sel=n_selected, q=len(futures))
+
+                # Final drain (with optional heartbeat timeouts)
+                _refresh_total(force=True)
+                while futures:
+                    _drain_some()
+                _refresh_total(force=True)
+                _maybe_heartbeat(force=True)
+
+            finally:
+                scan_pbar.close()
+                aug_pbar.close()
 
     seen.commit()
     seen.close()
-    print(f"Stage {args.stage_name}: scanned {n_total} rows; selected {n_selected} base rows; emitted up to {n_selected*int(args.copies)}")
+    print(
+        f"Stage {args.stage_name}: scanned {n_total} rows; selected {n_selected} base rows; "
+        f"scheduled {n_submitted} augments; completed {n_done}; statuses {dict(status_counts)}"
+    )
     safe_beep()
 
 
