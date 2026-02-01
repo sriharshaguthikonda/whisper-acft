@@ -376,6 +376,8 @@ def main() -> None:
     seen_db = args.seen_db or default_seen_db(out_path, args.stage_name)
     seen = SQLiteSeenSet(seen_db)
 
+    # Use a bounded queue to prevent memory explosion with large manifests
+    MAX_QUEUE_SIZE = int(args.workers) * 10  # Keep queue modestly sized
     futures = []
     n_total = 0
     n_selected = 0
@@ -404,11 +406,23 @@ def main() -> None:
                     futures.append(
                         ex.submit(process_one, row, args.stage_name, copy_idx, out_dir, args, other_files, seen)
                     )
+                
+                # Process results as queue gets full to prevent memory buildup
+                if len(futures) >= MAX_QUEUE_SIZE:
+                    results = []
+                    for fut in as_completed(futures):
+                        results.append(fut.result())
+                    futures = []  # Reset queue
+                    for ok, out_row, status in results:
+                        if out_row:
+                            f_out.write(json.dumps(out_row, ensure_ascii=False) + "\n")
 
-            for fut in tqdm(as_completed(futures), total=len(futures), desc=f"{args.stage_name} augment"):
-                ok, out_row, status = fut.result()
-                if out_row:
-                    f_out.write(json.dumps(out_row, ensure_ascii=False) + "\n")
+            # Process any remaining futures
+            if futures:
+                for fut in tqdm(as_completed(futures), total=len(futures), desc=f"{args.stage_name} augment"):
+                    ok, out_row, status = fut.result()
+                    if out_row:
+                        f_out.write(json.dumps(out_row, ensure_ascii=False) + "\n")
 
     seen.commit()
     seen.close()
