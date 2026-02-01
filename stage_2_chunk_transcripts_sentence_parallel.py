@@ -1,7 +1,7 @@
 """Stage 2b: Cut audio chunks from tasks_pending.jsonl, with optional stereo split + drop-dupe.
 
 Your existing pipeline already precomputes cut-jobs in:
-  I:\Record_chunks\tasks_pending.jsonl
+  I:\\Record_chunks\\tasks_pending.jsonl
 Each JSONL line looks like:
   {"audio_path": "...mp3", "out_wav": "...chunk0000.wav", "core_start": 0.0, "core_end": 1.88, "target_out_sec": 2.28}
 
@@ -22,10 +22,10 @@ Resumable:
 
   usage
 
-I:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\stage_2_chunk_transcripts_sentence_parallel.py ^
-  --tasks_pending_path "I:\Record_chunks\tasks_pending.jsonl" ^
-  --pairs_pending_path "I:\Record_chunks\pairs_pending.jsonl" ^
-  --out_pairs_path "I:\Record_chunks\pairs_manifest_stereo.jsonl" ^
+I:\\Whisper-training-env\\Scripts\\python.exe i:\\whisper-acft\\stage_2_chunk_transcripts_sentence_parallel.py ^
+  --tasks_pending_path "I:\\Record_chunks\\tasks_pending.jsonl" ^
+  --pairs_pending_path "I:\\Record_chunks\\pairs_pending.jsonl" ^
+  --out_pairs_path "I:\\Record_chunks\\pairs_manifest_stereo.jsonl" ^
   --ffmpeg_workers 4 --task_workers 4 --ffmpeg_threads 1 ^
   --stereo_policy split_drop_dupes
 
@@ -52,6 +52,9 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
+
+# Import UID utilities
+from pipeline_uid_utils import make_base_uid
 
 # Optional: numpy speeds up correlation math
 try:
@@ -693,7 +696,20 @@ def process_one_task(
                     "sr": int(args.sample_rate),
                     "model": "",
                 }
+            
+            # Generate base UID for this chunk
+            chunk_index = int(r.get("chunk_index") or 0)
+            base_uid = make_base_uid(src, chunk_index, float(task.core_start), float(task.core_end))
+            
+            # Set required UID fields
+            r["uid"] = base_uid  # For original chunks, uid == base_uid
+            r["base_uid"] = base_uid
+            r["aug_stage"] = "stage2"  # This is stage 2 processing
+            r["parent_uid"] = base_uid  # Original chunks have parent_uid == base_uid
+            
+            # Set other required fields
             r["audio_path"] = audio_path
+            r["out_wav"] = audio_path  # Set out_wav to match audio_path
             r["source_audio"] = src
             r["duration_sec_target"] = float(task.target_out_sec)
             r["sr"] = int(args.sample_rate)

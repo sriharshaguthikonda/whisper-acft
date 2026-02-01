@@ -891,7 +891,7 @@ def main() -> None:
                     }
 
                 append_csv_row(csv_path, fieldnames, row)
-                current_processed_files.append(str(af))
+                current_processed_files.append(_canon_path(str(af)))
 
                 # progress
                 file_idx = start + batch_files.index(af) + 1
