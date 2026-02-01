@@ -129,7 +129,7 @@ class SQLiteSeenSet:
         self._lock = threading.Lock()
         self._conn = sqlite3.connect(
             str(self.db_path),
-            timeout=30,
+            timeout=60,  # Increased from 30 to 60 seconds
             check_same_thread=False,  # <- critical for ThreadPoolExecutor
         )
 
@@ -138,7 +138,7 @@ class SQLiteSeenSet:
             cur.execute("PRAGMA journal_mode=WAL;")
             cur.execute("PRAGMA synchronous=NORMAL;")
             cur.execute("PRAGMA temp_store=MEMORY;")
-            cur.execute("PRAGMA busy_timeout=5000;")
+            cur.execute("PRAGMA busy_timeout=30000;")  # Increased from 5000 to 30000
             cur.execute("CREATE TABLE IF NOT EXISTS seen (k TEXT PRIMARY KEY);")
             cur.close()
             self._conn.commit()
