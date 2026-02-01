@@ -239,7 +239,7 @@ def atomic_write_wav_pcm16(path: Path, audio, sr: int, subtype: str = "PCM_16", 
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
 
-    tmp = Path(str(path) + f".tmp.{os.getpid()}.{threading.get_ident()}")
+    tmp = path.with_suffix(f".tmp.{os.getpid()}.{threading.get_ident()}.wav")
     safe_unlink(tmp)
     try:
         sf.write(str(tmp), np.asarray(audio, dtype=np.float32), int(sr), subtype=subtype)
