@@ -792,6 +792,9 @@ def fix_whisper_special_tokens(processor, model):
 
 def strip_leading_token(labels, token_id: int, pad_id: int):
     """If every sequence begins with token_id (and it's not padding), drop that column."""
+    # Safety: if token_id is not initialised yet, do nothing.
+    if token_id is None:
+        return labels
     # labels are int64 tensor shaped [B, T]
     if labels.numel() == 0:
         return labels
@@ -955,6 +958,17 @@ def collate_batch(examples):
 # ============================================
 # CELL 9/9 — Main loop with async prefetch (works in BOTH modes)
 # ============================================
+
+# Fail fast with a helpful error if the Stage-18 middle section is missing.
+_required = ["build_loader_from_rows", "train_one_epoch", "save_checkpoint"]
+_missing = [name for name in _required if name not in globals()]
+if _missing:
+    raise SystemExit(
+        "This file is missing core training functions: " + ", ".join(_missing) + "\n"
+        "You likely copied only parts of your Stage 18 script.\n"
+        "Fix: re-add the missing middle section (models/optimizer/scheduler + train loop + checkpoint code) "
+        "from your working Stage 18 script, then re-run."
+    )
 
 
 def cleanup_trained_drive_audio(drive_paths, mode: str, allowed_prefix: str, archive_dir: str):
