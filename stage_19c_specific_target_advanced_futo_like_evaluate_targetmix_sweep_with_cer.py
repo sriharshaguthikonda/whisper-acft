@@ -67,6 +67,7 @@ import hashlib
 import os
 import random
 import re
+import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Dict, List, Tuple, Optional, Iterable
@@ -201,6 +202,91 @@ def load_speaker_sort_scores(csv_path: Path) -> SpeakerLabelDB:
 
     return SpeakerLabelDB(by_path=by_path, by_basename=by_basename)
 
+# ---- Extended speaker CSV with scores (for score-sorted target selection when mixing with external others)
+
+@dataclass
+class SpeakerScoreDB:
+    decision_by_path: Dict[str, str]
+    decision_by_basename: Dict[str, str]
+    score_by_path: Dict[str, float]
+    score_by_basename: Dict[str, float]
+
+    def decision_for(self, audio_path: str) -> Optional[str]:
+        k = _norm_windows_key(audio_path)
+        if k in self.decision_by_path:
+            return self.decision_by_path[k]
+        b = _basename(audio_path)
+        return self.decision_by_basename.get(b)
+
+    def score_for(self, audio_path: str) -> Optional[float]:
+        k = _norm_windows_key(audio_path)
+        if k in self.score_by_path:
+            return self.score_by_path[k]
+        b = _basename(audio_path)
+        return self.score_by_basename.get(b)
+
+
+def load_speaker_scores_csv(csv_path: Path) -> SpeakerScoreDB:
+    if not csv_path.exists():
+        raise FileNotFoundError(csv_path)
+
+    decision_by_path: Dict[str, str] = {}
+    score_by_path: Dict[str, float] = {}
+    basename_decisions: Dict[str, Dict[str, int]] = {}
+    basename_scores: Dict[str, List[float]] = {}
+
+    with csv_path.open("r", encoding="utf-8", newline="") as f:
+        reader = csv.DictReader(f)
+        if not reader.fieldnames:
+            raise ValueError("CSV has no header")
+
+        if "file" not in reader.fieldnames or "decision" not in reader.fieldnames:
+            raise ValueError(f"CSV must contain 'file' and 'decision' columns. Found: {reader.fieldnames}")
+
+        for row in reader:
+            fp = (row.get("file") or "").strip()
+            if not fp:
+                continue
+
+            decision = (row.get("decision") or "").strip().upper()
+            if decision not in {"TARGET", "OTHER"}:
+                continue
+
+            score_raw = (row.get("score") or "").strip()
+            score: Optional[float] = None
+            if score_raw:
+                try:
+                    score = float(score_raw)
+                except Exception:
+                    score = None
+
+            nk = _norm_windows_key(fp)
+            decision_by_path[nk] = decision
+            if score is not None:
+                score_by_path[nk] = score
+
+            b = _basename(fp)
+            basename_decisions.setdefault(b, {})
+            basename_decisions[b][decision] = basename_decisions[b].get(decision, 0) + 1
+            if score is not None:
+                basename_scores.setdefault(b, []).append(score)
+
+    decision_by_basename: Dict[str, str] = {}
+    score_by_basename: Dict[str, float] = {}
+
+    for b, counts in basename_decisions.items():
+        if len(counts) == 1:
+            decision_by_basename[b] = next(iter(counts.keys()))
+            if b in basename_scores and basename_scores[b]:
+                score_by_basename[b] = float(max(basename_scores[b]))
+
+    return SpeakerScoreDB(
+        decision_by_path=decision_by_path,
+        decision_by_basename=decision_by_basename,
+        score_by_path=score_by_path,
+        score_by_basename=score_by_basename,
+    )
+
 
 # ----------------------------
 # Audio: load/cache/resample
@@ -266,6 +352,51 @@ def load_audio_mono_16k(path: Path) -> Tuple[np.ndarray, int]:
             sr = 16000
 
     return audio, sr
+
+
+def make_loader_with_ffmpeg(ffmpeg_path: str, core_load_orig):
+    def _load_audio_mono_16k(p: Path) -> Tuple[np.ndarray, int]:
+        try:
+            audio, sr = sf.read(str(p), dtype="float32", always_2d=False)
+            if isinstance(audio, np.ndarray) and audio.ndim == 2:
+                audio = audio.mean(axis=1)
+            audio = np.asarray(audio, dtype=np.float32)
+            if not np.isfinite(audio).all():
+                audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+            if sr != 16000:
+                return core_load_orig(p)
+            return audio, int(sr)
+        except Exception:
+            pass
+
+        cmd = [
+            ffmpeg_path,
+            "-v",
+            "error",
+            "-i",
+            str(p),
+            "-f",
+            "f32le",
+            "-ac",
+            "1",
+            "-ar",
+            "16000",
+            "-",
+        ]
+        try:
+            proc = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        except subprocess.CalledProcessError as e:
+            err = (e.stderr or b"").decode("utf-8", errors="ignore")
+            raise RuntimeError(f"ffmpeg failed for {p}: {err}")
+
+        audio = np.frombuffer(proc.stdout, dtype=np.float32)
+        if audio.size == 0:
+            raise RuntimeError(f"ffmpeg produced empty audio for {p}")
+        if not np.isfinite(audio).all():
+            audio = np.nan_to_num(audio, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+        return audio.astype(np.float32), 16000
+
+    return _load_audio_mono_16k
 
 
 def seconds_from_audio(audio: np.ndarray, sr: int) -> float:
@@ -599,6 +730,67 @@ def load_jsonl(p: Path) -> List[dict]:
             rows.append(json.loads(line))
     return rows
 
+# ----------------------------
+# Transcript helpers for external OTHERs
+# ----------------------------
+
+@dataclass
+class TranscriptDB:
+    by_path: Dict[str, str]
+    by_basename: Dict[str, str]
+
+    def text_for(self, audio_path: str) -> Optional[str]:
+        k = _norm_windows_key(audio_path)
+        if k in self.by_path:
+            return self.by_path[k]
+        b = _basename(audio_path)
+        return self.by_basename.get(b)
+
+
+def _row_transcript(row: dict) -> str:
+    for k in ("raw_transcription", "transcript", "text"):
+        v = row.get(k)
+        if isinstance(v, str) and v.strip():
+            return v.strip()
+    return ""
+
+
+def build_transcript_db_from_manifest(manifest_path: Path) -> TranscriptDB:
+    rows = load_jsonl(manifest_path)
+    by_path: Dict[str, str] = {}
+    basename_candidates: Dict[str, List[str]] = {}
+
+    for r in rows:
+        ap = str(r.get("audio_path", "") or "").strip()
+        if not ap:
+            continue
+        tx = _row_transcript(r)
+        if not tx:
+            continue
+        nk = _norm_windows_key(ap)
+        by_path[nk] = tx
+        b = _basename(ap)
+        basename_candidates.setdefault(b, []).append(tx)
+
+    by_basename: Dict[str, str] = {}
+    for b, txs in basename_candidates.items():
+        if len(txs) == 1:
+            by_basename[b] = txs[0]
+        else:
+            by_basename[b] = max(txs, key=len)
+
+    return TranscriptDB(by_path=by_path, by_basename=by_basename)
+
+
+def scan_audio_files(root: Path) -> List[Path]:
+    exts = {".wav", ".flac", ".ogg", ".mp3", ".m4a", ".aac", ".opus"}
+    out: List[Path] = []
+    for p in root.rglob("*"):
+        if p.is_file() and p.suffix.lower() in exts:
+            out.append(p)
+    out.sort(key=lambda p: _norm_windows_key(str(p)))
+    return out
+
 
 # ----------------------------
 # Generate kwargs
@@ -672,6 +864,160 @@ def _cuda_mem_ratio() -> float:
 # ----------------------------
 # Pair building
 # ----------------------------
+
+def select_targets_sorted(
+    rows: List[dict],
+    scores: SpeakerScoreDB,
+    target_take: int,
+    target_percent: float,
+) -> Tuple[List[dict], Dict]:
+    labelled = 0
+    unknown = 0
+    targets: List[Tuple[float, dict]] = []
+
+    for r in rows:
+        ap = str(r.get("audio_path", "") or "").strip()
+        if not ap:
+            continue
+        dec = scores.decision_for(ap)
+        if dec is None:
+            unknown += 1
+            continue
+        labelled += 1
+        if dec != "TARGET":
+            continue
+
+        tx = _row_transcript(r)
+        if not tx:
+            continue
+
+        sc = scores.score_for(ap)
+        scv = float(sc) if sc is not None else float("-inf")
+        targets.append((scv, r))
+
+    targets.sort(key=lambda t: (-(t[0]), _norm_windows_key(str(t[1].get("audio_path", "")))))
+
+    if not (0.0 <= float(target_percent) <= 100.0):
+        raise ValueError("--target_percent must be 0..100")
+
+    if float(target_percent) < 100.0:
+        k = max(1, int(len(targets) * (float(target_percent) / 100.0)))
+        targets = targets[:k]
+
+    if int(target_take) > 0:
+        targets = targets[: int(target_take)]
+
+    info = {
+        "rows_total": len(rows),
+        "rows_labelled": labelled,
+        "rows_unknown": unknown,
+        "targets_selected": len(targets),
+    }
+
+    return [r for _, r in targets], info
+
+
+def build_base_pairs_targets_vs_others(
+    target_rows: List[dict],
+    other_paths: List[Path],
+    other_tx: Optional[TranscriptDB],
+    mix_per_target: int,
+    pairing_mode: str,
+    seed: int,
+    allow_missing_other_ref: bool,
+) -> Tuple[List[dict], Dict]:
+
+    if not target_rows:
+        raise RuntimeError("No TARGET rows selected. Check CSV matching and transcripts in --test_manifest.")
+    if not other_paths:
+        raise RuntimeError("No OTHER audio files found in --others_dir.")
+
+    usable_others: List[Path] = []
+    missing_tx = 0
+    for p in other_paths:
+        if other_tx is None:
+            usable_others.append(p)
+            continue
+        tx = other_tx.text_for(str(p))
+        if tx and tx.strip():
+            usable_others.append(p)
+        else:
+            missing_tx += 1
+
+    if other_tx is not None and not allow_missing_other_ref:
+        if not usable_others:
+            raise RuntimeError(
+                "You provided --others_manifest but none of the files in --others_dir matched a transcript.\n"
+                "Fix matching (same basenames or full paths) OR set --allow_missing_other_ref=1."
+            )
+
+    others = usable_others if (other_tx is not None and not allow_missing_other_ref) else other_paths
+
+    rng = random.Random(int(seed))
+
+    pairs: List[dict] = []
+    for i, trow in enumerate(target_rows):
+        t_ap = str(trow.get("audio_path", "") or "")
+        t_ref = _row_transcript(trow)
+        t_key = _norm_windows_key(t_ap)
+
+        for k in range(int(mix_per_target)):
+            if pairing_mode == "round_robin":
+                oi = (i * int(mix_per_target) + k) % len(others)
+            elif pairing_mode == "random":
+                oi = rng.randrange(0, len(others))
+            else:  # hash (default)
+                oi = int(_stable_u64(f"{t_key}||k{k}||seed{seed}")) % len(others)
+
+            o_path = others[oi]
+            o_ap = str(o_path)
+            o_ref = ""
+            if other_tx is not None:
+                o_ref = (other_tx.text_for(o_ap) or "").strip()
+
+            if not o_ref and not allow_missing_other_ref:
+                found = False
+                for j in range(1, min(25, len(others))):
+                    oi2 = (oi + j) % len(others)
+                    o_ap2 = str(others[oi2])
+                    o_ref2 = (other_tx.text_for(o_ap2) or "").strip() if other_tx is not None else ""
+                    if o_ref2:
+                        o_ap = o_ap2
+                        o_ref = o_ref2
+                        found = True
+                        break
+                if not found:
+                    continue
+
+            if _norm_windows_key(o_ap) == t_key:
+                continue
+
+            base_key = f"{t_key}||{_norm_windows_key(o_ap)}||k{k}"
+
+            pairs.append(
+                {
+                    "base_key": base_key,
+                    "target_audio_path": t_ap,
+                    "other_audio_path": o_ap,
+                    "target_ref": t_ref,
+                    "other_ref": o_ref,
+                }
+            )
+
+    info = {
+        "targets": len(target_rows),
+        "others": len(other_paths),
+        "others_missing_transcript": int(missing_tx),
+        "pairs": len(pairs),
+        "pairing_mode": pairing_mode,
+        "mix_per_target": int(mix_per_target),
+    }
+
+    if not pairs:
+        raise RuntimeError("No pairs were generated. Likely because other transcripts were missing.")
+
+    return pairs, info
+
 
 def build_target_other_base_pairs(
     rows: List[dict],
@@ -752,6 +1098,8 @@ def build_target_other_base_pairs(
             if pairing_mode == "round_robin":
                 oi = other_indices[rr_ptr % len(other_indices)]
                 rr_ptr += 1
+            elif pairing_mode == "hash":
+                oi = int(_stable_u64(f"{_norm_windows_key(t_ap)}||k{k}||seed{seed}")) % len(others)
             else:
                 oi = rng.randrange(0, len(others))
 
@@ -1602,7 +1950,7 @@ def main() -> None:
 
     # pairing
     ap.add_argument("--mix_per_target", type=int, default=1)
-    ap.add_argument("--pairing_mode", default="round_robin", choices=["round_robin", "random"])
+    ap.add_argument("--pairing_mode", default="round_robin", choices=["round_robin", "random", "hash"])
     ap.add_argument("--seed", type=int, default=42)
 
     # mixing rules
@@ -1617,11 +1965,23 @@ def main() -> None:
 
     # caching
     ap.add_argument("--audio_cache_gb", type=float, default=1.0, help="0 disables. Helps a lot for sweep.")
+    ap.add_argument("--ffmpeg_path", default="ffmpeg", help="ffmpeg executable (fallback for mp3/m4a).")
+
+    # external OTHER dir mode
+    ap.add_argument("--others_dir", type=Path, default=None, help="Folder containing OTHER audio files to mix.")
+    ap.add_argument("--others_manifest", type=Path, default=None, help="Optional manifest for OTHER transcripts.")
+    ap.add_argument("--allow_missing_other_ref", type=int, default=0,
+                    help="If 0, OTHER files without transcripts are skipped when --others_manifest is provided.")
+    ap.add_argument("--pairs_manifest", type=Path, default=None,
+                    help="Path to save/load constructed base pairs (for resume across runs).")
+    ap.add_argument("--rebuild_pairs", action="store_true", help="Force rebuild base pairs even if pairs_manifest exists.")
 
     # output/resume
     ap.add_argument("--out_json", type=Path, default=None)
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--force_resume", action="store_true")
+    ap.add_argument("--recalc_metrics", action="store_true",
+                    help="Recompute metrics from saved predictions for already-evaluated models without new inference.")
 
     args = ap.parse_args()
 
@@ -1636,17 +1996,64 @@ def main() -> None:
         raise ValueError("--target_max must be >= 0")
 
     rows = load_jsonl(args.test_manifest)
-    labels = load_speaker_sort_scores(args.speaker_scores_csv)
 
-    base_pairs, pair_info = build_target_other_base_pairs(
-        rows=rows,
-        labels=labels,
-        mix_per_target=int(args.mix_per_target),
-        pairing_mode=str(args.pairing_mode),
-        seed=int(args.seed),
-        target_percentage=float(args.target_percentage),
-        target_max=int(args.target_max),
-    )
+    # Optional ffmpeg fallback for broader formats
+    core_load_orig = load_audio_mono_16k
+    load_audio_mono_16k = make_loader_with_ffmpeg(str(args.ffmpeg_path), core_load_orig)
+
+    if args.others_dir is not None:
+        score_db = load_speaker_scores_csv(args.speaker_scores_csv)
+        target_rows, target_info = select_targets_sorted(
+            rows=rows,
+            scores=score_db,
+            target_take=int(args.target_max),
+            target_percent=float(args.target_percentage),
+        )
+
+        other_paths = scan_audio_files(args.others_dir)
+        other_tx: Optional[TranscriptDB] = None
+        if args.others_manifest is not None:
+            other_tx = build_transcript_db_from_manifest(Path(args.others_manifest))
+
+        if args.pairs_manifest is None:
+            args.pairs_manifest = args.checkpoint_dir / "pairs_manifest_targetmix_sweep_othersdir.jsonl"
+
+        if (args.resume or args.force_resume) and args.pairs_manifest.exists() and not args.rebuild_pairs:
+            base_pairs = load_jsonl(args.pairs_manifest)
+            pair_info = {
+                "loaded_from": str(args.pairs_manifest),
+                "base_pairs": len(base_pairs),
+                "target_info": target_info,
+            }
+            print(f"✓ Loaded base pairs from {args.pairs_manifest} ({len(base_pairs)} pairs)")
+        else:
+            base_pairs, base_info = build_base_pairs_targets_vs_others(
+                target_rows=target_rows,
+                other_paths=other_paths,
+                other_tx=other_tx,
+                mix_per_target=int(args.mix_per_target),
+                pairing_mode=str(args.pairing_mode),
+                seed=int(args.seed),
+                allow_missing_other_ref=bool(args.allow_missing_other_ref),
+            )
+            pair_info = {"target_info": target_info, "base_info": base_info}
+            save_jsonl = args.pairs_manifest or (args.checkpoint_dir / "pairs_manifest_targetmix_sweep_othersdir.jsonl")
+            with save_jsonl.open("w", encoding="utf-8") as f:
+                for r in base_pairs:
+                    f.write(json.dumps(r, ensure_ascii=False) + "\n")
+            print(f"✓ Saved base pairs to {save_jsonl}")
+    else:
+        labels = load_speaker_sort_scores(args.speaker_scores_csv)
+
+        base_pairs, pair_info = build_target_other_base_pairs(
+            rows=rows,
+            labels=labels,
+            mix_per_target=int(args.mix_per_target),
+            pairing_mode=str(args.pairing_mode),
+            seed=int(args.seed),
+            target_percentage=float(args.target_percentage),
+            target_max=int(args.target_max),
+        )
 
     # Subsample base pairs BEFORE sweep
     if args.percentage < 100.0:
@@ -1735,9 +2142,13 @@ def main() -> None:
         out_json = args.checkpoint_dir / "evaluation_results_futo_like_targetmix_sweep.json"
 
     results = {
+        "mode": "others_dir" if args.others_dir is not None else "single_manifest",
         "test_manifest": str(args.test_manifest),
         "speaker_scores_csv": str(args.speaker_scores_csv),
         "checkpoint_dir": str(args.checkpoint_dir),
+        "others_dir": str(args.others_dir) if args.others_dir else None,
+        "others_manifest": str(args.others_manifest) if args.others_manifest else None,
+        "pairs_manifest": str(args.pairs_manifest) if args.pairs_manifest else None,
         "percentage": float(args.percentage),
         "pair_info": pair_info,
         "base_pairs": len(base_pairs),
@@ -1776,6 +2187,7 @@ def main() -> None:
                 "other_peak_ratio": cfg.other_peak_ratio,
             },
             "audio_cache_gb": float(args.audio_cache_gb),
+            "ffmpeg_path": str(args.ffmpeg_path),
         },
         "models": [],
     }
@@ -1825,17 +2237,22 @@ def main() -> None:
     vad_trimmer = SileroVADTrimmer() if cfg.vad.enabled else None
 
     for m in models:
-        if m in evaluated_models:
+        model_already_done = m in evaluated_models
+        model_name = Path(m).name if Path(m).exists() else m
+        wants_recalc = args.recalc_metrics or args.force_resume
+
+        if model_already_done and not wants_recalc:
             print(f"\n⏭ Skipping already evaluated model: {m}")
             continue
 
         print("\n" + "=" * 80)
-        print(f"Evaluating: {m}")
+        if model_already_done and wants_recalc:
+            print(f"Re-evaluating metrics from saved predictions: {m}")
+        else:
+            print(f"Evaluating: {m}")
         print("=" * 80)
 
-        model_name = Path(m).name if Path(m).exists() else m
-
-        if args.force_resume:
+        if model_already_done and wants_recalc:
             has_predictions = any(model_name in v.get("predictions", {}) for v in all_predictions.values())
             if has_predictions:
                 print(f"📊 Recalculating metrics from existing predictions for {model_name}")
@@ -1843,9 +2260,12 @@ def main() -> None:
                 overall, by_cond = recompute_metrics_from_saved_predictions(
                     all_predictions, model_name, cfg.normalize_mode, active_keys=active_keys
                 )
+                results["models"] = [mm for mm in results.get("models", []) if mm.get("model") != m]
                 results["models"].append({"model": m, "metrics_overall": overall, "metrics_by_condition": by_cond})
                 save_incremental_results(results, all_predictions, out_json)
                 continue
+            else:
+                print("⚠ Recalc requested but no saved predictions found; running full evaluation.")
 
         overall, by_cond = eval_one_model(
             model_id_or_path=m,

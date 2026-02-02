@@ -36,6 +36,9 @@ from transformers import (
     GenerationConfig,
 )
 
+
+epoch_num_start = 0  # default; will be overridden if checkpoints exist
+
 # =============================
 # PATCH 1) Durable IO + keys
 # =============================
@@ -404,11 +407,12 @@ OPT_STEPS_PER_EPOCH = estimate_opt_steps_per_epoch(N_SAMPLES_PER_EPOCH, BATCH_SI
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-DISABLE_AMP = False  # Set to True to disable mixed precision (helps with NaN issues)
+# Runtime toggle (recommended on GTX 1660 if you see NaNs): set WHISPER_DISABLE_AMP=1
+DISABLE_AMP = bool(int(os.environ.get("WHISPER_DISABLE_AMP", "0")))
 use_amp = (device == "cuda") and (not DISABLE_AMP)
 amp_dtype = torch.float16
-use_grad_scaler = (device == "cuda")
-scaler = torch.amp.GradScaler("cuda", enabled=use_grad_scaler)
+# Enable GradScaler only when autocast is enabled
+scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
 print("Device:", device)
 if device == "cuda":
@@ -955,6 +959,455 @@ def collate_batch(examples):
         "keys": keys_used,  # PATCH 6: Return keys used
         "audio_used": audio_used,  # PATCH 6: Return audio paths used
     }
+
+
+# ============================================
+# CELL 5/9 — Models + optimizer + scheduler (RESTORED)
+# ============================================
+
+try:
+    gen_config = GenerationConfig.from_pretrained(FUTO_MODEL_ID)
+except Exception:
+    gen_config = None
+
+
+def find_latest_checkpoint_epoch(checkpoint_dir: str):
+    if not os.path.isdir(checkpoint_dir):
+        return None, None, None
+
+    model_epochs = {}
+    state_epochs = {}
+
+    for name in os.listdir(checkpoint_dir):
+        p = os.path.join(checkpoint_dir, name)
+        if os.path.isdir(p) and name.startswith("model_epoch_"):
+            try:
+                ep = int(name[len("model_epoch_"):])
+                model_epochs[ep] = p
+            except Exception:
+                pass
+        if os.path.isfile(p) and name.startswith("training_state_epoch_") and name.endswith(".pt"):
+            try:
+                ep = int(name[len("training_state_epoch_"):-3])
+                state_epochs[ep] = p
+            except Exception:
+                pass
+
+    if not model_epochs and not state_epochs:
+        return None, None, None
+
+    latest_epoch = max(list(model_epochs.keys()) + list(state_epochs.keys()))
+    return latest_epoch, model_epochs.get(latest_epoch), state_epochs.get(latest_epoch)
+
+
+def load_student_from_checkpoint_or_base(model_dir: str | None):
+    if model_dir and os.path.isdir(model_dir):
+        print("Loading student from checkpoint:", model_dir)
+        return WhisperForConditionalGeneration.from_pretrained(model_dir, generation_config=gen_config)
+    print("Loading student from base:", PROCESSOR_ID)
+    return WhisperForConditionalGeneration.from_pretrained(PROCESSOR_ID, generation_config=gen_config)
+
+
+latest_ckpt_epoch, latest_model_dir, latest_state_path = find_latest_checkpoint_epoch(CHECKPOINT_DIR)
+latest_state = None
+if latest_state_path:
+    try:
+        latest_state = torch.load(latest_state_path, map_location="cpu")
+        print("Found training state:", latest_state_path)
+    except Exception as e:
+        print("WARNING: cannot read state file, weights-only resume.", repr(e))
+        latest_state = None
+
+trained_based_epoch = len(trained_set) // max(1, int(N_SAMPLES_PER_EPOCH))
+ckpt_based_epoch = (latest_ckpt_epoch + 1) if latest_ckpt_epoch is not None else 0
+epoch_num_start = max(int(trained_based_epoch), int(ckpt_based_epoch))
+print(f"Auto epoch start: {epoch_num_start} (trained_based={trained_based_epoch}, ckpt_based={ckpt_based_epoch})")
+
+model_train = load_student_from_checkpoint_or_base(latest_model_dir)
+model_train.to(device)
+model_train.train()
+
+# Fix critical token configuration issues
+SOT_ID = fix_whisper_special_tokens(processor, model_train)
+DECODER_START_ID = SOT_ID
+
+want_acft = (float(LAMBDA_ACFT) > 0.0)
+if want_acft:
+    model_ref = WhisperForConditionalGeneration.from_pretrained(ACFT_REFERENCE_MODEL_ID, generation_config=gen_config)
+    model_ref.to(device)
+    model_ref.eval()
+    for p in model_ref.parameters():
+        p.requires_grad_(False)
+else:
+    model_ref = None
+
+optimizer = torch.optim.AdamW(model_train.parameters(), lr=float(LR_START))
+
+# Track optimizer steps globally
+global_step = 0
+
+# Scheduler (warmup + epoch decay)
+scheduler = None
+if USE_SCHEDULER:
+    def lr_mult(step: int) -> float:
+        if step < WARMUP_STEPS:
+            return float(step) / max(1.0, float(WARMUP_STEPS))
+        post = step - WARMUP_STEPS
+        epoch_i = int(post // max(1, OPT_STEPS_PER_EPOCH))
+        mult = (DECAY_GAMMA ** epoch_i)
+        floor_mult = float(LR_FLOOR) / float(LR_START)
+        if mult < floor_mult:
+            mult = floor_mult
+        return float(mult)
+
+    scheduler = torch.optim.lr_scheduler.LambdaLR(optimizer, lr_lambda=lr_mult)
+    print("[lr] Scheduler enabled: warmup + epoch decay")
+else:
+    print("[lr] Scheduler disabled: constant LR")
+
+# Resume optimizer/scaler/scheduler/global_step
+if latest_state is not None:
+    try:
+        if latest_state.get("optimizer") is not None:
+            optimizer.load_state_dict(latest_state["optimizer"])
+            print("Resumed optimizer state.")
+        if use_amp and latest_state.get("scaler") is not None:
+            scaler.load_state_dict(latest_state["scaler"])
+            print("Resumed GradScaler state.")
+        global_step = int(latest_state.get("global_step", 0) or 0)
+        if scheduler is not None and latest_state.get("scheduler") is not None:
+            try:
+                scheduler.load_state_dict(latest_state["scheduler"])
+                print("Resumed scheduler state.")
+            except Exception as e:
+                print("WARNING: failed to resume scheduler:", repr(e))
+    except Exception as e:
+        print("WARNING: failed to resume optimizer/scaler:", repr(e))
+
+if RESUME_CLAMP_LR:
+    clamp_optimizer_lr(optimizer, float(LR_START))
+    if scheduler is not None and hasattr(scheduler, 'base_lrs'):
+        scheduler.base_lrs = [min(float(b), float(LR_START)) for b in scheduler.base_lrs]
+    print(f"[lr] Clamped LR to LR_START on resume: {LR_START} (global_step={global_step})")
+
+cleanup_memory("after model load")
+
+
+# ============================================
+# CELL 6/9 — Partial encoder + losses (RESTORED)
+# ============================================
+
+FULL_ENCODER_CONTEXT_LENGTH = int(getattr(model_train.config, "max_source_positions", 1500))
+
+
+def compute_partially_encoder(whisper_model, input_features: torch.Tensor, n_audio_ctx: int):
+    target_mel_seq_len = 2 * int(n_audio_ctx)
+    diff = target_mel_seq_len - input_features.shape[2]
+
+    if diff > 0:
+        input_features = F.pad(input_features, (0, diff, 0, 0, 0, 0), "constant", 0.0)
+    elif diff < 0:
+        input_features = input_features[:, :, :target_mel_seq_len]
+
+    if int(n_audio_ctx) == int(FULL_ENCODER_CONTEXT_LENGTH):
+        return whisper_model.encoder(input_features).last_hidden_state
+
+    enc = whisper_model.encoder
+
+    x = F.gelu(enc.conv1(input_features))
+    x = F.gelu(enc.conv2(x))
+    x = x.permute(0, 2, 1)
+
+    pos = enc.embed_positions.weight[: x.shape[1]]
+    hs = x + pos
+    hs = F.dropout(hs, p=enc.dropout, training=enc.training)
+
+    for layer in enc.layers:
+        drop = False
+        if enc.training and torch.rand(()) < enc.layerdrop:
+            drop = True
+        if not drop:
+            if enc.gradient_checkpointing and enc.training:
+                out = enc._gradient_checkpointing_func(layer.__call__, hs, None, None, False)
+            else:
+                out = layer(hs, None, layer_head_mask=None, output_attentions=False)
+            hs = out[0]
+
+    hs = enc.layer_norm(hs)
+    return hs
+
+
+def pick_n_ctx_from_batch(
+    lengths_sec: torch.Tensor,
+    max_embed_positions: int,
+    *,
+    full_ctx: int,
+    safety_sec: float = 0.20,
+    round_to: int = 16,
+    jitter_max: int = 64,
+) -> int:
+    if not lengths_sec.numel():
+        return int(min(full_ctx, max_embed_positions))
+
+    max_len = float(lengths_sec.max().item())
+    base = (float(full_ctx) / 30.0) * (max_len + float(safety_sec))
+    base = int(math.ceil(base))
+
+    if round_to and round_to > 1:
+        base = int(math.ceil(base / round_to) * round_to)
+
+    base = max(1, min(base, max_embed_positions))
+
+    jitter = min(int(jitter_max), max(0, base // 10))
+    if jitter > 0:
+        add = int(torch.randint(0, jitter + 1, (1,), device=lengths_sec.device).item())
+        n_ctx = base + add
+    else:
+        n_ctx = base
+
+    return int(max(1, min(n_ctx, max_embed_positions)))
+
+
+def masked_hidden_mse(hs_pred: torch.Tensor, hs_tgt: torch.Tensor, attn_mask: torch.Tensor):
+    hs_pred = hs_pred.float()
+    hs_tgt = hs_tgt.float()
+    mask = attn_mask.unsqueeze(0).unsqueeze(-1).to(dtype=torch.float32)  # [1,B,T,1]
+    diff2 = (hs_pred - hs_tgt).pow(2) * mask
+    denom = mask.sum() * float(hs_pred.shape[0]) * float(hs_pred.shape[-1])
+    return diff2.sum(dtype=torch.float32) / denom.clamp_min(1.0)
+
+
+def get_lm_head(model: WhisperForConditionalGeneration):
+    if hasattr(model, "proj_out"):
+        return model.proj_out
+    if hasattr(model, "lm_head"):
+        return model.lm_head
+    raise AttributeError("No lm head found (expected proj_out or lm_head)")
+
+
+# ============================================
+# CELL 7/9 — Checkpointing (RESTORED)
+# ============================================
+
+
+def save_checkpoint(epoch_num: int, subset_start_idx: int, subset_count: int):
+    os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+
+    model_dir = os.path.join(CHECKPOINT_DIR, f"model_epoch_{epoch_num:06d}")
+    os.makedirs(model_dir, exist_ok=True)
+
+    # Save model weights/config
+    model_train.to("cpu").save_pretrained(model_dir)
+    model_train.to(device)
+
+    state = {
+        "epoch": int(epoch_num),
+        "subset_start_idx": int(subset_start_idx),
+        "subset_count": int(subset_count),
+        "optimizer": optimizer.state_dict(),
+        "scheduler": scheduler.state_dict() if scheduler is not None else None,
+        "scaler": scaler.state_dict() if use_amp else None,
+        "global_step": int(global_step),
+        "ts": time.time(),
+    }
+
+    state_path = os.path.join(CHECKPOINT_DIR, f"training_state_epoch_{epoch_num:06d}.pt")
+    torch.save(state, state_path)
+    print("✓ Saved checkpoint:", model_dir)
+
+
+# ============================================
+# CELL 8/9 — Training loop (RESTORED)
+# ============================================
+
+
+def build_loader_from_rows(rows_for_epoch):
+    if USE_LOCAL_CACHE:
+        audio_paths = [r["audio_path_local"] for r in rows_for_epoch]
+    else:
+        audio_paths = [r["audio_path"] for r in rows_for_epoch]
+
+    slim = []
+    for ap_use, r in zip(audio_paths, rows_for_epoch):
+        slim.append({
+            "audio": ap_use,
+            "raw_transcription": r.get("raw_transcription", ""),
+            "audio_path_orig": r.get("audio_path"),
+            "key": r.get("key") or canonical_audio_key(r.get("audio_path")),
+            "uid": r.get("uid"),
+        })
+
+    ds = Dataset.from_list(slim)
+
+    return DataLoader(
+        ds,
+        batch_size=int(BATCH_SIZE),
+        shuffle=True,
+        collate_fn=collate_batch,
+        num_workers=int(NUM_WORKERS),
+        pin_memory=(device == "cuda"),
+        drop_last=False,
+    )
+
+
+def _isfinite(x: torch.Tensor) -> bool:
+    return bool(torch.isfinite(x).all().item())
+
+
+def train_one_epoch(epoch_num: int, loader):
+    global global_step
+
+    model_train.train()
+    optimizer.zero_grad(set_to_none=True)
+    lm_head = get_lm_head(model_train)
+
+    running = 0.0
+    n_batches = 0
+
+    accum = 0
+    trained_keys_epoch = set()
+    accum_keys = []
+
+    pbar = tqdm(loader, desc=f"Epoch {epoch_num}", leave=False)
+
+    for batch_idx, batch in enumerate(pbar):
+        if batch is None:
+            continue
+
+        input_features = batch["input_features"].to(device, non_blocking=True)
+        labels = batch["labels"].to(device, non_blocking=True)
+        attn_mask = batch["attention_mask"].to(device, non_blocking=True)
+        lengths = batch["lengths"].to(device, non_blocking=True)
+        keys = batch.get("keys") or []
+
+        max_embed_positions = int(model_train.model.encoder.embed_positions.weight.shape[0])
+        if FORCE_FULL_AUDIO_CTX:
+            n_ctx = int(FULL_ENCODER_CONTEXT_LENGTH)
+        else:
+            n_ctx = pick_n_ctx_from_batch(
+                lengths,
+                max_embed_positions,
+                full_ctx=int(FULL_ENCODER_CONTEXT_LENGTH),
+                safety_sec=float(AUDIO_CTX_SAFETY_SEC),
+                round_to=int(AUDIO_CTX_ROUND_TO),
+                jitter_max=int(AUDIO_CTX_JITTER_MAX),
+            )
+
+        # Prepare decoder inputs
+        labels_for_shift = labels.clone()
+        labels_for_shift[labels_for_shift == -100] = int(PAD_ID)
+        decoder_input_ids = shift_tokens_right(labels_for_shift, int(PAD_ID), int(DECODER_START_ID))
+
+        with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
+            enc_partial = compute_partially_encoder(model_train.model, input_features, int(n_ctx))
+            dec_partial = model_train.model.decoder(
+                input_ids=decoder_input_ids,
+                attention_mask=attn_mask,
+                encoder_hidden_states=enc_partial,
+                output_hidden_states=True,
+                use_cache=False,
+            )
+            logits = lm_head(dec_partial.last_hidden_state)
+            loss_ce = F.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]),
+                labels.reshape(-1),
+                ignore_index=-100,
+                label_smoothing=float(CE_LABEL_SMOOTH),
+            )
+
+        if not _isfinite(loss_ce):
+            print("[warn] non-finite CE loss; skipping batch")
+            optimizer.zero_grad(set_to_none=True)
+            accum = 0
+            accum_keys = []
+            continue
+
+        if want_acft:
+            # Reference forward pass in full precision for stability
+            with torch.no_grad(), torch.amp.autocast("cuda", enabled=False):
+                enc_full = compute_partially_encoder(model_ref.model, input_features, int(FULL_ENCODER_CONTEXT_LENGTH))
+                dec_full = model_ref.model.decoder(
+                    input_ids=decoder_input_ids,
+                    attention_mask=attn_mask,
+                    encoder_hidden_states=enc_full,
+                    output_hidden_states=True,
+                    use_cache=False,
+                )
+
+            hs_p = torch.stack(dec_partial.hidden_states, dim=0)
+            hs_f = torch.stack(dec_full.hidden_states, dim=0)
+
+            if (not _isfinite(hs_p)) or (not _isfinite(hs_f)):
+                print("[warn] non-finite hidden states in ACFT; skipping batch")
+                optimizer.zero_grad(set_to_none=True)
+                accum = 0
+                accum_keys = []
+                continue
+
+            loss_acft = masked_hidden_mse(hs_p, hs_f, attn_mask)
+            if not _isfinite(loss_acft):
+                print("[warn] non-finite ACFT loss; skipping batch")
+                optimizer.zero_grad(set_to_none=True)
+                accum = 0
+                accum_keys = []
+                continue
+        else:
+            loss_acft = torch.zeros((), device=device)
+
+        if want_acft and int(ACFT_RAMP_STEPS) > 0:
+            ramp = min(1.0, float(global_step) / float(max(1, int(ACFT_RAMP_STEPS))))
+            lambda_acft_eff = float(LAMBDA_ACFT) * ramp
+        else:
+            lambda_acft_eff = float(LAMBDA_ACFT)
+
+        loss = (float(LAMBDA_CE) * loss_ce) + (lambda_acft_eff * loss_acft)
+        loss = loss / float(GRAD_ACCUM_STEPS)
+
+        if use_amp:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
+
+        running += float(loss.detach().cpu().item())
+        n_batches += 1
+        accum += 1
+        accum_keys.extend(list(keys))
+
+        # step
+        if accum >= int(GRAD_ACCUM_STEPS):
+            if use_amp:
+                scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model_train.parameters(), float(MAX_GRAD_NORM))
+
+            if use_amp:
+                scaler.step(optimizer)
+                scaler.update()
+            else:
+                optimizer.step()
+
+            optimizer.zero_grad(set_to_none=True)
+            if scheduler is not None:
+                scheduler.step()
+
+            global_step += 1
+            trained_keys_epoch.update(accum_keys)
+            accum_keys = []
+            accum = 0
+
+        lr_now = float(optimizer.param_groups[0].get("lr", 0.0))
+        pbar.set_postfix({
+            "loss": float(loss.detach().cpu().item()) * float(GRAD_ACCUM_STEPS),
+            "ce": float(loss_ce.detach().cpu().item()),
+            "acft": float(loss_acft.detach().cpu().item()) if want_acft else 0.0,
+            "n_ctx": int(n_ctx),
+            "bs": int(input_features.shape[0]),
+            "lr": lr_now,
+        })
+
+    avg_loss = (running / max(1, n_batches))
+    return avg_loss, trained_keys_epoch
+
+
 # ============================================
 # CELL 9/9 — Main loop with async prefetch (works in BOTH modes)
 # ============================================
