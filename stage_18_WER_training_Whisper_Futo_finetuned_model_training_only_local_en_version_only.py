@@ -106,11 +106,11 @@ def atomic_write_json(path: str, obj):
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_combined_all_datasets_randomized_train.jsonl"
+MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_combined_all_datasets_randomized_train_no_reverb_filtered.jsonl"
 
 # Make each run isolated. If you want fixed naming, set RUN_TAG manually.
 RUN_TAG = os.environ.get('WHISPER_RUN_TAG') or datetime.now().strftime('%Y%m%d_%H%M%S')
-CHECKPOINT_DIR = f"i:/Stage_2_shuffle_Dynamic_n_ctx_stage_7_9_checkpoints_partialctx_tiny_en_9/{RUN_TAG}"
+CHECKPOINT_DIR = f"i:/Stage_2_shuffle_checkpoints_partialctx_tiny_en_13/{RUN_TAG}"
 
 # Put run-state files INSIDE the checkpoint directory so runs do not poison each other.
 TRAINED_JSONL_PATH = os.path.join(CHECKPOINT_DIR, "trained_stage1.jsonl")
@@ -304,17 +304,20 @@ MIN_BATCH_SIZE = 4  # Minimum batch size for very large files
 MAX_BATCH_SIZE = 40  # Maximum batch size for small files
 MAX_AUDIO_SECONDS = 30.0  # we pad features to 30s; this filters absurdly long chunks
 
+# --- Gradient clipping to prevent exploding gradients ---
+MAX_GRAD_NORM = 0.1  # Very aggressive gradient clipping to prevent NaN
+
 # ----------------------------
 # Learning rate + scheduler (NEW)
 # ----------------------------
 # Start here:
 # - If training is unstable or WER collapses after epoch_000001: reduce LR_START (e.g., 2e-6 -> 1e-6 -> 5e-7)
 # - If training is too slow / no learning: increase LR_START (e.g., 2e-6 -> 5e-6)
-LR_START = 1e-7
-LR_FLOOR = 1e-8
-WARMUP_STEPS = 1000         # optimizer-steps (NOT micro-batches)
-DECAY_GAMMA = 0.95          # per-epoch decay multiplier after warmup
-USE_SCHEDULER = False       # Disable scheduler temporarily for stability
+LR_START = 2e-6          # Reduce LR further to prevent NaN
+LR_FLOOR = 2e-7           # Higher floor to prevent LR from getting too small
+WARMUP_STEPS = 50         # Slightly longer warmup
+DECAY_GAMMA = 0.8         # Gentler decay per epoch
+USE_SCHEDULER = True        # Enable scheduler for better stability
 RESUME_OVERRIDE_LR = True   # IMPORTANT: force LR_START even when resuming optimizer state
 
 # --- Fix the dangerous behaviour: NEVER bump LR UP on resume ---
@@ -729,11 +732,66 @@ def prepare_epoch_cache(pointer: int, trained_set: set, need: int, manifest_rows
 
 processor = WhisperProcessor.from_pretrained(PROCESSOR_ID)
 
+
+# ============================
+# Helper functions to fix token issues
+# ============================
+
+def _tok_id(tokenizer, tok: str, fallback: int | None = None) -> int:
+    tid = tokenizer.convert_tokens_to_ids(tok)
+    if tid is None or int(tid) < 0:
+        if fallback is None:
+            raise RuntimeError(f"Token not found in tokenizer vocab: {tok}")
+        return int(fallback)
+    return int(tid)
+
+
+def fix_whisper_special_tokens(processor, model):
+    """Hard-sets the correct decoder start token and prints token sanity."""
+    tok = processor.tokenizer
+
+    sot_id = _tok_id(tok, "<|startoftranscript|>")
+    nospeech_id = _tok_id(tok, "<|nospeech|>", fallback=50362)  # fallback only for printing
+
+    print("[tokens] pad:", tok.pad_token_id, "eos:", tok.eos_token_id, "bos:", tok.bos_token_id)
+    print("[tokens] <|startoftranscript|> id:", sot_id, "->", tok.decode([sot_id]))
+    print("[tokens] <|nospeech|> id:", nospeech_id, "->", tok.decode([nospeech_id]))
+
+    # CRITICAL: decoder_start_token_id should be SOT, not nospeech.
+    before = getattr(model.config, "decoder_start_token_id", None)
+    model.config.decoder_start_token_id = sot_id
+    if hasattr(model, "generation_config") and model.generation_config is not None:
+        model.generation_config.decoder_start_token_id = sot_id
+        # also make sure generation knows where to stop
+        model.generation_config.eos_token_id = tok.eos_token_id
+        model.generation_config.pad_token_id = tok.pad_token_id
+
+    print("[tokens] decoder_start_token_id was:", before, "now:", model.config.decoder_start_token_id,
+          "->", tok.decode([model.config.decoder_start_token_id]))
+
+    # If you see that your previous decoder_start_token_id decodes to <|nospeech|>,
+    # that is a serious config bug and can cause pathological decoding.
+
+    return sot_id
+
+
+def strip_leading_token(labels, token_id: int, pad_id: int):
+    """If every sequence begins with token_id (and it's not padding), drop that column."""
+    # labels are int64 tensor shaped [B, T]
+    if labels.numel() == 0:
+        return labels
+    first_col = labels[:, 0]
+    # Only strip if it's consistently present (and not already masked)
+    if torch.all(first_col == token_id):
+        return labels[:, 1:]
+    return labels
+
 N_SAMPLES_30S = processor.feature_extractor.n_samples
 NB_MAX_FRAMES = processor.feature_extractor.nb_max_frames
 
 PAD_ID = processor.tokenizer.pad_token_id
 DECODER_START_ID = None
+SOT_ID = None  # set later by fix_whisper_special_tokens()
 
 
 def decode_mono_16k(path: str):
@@ -853,15 +911,24 @@ def collate_batch(examples):
 
     labels = tok["input_ids"].clone()
     labels[labels == PAD_ID] = -100
+    
+    # CRITICAL: Strip leading SOT token from labels to prevent pathological training
+    labels = strip_leading_token(labels, token_id=SOT_ID, pad_id=PAD_ID)
+    
+    # Also adjust attention_mask if we stripped a token
+    attn_mask = tok["attention_mask"]
+    if attn_mask is not None and attn_mask.shape[1] == labels.shape[1] + 1:
+        attn_mask = attn_mask[:, 1:]
 
-    if tok["attention_mask"].sum().item() == 0:
+    # Check the potentially sliced attention mask, not the original
+    if attn_mask is None or attn_mask.sum().item() == 0:
         return None
 
     return {
         "lengths": torch.tensor(lengths_sec, dtype=torch.float32),
         "input_features": feats.input_features,
         "labels": labels,
-        "attention_mask": tok["attention_mask"],
+        "attention_mask": attn_mask,  # Use adjusted attention mask
         "meta_audio": meta_audio,
         "meta_audio_orig": meta_audio_orig,
         "meta_uid": meta_uid,
@@ -1135,7 +1202,9 @@ model_train = load_student_from_checkpoint_or_base(latest_model_dir)
 model_train.to(device)
 model_train.train()
 
-DECODER_START_ID = int(model_train.config.decoder_start_token_id)
+# Fix critical token configuration issues
+SOT_ID = fix_whisper_special_tokens(processor, model_train)
+DECODER_START_ID = SOT_ID  # Use the corrected SOT ID
 
 want_acft = (LAMBDA_ACFT > 0.0)
 if want_acft:
@@ -1477,8 +1546,15 @@ def train_one_epoch(epoch_num: int, loader):
                 decoder_start_token_id=DECODER_START_ID,
             )
 
+            # Safety: ensure decoder_input_ids and attention_mask lengths match
+            assert decoder_input_ids.shape[1] == attn_mask.shape[1], (
+                f"decoder_input_ids len {decoder_input_ids.shape[1]} != attention_mask len {attn_mask.shape[1]}"
+            )
+
             max_embed_positions = model_train.model.encoder.embed_positions.weight.shape[0]
-            n_ctx = pick_n_ctx_from_batch(lengths, max_embed_positions)
+            #n_ctx = pick_n_ctx_from_batch(lengths, max_embed_positions)
+            # Use full context length instead of dynamic n_ctx for better training
+            n_ctx = FULL_ENCODER_CONTEXT_LENGTH
 
             with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
                 enc_partial = compute_partially_encoder(model_train.model, input_features, n_ctx)
@@ -1630,32 +1706,41 @@ def train_one_epoch(epoch_num: int, loader):
                 global_step += 1
 
             # Practical guardrail: quick sanity decode every N steps to detect repetition collapse
-            if global_step % 200 == 0:
-                try:
-                    # Simple repetition check on recent logits
-                    with torch.no_grad():
-                        # Check if any token repeats excessively in the last batch
-                        if hasattr(logits, 'argmax'):
-                            predicted_tokens = logits.argmax(dim=-1)
-                            # Look for excessive repetition in sequence dimension
-                            for seq_idx in range(predicted_tokens.shape[0]):
-                                seq_tokens = predicted_tokens[seq_idx].cpu().numpy()
-                                # Count consecutive repeats
-                                max_consecutive = 1
-                                current_consecutive = 1
-                                for i in range(1, len(seq_tokens)):
-                                    if seq_tokens[i] == seq_tokens[i-1] and seq_tokens[i] != 0:  # ignore padding
-                                        current_consecutive += 1
-                                        max_consecutive = max(max_consecutive, current_consecutive)
-                                    else:
-                                        current_consecutive = 1
-                                
-                                if max_consecutive > 20:
-                                    raise SystemExit(f'Detected repetition collapse: token repeated {max_consecutive} times consecutively. Stopping to protect checkpoint.')
-                except Exception as e:
-                    if 'repetition collapse' in str(e):
-                        raise e
-                    print(f"[warn] Repetition check failed: {e}")
+            # TEMPORARILY DISABLED TO SEE WHAT ACTUALLY HAPPENS
+            # if global_step % 200 == 0:
+            #     try:
+            #         # Simple repetition check on recent logits
+            #         with torch.no_grad():
+            #             # Check if any token repeats excessively in the last batch
+            #             if hasattr(logits, 'argmax'):
+            #                 predicted_tokens = logits.argmax(dim=-1)
+            #                 # Look for excessive repetition in sequence dimension
+            #                 for seq_idx in range(predicted_tokens.shape[0]):
+            #                     seq_tokens = predicted_tokens[seq_idx].cpu().numpy()
+            #                     # Count consecutive repeats
+            #                     max_consecutive = 1
+            #                     current_consecutive = 1
+            #                     for i in range(1, len(seq_tokens)):
+            #                         if seq_tokens[i] == seq_tokens[i-1] and seq_tokens[i] != 0:  # ignore padding
+            #                             current_consecutive += 1
+            #                             max_consecutive = max(max_consecutive, current_consecutive)
+            #                         else:
+            #                             current_consecutive = 1
+            #                     
+            #                     if max_consecutive > 20:
+            #                         raise SystemExit(f'Detected repetition collapse: token repeated {max_consecutive} times consecutively. Stopping to protect checkpoint.')
+            #     except Exception as e:
+            #         if 'repetition collapse' in str(e):
+            #             raise e
+            #         print(f"[warn] Repetition check failed: {e}")
+            
+            # DEBUG: Print some info about the first few batches
+            if global_step < 5:
+                print(f"[debug] Step {global_step}: loss={loss.item():.6f}, ce={loss_ce.item():.4f}")
+                if hasattr(logits, 'argmax'):
+                    predicted_tokens = logits.argmax(dim=-1)
+                    print(f"[debug] Predicted tokens shape: {predicted_tokens.shape}")
+                    print(f"[debug] Sample predicted tokens (first sequence): {predicted_tokens[0][:20].tolist()}")
 
             running += float(loss.item())
             steps += 1

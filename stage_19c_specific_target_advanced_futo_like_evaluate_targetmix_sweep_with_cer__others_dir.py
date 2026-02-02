@@ -9,21 +9,7 @@ Place this next to the original stage_19c core script.
 
 
 
-I:\Whisper-training-env\Scripts\python.exe "I:\whisper-acft\stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer__others_dir.py" \
-  --test_manifest "I:\Record_chunks\pairs_manifest_combined_all_datasets_randomized_test.jsonl" \
-  --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores.csv" \
-  --others_dir "I:\Record_others_chunks" \
-  --others_manifest "I:\Record_others_chunks\pairs_pending_stereo.jsonl" \
-  --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_stage_7_9_checkpoints_partialctx_tiny_en_9" \
-  --mix_per_target 1 \
-  --pairing_mode hash \
-  --target_take 0 \
-  --target_percent 1 \
-  --sweep_snr_db "20,10,5,0,-5" \
-  --sweep_overlap "0,0.25,0.5,0.75,1" \
-  --audio_cache_gb 1 \
-  --resume
-
+ i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer__others_dir.py" --test_manifest "I:\Record_chunks\pairs_manifest_combined_all_datasets_randomized_test.jsonl" --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores.csv" --others_dir "I:\Record_others_chunks" --others_manifest "I:\Record_others_chunks\pairs_pending_stereo.jsonl" --checkpoint_dir "I:\Stage_2_shuffle_n_ctx_stage_7_checkpoints_partialctx_tiny_en_11\20260202_033631" --mix_per_target 1 --pairing_mode hash --target_take 0 --target_percent 1 --sweep_snr_db "20,10,5,0,-5" --sweep_overlap "0,0.25,0.5,0.75,1" --audio_cache_gb 1 --resume --recalc_metrics
 
 
 
@@ -546,6 +532,8 @@ def main() -> None:
     ap.add_argument("--out_json", type=Path, default=None)
     ap.add_argument("--resume", action="store_true")
     ap.add_argument("--force_resume", action="store_true")
+    ap.add_argument("--recalc_metrics", action="store_true",
+                    help="Recompute metrics from saved predictions for models already present in results (no inference).")
 
     args = ap.parse_args()
 
@@ -628,12 +616,20 @@ def main() -> None:
 
     pair_rows = core.expand_pairs_with_conditions(base_pairs, conditions)
 
-    # checkpoints
+    # checkpoints - look for both model_epoch_* and s20_model_epoch_* patterns
     checkpoints = list(args.checkpoint_dir.glob("model_epoch_*"))
+    checkpoints.extend(args.checkpoint_dir.glob("s20_model_epoch_*"))
 
     def _ckpt_key(p: Path) -> int:
         try:
-            return int(p.name.split("_")[2])
+            # Handle both "model_epoch_XXXXXX" and "s20_model_epoch_XXXXXX" patterns
+            parts = p.name.split("_")
+            if parts[0] == "s20" and parts[1] == "model" and parts[2] == "epoch":
+                return int(parts[3])
+            elif parts[0] == "model" and parts[1] == "epoch":
+                return int(parts[2])
+            else:
+                return 0
         except Exception:
             return 0
 
@@ -778,24 +774,35 @@ def main() -> None:
     vad_trimmer = core.SileroVADTrimmer() if cfg.vad.enabled else None
 
     for m in models:
-        if m in evaluated_models:
+        model_already_done = m in evaluated_models
+        model_name = Path(m).name if Path(m).exists() else m
+        wants_recalc = args.recalc_metrics or args.force_resume
+
+        if model_already_done and not wants_recalc:
             print(f"\n⏭ Skipping already evaluated model: {m}")
             continue
 
         print("\n" + "=" * 80)
-        print(f"Evaluating: {m}")
+        if model_already_done and wants_recalc:
+            print(f"Re-evaluating metrics from saved predictions: {m}")
+        else:
+            print(f"Evaluating: {m}")
         print("=" * 80)
 
-        model_name = Path(m).name if Path(m).exists() else m
-
-        if args.force_resume:
+        if model_already_done and wants_recalc:
             has_predictions = any(model_name in v.get("predictions", {}) for v in all_predictions.values())
             if has_predictions:
                 print(f"📊 Recalculating metrics from existing predictions for {model_name}")
-                overall, by_cond = core.recompute_metrics_from_saved_predictions(all_predictions, model_name, cfg.normalize_mode)
+                overall, by_cond = core.recompute_metrics_from_saved_predictions(
+                    all_predictions, model_name, cfg.normalize_mode
+                )
+                # Replace old metrics entry (if any) to avoid duplicates/stale data.
+                results["models"] = [mm for mm in results.get("models", []) if mm.get("model") != m]
                 results["models"].append({"model": m, "metrics_overall": overall, "metrics_by_condition": by_cond})
                 core.save_incremental_results(results, all_predictions, out_json)
                 continue
+            else:
+                print("⚠ Recalc requested but no saved predictions found; running full evaluation.")
 
         overall, by_cond = core.eval_one_model(
             model_id_or_path=m,

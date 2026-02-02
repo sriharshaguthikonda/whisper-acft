@@ -39,6 +39,7 @@ i:\Whisper-training-env\Scripts\python.exe stage_19c_specific_target_advanced_fu
   --other_peak_ratio 1.0 ^
   --sweep_snr_db "20,10,5,0,-5" ^
   --sweep_overlap "0,0.25,0.5,0.75,1" ^
+  --dynamic_audio_ctx 0
   --auto_batch 0
   --resume
 

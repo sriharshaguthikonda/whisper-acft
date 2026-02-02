@@ -18,7 +18,9 @@ usage
   --out_manifest "I:\Record_chunks\pairs_manifest_stereo_english_only_filtered_others_voices_mixed.jsonl" `
   --other_voices_dir "I:\Record_others_compacted" `
   --out_dir "I:\Record_chunks_others_voices_mixed" `
-  --ratio 0.3 `
+  --max_bad_to_good_ratio 0.15`
+  --snr_db_max 10`
+  --ratio 0.1 `
   --copies 1 `
   --scores_csv "I:\whisper-acft\speaker_sort_scores.csv" `
   --workers 4 `

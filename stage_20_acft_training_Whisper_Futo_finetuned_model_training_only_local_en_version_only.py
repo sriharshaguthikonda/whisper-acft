@@ -5,15 +5,12 @@
 ##       ##     ## ##       ######### ##       
 ##       ##     ## ##    ## ##     ## ##       
 ########  #######   ######  ##     ## ######## 
- needs workd!!!!!!!!!
 
-# ============================================
-# CELL 1/9 — Install + imports
-# ============================================
+# Stage 20 ACFT Training Script
 
 #!pip -q install -U "transformers>=4.38" datasets accelerate soundfile tqdm
 
-import os, json, time, shutil, hashlib, gc
+import os, json, time, shutil, hashlib, gc, argparse
 from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
@@ -36,10 +33,61 @@ from transformers import (
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "i:/Record_chunks/pairs_manifest_filtered_with_noises_and_others_voices_mixed_aug_gain_aug_rir_real_silent_train_manifest.jsonl"
-TRAINED_JSONL_PATH = "i:/Record_chunks/trained_stage2.jsonl"
+MANIFEST_PATH = os.environ.get(
+    "WHISPER_MANIFEST",
+    "i:/Record_chunks/pairs_manifest_combined_all_datasets_randomized_train_no_reverb.jsonl",
+)
 
-CHECKPOINT_DIR = "i:/acft_checkpoints_partialctx_stage5"
+DEFAULT_CKPT_ROOT = os.environ.get(
+    "WHISPER_CKPT_ROOT",
+    "i:/Stage_2_shuffle_Dynamic_n_ctx_stage_7_checkpoints_partialctx_tiny_en_11",
+)
+
+
+def _latest_run_tag(root: str | None):
+    if not root or not os.path.isdir(root):
+        return None
+    tags = []
+    for name in os.listdir(root):
+        p = os.path.join(root, name)
+        if os.path.isdir(p):
+            tags.append(name)
+    if not tags:
+        return None
+    return sorted(tags)[-1]
+
+
+RUN_TAG = os.environ.get("WHISPER_RUN_TAG") or _latest_run_tag(DEFAULT_CKPT_ROOT) or "20260202_033631"
+
+CHECKPOINT_DIR = os.environ.get("WHISPER_CHECKPOINT_DIR") or os.path.join(DEFAULT_CKPT_ROOT, RUN_TAG)
+
+# Track trained list inside the run dir by default; reuse Stage 18 progress unless overridden.
+TRAINED_JSONL_PATH = os.environ.get("WHISPER_TRAINED_JSONL") or os.path.join(CHECKPOINT_DIR, "trained_stage1.jsonl")
+
+# ----------------------------
+# CLI overrides (no env vars needed)
+# ----------------------------
+argp = argparse.ArgumentParser(description="Stage 20 ACFT training (Whisper)")
+argp.add_argument("--manifest", dest="manifest_path", help="Manifest JSONL to train from")
+argp.add_argument("--checkpoint_dir", dest="checkpoint_dir", help="Checkpoint directory (run folder)")
+argp.add_argument("--run_tag", dest="run_tag", help="Run tag under default checkpoint root")
+argp.add_argument("--trained_jsonl", dest="trained_jsonl", help="Path to trained list jsonl")
+argp.add_argument("--reset_trained", action="store_true", help="Ignore trained list and start from manifest head")
+args, _unknown = argp.parse_known_args()
+
+if args.manifest_path:
+    MANIFEST_PATH = args.manifest_path
+
+if args.checkpoint_dir:
+    CHECKPOINT_DIR = args.checkpoint_dir
+elif args.run_tag:
+    RUN_TAG = args.run_tag
+    CHECKPOINT_DIR = os.path.join(DEFAULT_CKPT_ROOT, RUN_TAG)
+
+if args.trained_jsonl:
+    TRAINED_JSONL_PATH = args.trained_jsonl
+
+RESET_TRAINED = args.reset_trained or (str(os.environ.get("WHISPER_RESET_TRAINED", "0")).lower() in {"1", "true", "yes"})
 
 # If you're running on the same machine as the audio (local disk), caching copies is unnecessary.
 # Set to False to stream directly from manifest paths without staging per-epoch copies.
@@ -58,14 +106,23 @@ N_SAMPLES_PER_EPOCH = 5000
 MAX_EPOCHS = 999999
 
 # --- Training knobs ---
-BATCH_SIZE = 32
+BATCH_SIZE = 8
 GRAD_ACCUM_STEPS = 2
 LR = 5e-6
 MAX_AUDIO_SECONDS = 29.0  # we still pad features to 30s; this just filters absurdly long chunks
 
 # Loss weights
 LAMBDA_ACFT = 1.00       # robustness term
-LAMBDA_CE = 0.05          # ASR term (WER)
+LAMBDA_CE = 0.15         # ASR term (WER) — higher to curb repetition
+
+# Regularisation / stability
+CE_LABEL_SMOOTH = 0.05
+GRAD_CLIP_NORM = 1.0
+FULL_CONTEXT_PROB = 0.15  # force full-context batches sometimes to anchor decoder
+
+# Checkpoint naming (set env to avoid collisions with other stages/runs)
+MODEL_PREFIX = os.environ.get("WHISPER_MODEL_PREFIX", "s20_model_epoch_")
+STATE_PREFIX = os.environ.get("WHISPER_STATE_PREFIX", "s20_training_state_epoch_")
 
 # DataLoader knobs
 NUM_WORKERS = 0
@@ -93,8 +150,14 @@ os.environ["MKL_NUM_THREADS"] = "1"
 torch.set_num_threads(1)
 
 if torch.cuda.is_available():
-    torch.backends.cuda.matmul.fp32_precision = "tf32"
-    torch.backends.cudnn.conv.fp32_precision = "tf32"
+    try:
+        torch.backends.cuda.matmul.fp32_precision = "tf32"
+    except AttributeError:
+        pass  # Older PyTorch versions may not have this attribute
+    try:
+        torch.backends.cudnn.conv.fp32_precision = "tf32"
+    except AttributeError:
+        pass  # Older PyTorch versions may not have this attribute
     torch.backends.cudnn.benchmark = True
 
 
@@ -133,6 +196,35 @@ def cleanup_memory(tag: str = ""):
 if USE_LOCAL_CACHE:
     os.makedirs(LOCAL_EPOCH_CACHE_ROOT, exist_ok=True)
 os.makedirs(CHECKPOINT_DIR, exist_ok=True)
+
+# Bad batch debugging
+BAD_BATCH_DIR = os.path.join(CHECKPOINT_DIR, "bad_batches")
+os.makedirs(BAD_BATCH_DIR, exist_ok=True)
+
+
+def _dump_bad_batch(tag: str, batch: dict, extra: dict | None = None):
+    """Persist enough info to reproduce a NaN/Inf batch."""
+    try:
+        payload = {
+            "tag": tag,
+            "audio_paths": batch.get("audio_paths"),
+            "texts": batch.get("texts"),
+            "lengths": batch.get("lengths").detach().cpu().tolist() if isinstance(batch.get("lengths"), torch.Tensor) else batch.get("lengths"),
+        }
+        if extra:
+            payload.update(extra)
+        out = os.path.join(BAD_BATCH_DIR, f"{tag}.json")
+        with open(out, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
+
+
+def _isfinite(x: torch.Tensor) -> bool:
+    return bool(torch.isfinite(x).all().item())
+print(f"[paths] manifest={MANIFEST_PATH}")
+print(f"[paths] checkpoint_dir={CHECKPOINT_DIR}")
+print(f"[paths] trained_list={TRAINED_JSONL_PATH}")
 
 
 def read_jsonl(path: str):
@@ -201,6 +293,10 @@ with open(MANIFEST_PATH, "r", encoding="utf-8") as f:
         })
 
 trained_set = load_trained_set(TRAINED_JSONL_PATH)
+if RESET_TRAINED:
+    print("RESET_TRAINED is set: ignoring existing trained list and starting from manifest head.")
+    trained_set = set()
+
 print("Manifest rows:", len(manifest_rows))
 print("Already trained:", len(trained_set))
 
@@ -359,6 +455,7 @@ def collate_batch(examples):
     waveforms_30s = []
     lengths_sec = []
     texts = []
+    audio_paths = []
 
     for ex in examples:
         txt = (ex.get("raw_transcription") or "").strip()
@@ -380,6 +477,7 @@ def collate_batch(examples):
         lengths_sec.append(dur)
         waveforms_30s.append(pad_or_trim_to_30s(wav))
         texts.append(txt)
+        audio_paths.append(ap)
 
     if not waveforms_30s:
         return None
@@ -414,6 +512,8 @@ def collate_batch(examples):
         "labels": labels,
         "labels_raw": tok["input_ids"],
         "attention_mask": tok["attention_mask"],
+        "audio_paths": audio_paths,
+        "texts": texts,
     }
 
     return batch
@@ -439,27 +539,30 @@ def load_student_from_checkpoint_or_base(model_dir: str | None):
     return WhisperForConditionalGeneration.from_pretrained(FUTO_MODEL_ID, generation_config=gen_config)
 
 
+def _collect_epochs(checkpoint_dir: str, prefixes: list[str], is_dir: bool):
+    out = {}
+    for name in os.listdir(checkpoint_dir):
+        p = os.path.join(checkpoint_dir, name)
+        if is_dir and not os.path.isdir(p):
+            continue
+        if (not is_dir) and not os.path.isfile(p):
+            continue
+        for prefix in prefixes:
+            if name.startswith(prefix):
+                try:
+                    ep = int(name[len(prefix):].split(".")[0])
+                    out[ep] = p
+                except Exception:
+                    pass
+    return out
+
+
 def find_latest_checkpoint_epoch(checkpoint_dir: str):
     if not os.path.isdir(checkpoint_dir):
         return None, None, None
 
-    model_epochs = {}
-    state_epochs = {}
-
-    for name in os.listdir(checkpoint_dir):
-        p = os.path.join(checkpoint_dir, name)
-        if os.path.isdir(p) and name.startswith("model_epoch_"):
-            try:
-                ep = int(name[len("model_epoch_"):])
-                model_epochs[ep] = p
-            except Exception:
-                pass
-        if os.path.isfile(p) and name.startswith("training_state_epoch_") and name.endswith(".pt"):
-            try:
-                ep = int(name[len("training_state_epoch_"):-3])
-                state_epochs[ep] = p
-            except Exception:
-                pass
+    model_epochs = _collect_epochs(checkpoint_dir, [MODEL_PREFIX, "model_epoch_"], is_dir=True)
+    state_epochs = _collect_epochs(checkpoint_dir, [STATE_PREFIX, "training_state_epoch_"], is_dir=False)
 
     if not model_epochs and not state_epochs:
         return None, None, None
@@ -634,9 +737,14 @@ def pick_n_ctx_from_batch(
 
 def masked_hidden_mse(hs_pred: torch.Tensor, hs_tgt: torch.Tensor, attn_mask: torch.Tensor):
     # hs_* : [L, B, T, D]
-    mask = attn_mask.unsqueeze(0).unsqueeze(-1).to(dtype=hs_pred.dtype)  # [1,B,T,1]
+    # IMPORTANT: do this in float32 and normalise across ALL elements.
+    hs_pred = hs_pred.float()
+    hs_tgt = hs_tgt.float()
+    mask = attn_mask.unsqueeze(0).unsqueeze(-1).to(dtype=torch.float32)  # [1,B,T,1]
     diff2 = (hs_pred - hs_tgt).pow(2) * mask
-    return diff2.sum() / mask.sum().clamp_min(1.0)
+    # mask.sum() counts B*T, but diff2.sum() also sums over L and D. Normalise by L*D as well.
+    denom = mask.sum() * float(hs_pred.shape[0]) * float(hs_pred.shape[-1])
+    return diff2.sum(dtype=torch.float32) / denom.clamp_min(1.0)
 
 
 def get_lm_head(model: WhisperForConditionalGeneration):
@@ -656,7 +764,7 @@ def get_lm_head(model: WhisperForConditionalGeneration):
 def save_checkpoint(epoch_num: int, subset_start_idx: int, subset_count: int):
     os.makedirs(CHECKPOINT_DIR, exist_ok=True)
 
-    model_dir = os.path.join(CHECKPOINT_DIR, f"model_epoch_{epoch_num:06d}")
+    model_dir = os.path.join(CHECKPOINT_DIR, f"{MODEL_PREFIX}{epoch_num:06d}")
     os.makedirs(model_dir, exist_ok=True)
 
     # Save student
@@ -680,7 +788,7 @@ def save_checkpoint(epoch_num: int, subset_start_idx: int, subset_count: int):
         "lambda_ce": LAMBDA_CE,
     }
 
-    state_path = os.path.join(CHECKPOINT_DIR, f"training_state_epoch_{epoch_num:06d}.pt")
+    state_path = os.path.join(CHECKPOINT_DIR, f"{STATE_PREFIX}{epoch_num:06d}.pt")
     tmp_state_path = state_path + ".tmp"
     torch.save(state, tmp_state_path)
     os.replace(tmp_state_path, state_path)
@@ -753,6 +861,8 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
 
         max_embed_positions = model_train.model.encoder.embed_positions.weight.shape[0]
         n_ctx = pick_n_ctx_from_batch(lengths, max_embed_positions)
+        if torch.rand(()) < FULL_CONTEXT_PROB:
+            n_ctx = FULL_ENCODER_CONTEXT_LENGTH
 
         with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
             # -------- Student: partial encoder --------
@@ -771,25 +881,44 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
                 logits.reshape(-1, logits.shape[-1]),
                 labels.reshape(-1),
                 ignore_index=-100,
+                label_smoothing=CE_LABEL_SMOOTH,
             )
 
-            # -------- Reference: full encoder (ACFT target) --------
-            with torch.no_grad():
-                enc_full = compute_partially_encoder(model_ref.model, input_features, FULL_ENCODER_CONTEXT_LENGTH)
-                dec_full = model_ref.model.decoder(
-                    input_ids=decoder_input_ids,
-                    attention_mask=attn_mask,
-                    encoder_hidden_states=enc_full,
-                    output_hidden_states=True,
-                    use_cache=False,
-                )
+        # -------- Reference: full encoder (ACFT target) --------
+        # Do reference pass in full precision to avoid fp16 SDPA/overflow quirks.
+        with torch.no_grad(), torch.amp.autocast("cuda", enabled=False):
+            enc_full = compute_partially_encoder(model_ref.model, input_features, FULL_ENCODER_CONTEXT_LENGTH)
+            dec_full = model_ref.model.decoder(
+                input_ids=decoder_input_ids,
+                attention_mask=attn_mask,
+                encoder_hidden_states=enc_full,
+                output_hidden_states=True,
+                use_cache=False,
+            )
 
-            hs_p = torch.stack(dec_partial.hidden_states, dim=0)
-            hs_f = torch.stack(dec_full.hidden_states, dim=0)
-            loss_acft = masked_hidden_mse(hs_p, hs_f, attn_mask)
+        hs_p = torch.stack(dec_partial.hidden_states, dim=0)
+        hs_f = torch.stack(dec_full.hidden_states, dim=0)
 
-            loss = (LAMBDA_CE * loss_ce) + (LAMBDA_ACFT * loss_acft)
-            loss = loss / float(GRAD_ACCUM_STEPS)
+        # Fail fast BEFORE backward()
+        if not _isfinite(loss_ce) or not _isfinite(hs_p) or not _isfinite(hs_f):
+            _dump_bad_batch(f"ep{epoch_num}_b{batch_idx:06d}", batch, {
+                "n_ctx": int(n_ctx),
+                "loss_ce": float(loss_ce.detach().cpu().item()) if torch.isfinite(loss_ce) else None,
+            })
+            optimizer.zero_grad(set_to_none=True)
+            continue
+
+        loss_acft = masked_hidden_mse(hs_p, hs_f, attn_mask)
+        if not _isfinite(loss_acft):
+            _dump_bad_batch(f"ep{epoch_num}_b{batch_idx:06d}", batch, {
+                "n_ctx": int(n_ctx),
+                "loss_ce": float(loss_ce.detach().cpu().item()),
+            })
+            optimizer.zero_grad(set_to_none=True)
+            continue
+
+        loss = (LAMBDA_CE * loss_ce) + (LAMBDA_ACFT * loss_acft)
+        loss = loss / float(GRAD_ACCUM_STEPS)
 
         if use_grad_scaler:
             scaler.scale(loss).backward()
@@ -798,9 +927,12 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
 
         if (batch_idx + 1) % GRAD_ACCUM_STEPS == 0:
             if use_grad_scaler:
+                scaler.unscale_(optimizer)
+                torch.nn.utils.clip_grad_norm_(model_train.parameters(), GRAD_CLIP_NORM)
                 scaler.step(optimizer)
                 scaler.update()
             else:
+                torch.nn.utils.clip_grad_norm_(model_train.parameters(), GRAD_CLIP_NORM)
                 optimizer.step()
             optimizer.zero_grad(set_to_none=True)
 
@@ -813,6 +945,7 @@ def train_one_epoch(epoch_num: int, loader: DataLoader):
             "acft": f"{loss_acft.item():.4f}",
             "n_ctx": int(n_ctx),
             "bs": int(input_features.shape[0]),
+            "lr": f"{optimizer.param_groups[0]['lr']:.2e}",
         })
 
         # Cleanup
@@ -979,4 +1112,3 @@ finally:
                 pass
 
 print("Done.")
-
