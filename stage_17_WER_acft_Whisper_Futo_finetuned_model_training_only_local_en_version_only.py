@@ -937,20 +937,21 @@ def collate_batch(examples):
     # CRITICAL: Strip leading SOT token from labels to prevent pathological training
     labels = strip_leading_token(labels, token_id=SOT_ID, pad_id=PAD_ID)
     
-    # Also adjust attention_mask if we stripped a token
-    attn_mask = tok["attention_mask"]
-    if attn_mask is not None and attn_mask.shape[1] == labels.shape[1] + 1:
-        attn_mask = attn_mask[:, 1:]
-
-    # Check the potentially sliced attention mask, not the original
-    if attn_mask is None or attn_mask.sum().item() == 0:
+    # NOTE:
+    # We DO NOT return a decoder attention mask here, because the decoder inputs are shifted
+    # (decoder_input_ids = shift_tokens_right(...)) inside the training loop.
+    # Using tokenizer's attention_mask directly for the decoder is WRONG when right-padding:
+    # it masks out the last real token after shifting.
+    # We'll build decoder_attention_mask from decoder_input_ids in the train loop.
+    labels_attention_mask = tok.get("attention_mask")
+    if labels_attention_mask is None or labels_attention_mask.sum().item() == 0:
         return None
 
     return {
         "lengths": torch.tensor(lengths_sec, dtype=torch.float32),
         "input_features": feats.input_features,
         "labels": labels,
-        "attention_mask": attn_mask,  # Use adjusted attention mask
+        "labels_attention_mask": labels_attention_mask,
         "meta_audio": meta_audio,
         "meta_audio_orig": meta_audio_orig,
         "meta_uid": meta_uid,
@@ -1261,6 +1262,7 @@ def train_one_epoch(epoch_num: int, loader):
     optimizer.zero_grad(set_to_none=True)
     lm_head = get_lm_head(model_train)
 
+    # Track unscaled loss so avg_loss is comparable across different GRAD_ACCUM_STEPS.
     running = 0.0
     n_batches = 0
 
@@ -1276,7 +1278,9 @@ def train_one_epoch(epoch_num: int, loader):
 
         input_features = batch["input_features"].to(device, non_blocking=True)
         labels = batch["labels"].to(device, non_blocking=True)
-        attn_mask = batch["attention_mask"].to(device, non_blocking=True)
+        # Build decoder attention mask from decoder_input_ids (correct for right-padding + shifting)
+        # NOTE: we keep labels_attention_mask only for debugging/inspection.
+        labels_attention_mask = batch.get("labels_attention_mask")
         lengths = batch["lengths"].to(device, non_blocking=True)
         keys = batch.get("keys") or []
 
@@ -1297,12 +1301,13 @@ def train_one_epoch(epoch_num: int, loader):
         labels_for_shift = labels.clone()
         labels_for_shift[labels_for_shift == -100] = int(PAD_ID)
         decoder_input_ids = shift_tokens_right(labels_for_shift, int(PAD_ID), int(DECODER_START_ID))
+        decoder_attention_mask = (decoder_input_ids != int(PAD_ID)).to(dtype=torch.long, device=device)
 
         with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
             enc_partial = compute_partially_encoder(model_train.model, input_features, int(n_ctx))
             dec_partial = model_train.model.decoder(
                 input_ids=decoder_input_ids,
-                attention_mask=attn_mask,
+                attention_mask=decoder_attention_mask,
                 encoder_hidden_states=enc_partial,
                 output_hidden_states=True,
                 use_cache=False,
@@ -1328,7 +1333,7 @@ def train_one_epoch(epoch_num: int, loader):
                 enc_full = compute_partially_encoder(model_ref.model, input_features, int(FULL_ENCODER_CONTEXT_LENGTH))
                 dec_full = model_ref.model.decoder(
                     input_ids=decoder_input_ids,
-                    attention_mask=attn_mask,
+                    attention_mask=decoder_attention_mask,
                     encoder_hidden_states=enc_full,
                     output_hidden_states=True,
                     use_cache=False,
@@ -1344,7 +1349,7 @@ def train_one_epoch(epoch_num: int, loader):
                 accum_keys = []
                 continue
 
-            loss_acft = masked_hidden_mse(hs_p, hs_f, attn_mask)
+            loss_acft = masked_hidden_mse(hs_p, hs_f, decoder_attention_mask)
             if not _isfinite(loss_acft):
                 print("[warn] non-finite ACFT loss; skipping batch")
                 optimizer.zero_grad(set_to_none=True)
@@ -1368,7 +1373,7 @@ def train_one_epoch(epoch_num: int, loader):
         else:
             loss.backward()
 
-        running += float(loss.detach().cpu().item())
+        running += float(loss.detach().cpu().item()) * float(GRAD_ACCUM_STEPS)
         n_batches += 1
         accum += 1
         accum_keys.extend(list(keys))
@@ -1403,6 +1408,33 @@ def train_one_epoch(epoch_num: int, loader):
             "bs": int(input_features.shape[0]),
             "lr": lr_now,
         })
+
+    # Final flush: don't throw away the last partial accumulation.
+    # Without this, you permanently skip a tail of samples every epoch (pointer advances).
+    if accum > 0:
+        scale_fix = float(GRAD_ACCUM_STEPS) / float(accum)
+
+        if use_amp:
+            scaler.unscale_(optimizer)
+        # Rescale grads so the effective divisor is `accum` not `GRAD_ACCUM_STEPS`.
+        for p in model_train.parameters():
+            if p.grad is not None:
+                p.grad.mul_(scale_fix)
+
+        torch.nn.utils.clip_grad_norm_(model_train.parameters(), float(MAX_GRAD_NORM))
+
+        if use_amp:
+            scaler.step(optimizer)
+            scaler.update()
+        else:
+            optimizer.step()
+
+        optimizer.zero_grad(set_to_none=True)
+        if scheduler is not None:
+            scheduler.step()
+
+        global_step += 1
+        trained_keys_epoch.update(accum_keys)
 
     avg_loss = (running / max(1, n_batches))
     return avg_loss, trained_keys_epoch
