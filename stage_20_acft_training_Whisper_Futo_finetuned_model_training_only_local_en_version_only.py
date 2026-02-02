@@ -10,6 +10,17 @@
 
 #!pip -q install -U "transformers>=4.38" datasets accelerate soundfile tqdm
 
+
+
+
+"""
+
+usage
+---------------------------------------------------
+i:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\stage_20_acft_training_Whisper_Futo_finetuned_model_training_only_local_en_version_only.py --manifest "i:/Record_chunks/pairs_manifest_combined_all_datasets_randomized_train_no_reverb.jsonl" --checkpoint_dir "i:/Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_8/" --reset_trained
+
+"""
+
 import os, json, time, shutil, hashlib, gc, argparse
 from concurrent.futures import ThreadPoolExecutor
 
