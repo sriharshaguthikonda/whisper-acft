@@ -295,19 +295,19 @@ PROCESSOR_ID = "openai/whisper-tiny.en"  # must match the base family
 
 # ===== Combined WER + ACFT knobs =====
 # Goal: keep WER going down, while ACFT prevents repetition / collapse when audio_ctx is dynamic.
-# You can override via env vars.
-ACFT_REFERENCE_MODEL_ID = os.environ.get("WHISPER_ACFT_REF_MODEL", FUTO_MODEL_ID)
-CE_LABEL_SMOOTH = float(os.environ.get("WHISPER_CE_LABEL_SMOOTH", "0.05"))
-LAMBDA_CE = float(os.environ.get("WHISPER_LAMBDA_CE", "1.0"))
-LAMBDA_ACFT = float(os.environ.get("WHISPER_LAMBDA_ACFT", "0.30"))
+# Direct script parameters - modify these values as needed
+ACFT_REFERENCE_MODEL_ID = FUTO_MODEL_ID  # Reference model for ACFT (default: same as training model)
+CE_LABEL_SMOOTH = 0.05  # Label smoothing for CE loss (0.0 = disabled, 0.05 = recommended)
+LAMBDA_CE = 1.0  # Weight for cross-entropy loss
+LAMBDA_ACFT = 0.30  # Weight for ACFT robustness loss
 # Optional ramp: start ACFT small then ramp up over first N optimizer steps
-ACFT_RAMP_STEPS = int(os.environ.get("WHISPER_ACFT_RAMP_STEPS", "200"))  # 0 disables
+ACFT_RAMP_STEPS = 200  # 0 disables ramp, 200 = ramp over first 200 steps
 
 # Dynamic audio_ctx (partial context) to teach robustness
-FORCE_FULL_AUDIO_CTX = bool(int(os.environ.get("WHISPER_FORCE_FULL_AUDIO_CTX", "0")))
-AUDIO_CTX_SAFETY_SEC = float(os.environ.get("WHISPER_AUDIO_CTX_SAFETY_SEC", "0.20"))
-AUDIO_CTX_ROUND_TO = int(os.environ.get("WHISPER_AUDIO_CTX_ROUND_TO", "16"))
-AUDIO_CTX_JITTER_MAX = int(os.environ.get("WHISPER_AUDIO_CTX_JITTER_MAX", "64"))
+FORCE_FULL_AUDIO_CTX = False  # True = always use full context, False = use dynamic context
+AUDIO_CTX_SAFETY_SEC = 0.20  # Safety margin in seconds for dynamic context
+AUDIO_CTX_ROUND_TO = 16  # Round context to multiples of this value
+AUDIO_CTX_JITTER_MAX = 64  # Maximum upward jitter for dynamic context
 
 TARGET_SR = 16000
 N_SAMPLES_PER_EPOCH = 5016
@@ -404,7 +404,7 @@ OPT_STEPS_PER_EPOCH = estimate_opt_steps_per_epoch(N_SAMPLES_PER_EPOCH, BATCH_SI
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-DISABLE_AMP = bool(int(os.environ.get("WHISPER_DISABLE_AMP", "0")))
+DISABLE_AMP = False  # Set to True to disable mixed precision (helps with NaN issues)
 use_amp = (device == "cuda") and (not DISABLE_AMP)
 amp_dtype = torch.float16
 use_grad_scaler = (device == "cuda")
