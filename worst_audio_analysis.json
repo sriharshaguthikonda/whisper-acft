@@ -1,0 +1,2351 @@
+{
+  "top_worst_cases": [
+    {
+      "file": "Alcohol colleague_sent0004.wav",
+      "checkpoint": "futo-org/acft-whisper-tiny.en",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "And you have noticed it again today, this morning.",
+      "transcription": " (I'm not a fan)",
+      "avg_confidence": 0.24861693382263184
+    },
+    {
+      "file": "Antibiotic request traveling to Thailand_sent0136.wav",
+      "checkpoint": "futo-org/acft-whisper-tiny.en",
+      "wer_raw": 1.0,
+      "wer_norm": 0.8666666666666667,
+      "cer_norm": 0.7671232876712328,
+      "ground_truth": "are certain vaccinations that are needed to be given to you like for example meningitis",
+      "transcription": " \"like for example, many judges\"",
+      "avg_confidence": 0.42918023467063904
+    },
+    {
+      "file": "Attention deficit hyperactivity disorder._sent0098.wav",
+      "checkpoint": "futo-org/acft-whisper-tiny.en",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "explore these ideas of yours and this uh impulsivity as you put it and then uh i believe that would be",
+      "transcription": " \"",
+      "avg_confidence": 0.05512494593858719
+    },
+    {
+      "file": "New recording 134_sent0175.wav",
+      "checkpoint": "futo-org/acft-whisper-tiny.en",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "symptoms and the other things could also happen which could be very dangerous okay if you keep",
+      "transcription": " \"",
+      "avg_confidence": 0.0908694937825203
+    },
+    {
+      "file": "New recording 142_sent0111.wav",
+      "checkpoint": "futo-org/acft-whisper-tiny.en",
+      "wer_raw": 1.0,
+      "wer_norm": 0.9411764705882353,
+      "cer_norm": 0.9130434782608695,
+      "ground_truth": "take care of your health and i appreciate that uh and you know you coming here with this uh",
+      "transcription": " \"I'm not a fan\"",
+      "avg_confidence": 0.1950356364250183
+    },
+    {
+      "file": "New recording 168_sent0055.wav",
+      "checkpoint": "futo-org/acft-whisper-tiny.en",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.8961038961038961,
+      "ground_truth": "well but have you taken this medication oxybutynin you said like you said have you taken this",
+      "transcription": " \"I'm not as well\"",
+      "avg_confidence": 0.2542552649974823
+    },
+    {
+      "file": "New recording 33_sent0029.wav",
+      "checkpoint": "futo-org/acft-whisper-tiny.en",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9836065573770492,
+      "ground_truth": "discuss what we can do with water okay and so I see from my notes that you are",
+      "transcription": " U",
+      "avg_confidence": 0.05413420498371124
+    },
+    {
+      "file": "New recording 359_sent0147.wav",
+      "checkpoint": "futo-org/acft-whisper-tiny.en",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "So, is there any concern that you have that you want me to address?",
+      "transcription": " (I'm not sure if I can)",
+      "avg_confidence": 0.19273099303245544
+    },
+    {
+      "file": "New recording 434_sent0117.wav",
+      "checkpoint": "futo-org/acft-whisper-tiny.en",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9523809523809523,
+      "ground_truth": "If you stop taking steroids, there is a condition called Gain cell arthritis.",
+      "transcription": " \"The",
+      "avg_confidence": 0.03512062132358551
+    },
+    {
+      "file": "New recording 45_sent0001.wav",
+      "checkpoint": "futo-org/acft-whisper-tiny.en",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9827586206896551,
+      "ground_truth": "Daniela Orlando, mother of five, comes with concerns, assess, talk, concerns.",
+      "transcription": " U.S.",
+      "avg_confidence": 0.46403008699417114
+    },
+    {
+      "file": "New recording 460_sent0106.wav",
+      "checkpoint": "futo-org/acft-whisper-tiny.en",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "hold order ESR CRP as well a chest x-ray okay and also your hip x-ray as well",
+      "transcription": " \"",
+      "avg_confidence": 0.04368850588798523
+    },
+    {
+      "file": "Alcohol colleague_sent0004.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "And you have noticed it again today, this morning.",
+      "transcription": " (I'm not sure if I can)",
+      "avg_confidence": 0.19975292682647705
+    },
+    {
+      "file": "Antibiotic request traveling to Thailand_sent0136.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.8767123287671232,
+      "ground_truth": "are certain vaccinations that are needed to be given to you like for example meningitis",
+      "transcription": " \"I'm not a fan\"",
+      "avg_confidence": 0.1907537579536438
+    },
+    {
+      "file": "Attention deficit hyperactivity disorder._sent0098.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "explore these ideas of yours and this uh impulsivity as you put it and then uh i believe that would be",
+      "transcription": " \"",
+      "avg_confidence": 0.048024218529462814
+    },
+    {
+      "file": "New recording 111_sent0003.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9090909090909091,
+      "ground_truth": "He had an episode of TIA and now he is here for follow up.",
+      "transcription": " \"I'm a man\"",
+      "avg_confidence": 0.20149335265159607
+    },
+    {
+      "file": "New recording 134_sent0114.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9178082191780822,
+      "ground_truth": "And have you caught any injuries or have you had any triggers that might have caused this?",
+      "transcription": " \"I'm not a fan\"",
+      "avg_confidence": 0.21355634927749634
+    },
+    {
+      "file": "New recording 134_sent0175.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "symptoms and the other things could also happen which could be very dangerous okay if you keep",
+      "transcription": " \"",
+      "avg_confidence": 0.06158868223428726
+    },
+    {
+      "file": "New recording 142_sent0111.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 0.9411764705882353,
+      "cer_norm": 0.9130434782608695,
+      "ground_truth": "take care of your health and i appreciate that uh and you know you coming here with this uh",
+      "transcription": " \"I'm not a fan\"",
+      "avg_confidence": 0.19856157898902893
+    },
+    {
+      "file": "New recording 168_sent0055.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.8961038961038961,
+      "ground_truth": "well but have you taken this medication oxybutynin you said like you said have you taken this",
+      "transcription": " \"I'm not a fan\"",
+      "avg_confidence": 0.2107008695602417
+    },
+    {
+      "file": "New recording 33_sent0029.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9836065573770492,
+      "ground_truth": "discuss what we can do with water okay and so I see from my notes that you are",
+      "transcription": " U",
+      "avg_confidence": 0.060178834944963455
+    },
+    {
+      "file": "New recording 359_sent0147.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "So, is there any concern that you have that you want me to address?",
+      "transcription": " (I'm not sure if it's a good idea)",
+      "avg_confidence": 0.23337756097316742
+    },
+    {
+      "file": "New recording 434_sent0117.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9523809523809523,
+      "ground_truth": "If you stop taking steroids, there is a condition called Gain cell arthritis.",
+      "transcription": " \"The",
+      "avg_confidence": 0.03332867845892906
+    },
+    {
+      "file": "New recording 449_sent0159.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "oxide okay or else it can get really complicated and really serious really soon okay after that",
+      "transcription": " \"",
+      "avg_confidence": 0.0249972864985466
+    },
+    {
+      "file": "New recording 45_sent0001.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 0.9090909090909091,
+      "cer_norm": 0.6551724137931034,
+      "ground_truth": "Daniela Orlando, mother of five, comes with concerns, assess, talk, concerns.",
+      "transcription": " \"A fight to in GP\" misses Denella Orlando, mother of five comes with concerns.",
+      "avg_confidence": 0.46881595253944397
+    },
+    {
+      "file": "New recording 460_sent0106.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "hold order ESR CRP as well a chest x-ray okay and also your hip x-ray as well",
+      "transcription": " \"",
+      "avg_confidence": 0.04879502207040787
+    },
+    {
+      "file": "Alcohol colleague_sent0004.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "And you have noticed it again today, this morning.",
+      "transcription": " (I'm not sure if I can)",
+      "avg_confidence": 0.19938363134860992
+    },
+    {
+      "file": "Antibiotic request traveling to Thailand_sent0075.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.8656716417910447,
+      "ground_truth": "about this worry of this infections what exact infections are you worried about",
+      "transcription": " \"I'm not sure if I can.\"",
+      "avg_confidence": 0.2148657739162445
+    },
+    {
+      "file": "Antibiotic request traveling to Thailand_sent0136.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.8767123287671232,
+      "ground_truth": "are certain vaccinations that are needed to be given to you like for example meningitis",
+      "transcription": " \"I'm not a fan\"",
+      "avg_confidence": 0.19089291989803314
+    },
+    {
+      "file": "Attention deficit hyperactivity disorder._sent0098.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "explore these ideas of yours and this uh impulsivity as you put it and then uh i believe that would be",
+      "transcription": " \"",
+      "avg_confidence": 0.048451460897922516
+    },
+    {
+      "file": "New recording 111_sent0003.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9090909090909091,
+      "ground_truth": "He had an episode of TIA and now he is here for follow up.",
+      "transcription": " \"I'm a man\"",
+      "avg_confidence": 0.20241042971611023
+    },
+    {
+      "file": "New recording 134_sent0114.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9178082191780822,
+      "ground_truth": "And have you caught any injuries or have you had any triggers that might have caused this?",
+      "transcription": " \"I'm not a fan\"",
+      "avg_confidence": 0.21272824704647064
+    },
+    {
+      "file": "New recording 134_sent0175.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "symptoms and the other things could also happen which could be very dangerous okay if you keep",
+      "transcription": " \"",
+      "avg_confidence": 0.05824867635965347
+    },
+    {
+      "file": "New recording 168_sent0055.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.8961038961038961,
+      "ground_truth": "well but have you taken this medication oxybutynin you said like you said have you taken this",
+      "transcription": " \"I'm not a fan\"",
+      "avg_confidence": 0.20950506627559662
+    },
+    {
+      "file": "New recording 33_sent0029.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9836065573770492,
+      "ground_truth": "discuss what we can do with water okay and so I see from my notes that you are",
+      "transcription": " U",
+      "avg_confidence": 0.060758158564567566
+    },
+    {
+      "file": "New recording 434_sent0117.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9523809523809523,
+      "ground_truth": "If you stop taking steroids, there is a condition called Gain cell arthritis.",
+      "transcription": " \"The",
+      "avg_confidence": 0.032438647001981735
+    },
+    {
+      "file": "New recording 449_sent0159.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "oxide okay or else it can get really complicated and really serious really soon okay after that",
+      "transcription": " \"",
+      "avg_confidence": 0.025296654552221298
+    },
+    {
+      "file": "New recording 45_sent0001.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 0.9090909090909091,
+      "cer_norm": 0.6551724137931034,
+      "ground_truth": "Daniela Orlando, mother of five, comes with concerns, assess, talk, concerns.",
+      "transcription": " \"A fight to in GP\" misses Denella Orlando, mother of five comes with concerns.",
+      "avg_confidence": 0.4652383327484131
+    },
+    {
+      "file": "New recording 460_sent0106.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "hold order ESR CRP as well a chest x-ray okay and also your hip x-ray as well",
+      "transcription": " \"",
+      "avg_confidence": 0.04914199188351631
+    },
+    {
+      "file": "Alcohol colleague_sent0004.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "And you have noticed it again today, this morning.",
+      "transcription": " (I'm not sure if I can)",
+      "avg_confidence": 0.19885995984077454
+    },
+    {
+      "file": "Antibiotic request traveling to Thailand_sent0075.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.8656716417910447,
+      "ground_truth": "about this worry of this infections what exact infections are you worried about",
+      "transcription": " \"I'm not sure if I can.\"",
+      "avg_confidence": 0.21476761996746063
+    },
+    {
+      "file": "Antibiotic request traveling to Thailand_sent0136.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.8767123287671232,
+      "ground_truth": "are certain vaccinations that are needed to be given to you like for example meningitis",
+      "transcription": " \"I'm not a fan\"",
+      "avg_confidence": 0.19118812680244446
+    },
+    {
+      "file": "Attention deficit hyperactivity disorder._sent0098.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "explore these ideas of yours and this uh impulsivity as you put it and then uh i believe that would be",
+      "transcription": " \"",
+      "avg_confidence": 0.04799684137105942
+    },
+    {
+      "file": "New recording 111_sent0003.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9090909090909091,
+      "ground_truth": "He had an episode of TIA and now he is here for follow up.",
+      "transcription": " \"I'm a man\"",
+      "avg_confidence": 0.20279303193092346
+    },
+    {
+      "file": "New recording 134_sent0114.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9178082191780822,
+      "ground_truth": "And have you caught any injuries or have you had any triggers that might have caused this?",
+      "transcription": " \"I'm not a fan\"",
+      "avg_confidence": 0.21210895478725433
+    },
+    {
+      "file": "New recording 134_sent0175.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "symptoms and the other things could also happen which could be very dangerous okay if you keep",
+      "transcription": " \"",
+      "avg_confidence": 0.05662626773118973
+    },
+    {
+      "file": "New recording 168_sent0055.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.8961038961038961,
+      "ground_truth": "well but have you taken this medication oxybutynin you said like you said have you taken this",
+      "transcription": " \"I'm not a fan\"",
+      "avg_confidence": 0.21033459901809692
+    },
+    {
+      "file": "New recording 33_sent0029.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9836065573770492,
+      "ground_truth": "discuss what we can do with water okay and so I see from my notes that you are",
+      "transcription": " U",
+      "avg_confidence": 0.06078232079744339
+    },
+    {
+      "file": "New recording 434_sent0117.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 0.9523809523809523,
+      "ground_truth": "If you stop taking steroids, there is a condition called Gain cell arthritis.",
+      "transcription": " \"The",
+      "avg_confidence": 0.03257660195231438
+    },
+    {
+      "file": "New recording 449_sent0159.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 1.0,
+      "cer_norm": 1.0,
+      "ground_truth": "oxide okay or else it can get really complicated and really serious really soon okay after that",
+      "transcription": " \"",
+      "avg_confidence": 0.025233298540115356
+    },
+    {
+      "file": "New recording 45_sent0001.wav",
+      "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+      "wer_raw": 1.0,
+      "wer_norm": 0.9090909090909091,
+      "cer_norm": 0.6551724137931034,
+      "ground_truth": "Daniela Orlando, mother of five, comes with concerns, assess, talk, concerns.",
+      "transcription": " \"A fight to in GP\" misses Denella Orlando, mother of five comes with concerns.",
+      "avg_confidence": 0.46394675970077515
+    }
+  ],
+  "file_summary": {
+    "New recording 45_sent0001.wav": {
+      "avg_wer": 1.0606060606060606,
+      "max_wer": 1.1818181818181819,
+      "min_wer": 1.0,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9827586206896551,
+          "transcription": " U.S."
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 0.9090909090909091,
+          "cer_norm": 0.6551724137931034,
+          "transcription": " \"A fight to in GP\" misses Denella Orlando, mother of five comes with concerns."
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 0.9090909090909091,
+          "cer_norm": 0.6551724137931034,
+          "transcription": " \"A fight to in GP\" misses Denella Orlando, mother of five comes with concerns."
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 0.9090909090909091,
+          "cer_norm": 0.6551724137931034,
+          "transcription": " \"A fight to in GP\" misses Denella Orlando, mother of five comes with concerns."
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 1.1818181818181819,
+          "wer_norm": 1.0909090909090908,
+          "cer_norm": 0.6551724137931034,
+          "transcription": " \"A fight to in GP\" misses Denella or Lando, mother of five comes with concerns."
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 0.9090909090909091,
+          "cer_norm": 0.6551724137931034,
+          "transcription": " \"A fight to in GP\" misses Denella Orlando, mother of five comes with concerns."
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 0.9090909090909091,
+          "cer_norm": 0.6551724137931034,
+          "transcription": " \"A fight to in GP\" misses Denella Orlando, mother of five comes with concerns."
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 1.0,
+          "wer_norm": 0.9090909090909091,
+          "cer_norm": 0.6551724137931034,
+          "transcription": " \"A fight to in GP\" misses Denella Orlando, mother of five comes with concerns."
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.1818181818181819,
+          "wer_norm": 1.0909090909090908,
+          "cer_norm": 0.6551724137931034,
+          "transcription": " \"A fight to in GP\" misses Denella or Lando, mother of five comes with concerns."
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.1818181818181819,
+          "wer_norm": 1.0909090909090908,
+          "cer_norm": 0.6551724137931034,
+          "transcription": " \"A fight to in GP\" misses Denella or Lando, mother of five comes with concerns."
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.1818181818181819,
+          "wer_norm": 1.0909090909090908,
+          "cer_norm": 0.6551724137931034,
+          "transcription": " \"A fight to in GP\" misses Denella or Lando, mother of five comes with concerns."
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 0.9090909090909091,
+          "cer_norm": 0.6551724137931034,
+          "transcription": " \"A fight to in GP\" misses Denella Orlando, mother of five comes with concerns."
+        }
+      ]
+    },
+    "Alcohol colleague_sent0004.wav": {
+      "avg_wer": 1.0,
+      "max_wer": 1.0,
+      "min_wer": 1.0,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not a fan)"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not sure if I can)"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not sure if I can)"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not sure if I can)"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not sure if I can)"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not sure if I can)"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not sure if I can)"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not sure if I can)"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not sure if I can)"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not sure if I can)"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not sure if I can)"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " (I'm not sure if I can)"
+        }
+      ]
+    },
+    "Antibiotic request traveling to Thailand_sent0136.wav": {
+      "avg_wer": 1.0,
+      "max_wer": 1.0,
+      "min_wer": 1.0,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 1.0,
+          "wer_norm": 0.8666666666666667,
+          "cer_norm": 0.7671232876712328,
+          "transcription": " \"like for example, many judges\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8767123287671232,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8767123287671232,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8767123287671232,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9863013698630136,
+          "transcription": " u"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8767123287671232,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9863013698630136,
+          "transcription": " u"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8767123287671232,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9863013698630136,
+          "transcription": " u"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8767123287671232,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9863013698630136,
+          "transcription": " u"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9863013698630136,
+          "transcription": " u"
+        }
+      ]
+    },
+    "Attention deficit hyperactivity disorder._sent0098.wav": {
+      "avg_wer": 1.0,
+      "max_wer": 1.0,
+      "min_wer": 1.0,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        }
+      ]
+    },
+    "New recording 134_sent0175.wav": {
+      "avg_wer": 1.0,
+      "max_wer": 1.0,
+      "min_wer": 1.0,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        }
+      ]
+    },
+    "New recording 168_sent0055.wav": {
+      "avg_wer": 1.0,
+      "max_wer": 1.0,
+      "min_wer": 1.0,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not as well\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not a child\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8961038961038961,
+          "transcription": " \"I'm not a fan\""
+        }
+      ]
+    },
+    "New recording 33_sent0029.wav": {
+      "avg_wer": 1.0,
+      "max_wer": 1.0,
+      "min_wer": 1.0,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " U"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " U"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " U"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " U"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " U"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " U"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " U"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " U"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " U"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " u"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " u"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9836065573770492,
+          "transcription": " u"
+        }
+      ]
+    },
+    "New recording 434_sent0117.wav": {
+      "avg_wer": 1.0,
+      "max_wer": 1.0,
+      "min_wer": 1.0,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9523809523809523,
+          "transcription": " \"The"
+        }
+      ]
+    },
+    "New recording 460_sent0106.wav": {
+      "avg_wer": 1.0,
+      "max_wer": 1.0,
+      "min_wer": 1.0,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        }
+      ]
+    },
+    "New recording 15_sent0131.wav": {
+      "avg_wer": 0.9615384615384616,
+      "max_wer": 0.9615384615384616,
+      "min_wer": 0.9615384615384616,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 0.9615384615384616,
+          "wer_norm": 0.9629629629629629,
+          "cer_norm": 0.9139784946236559,
+          "transcription": " \"I'm not a fan\""
+        }
+      ]
+    },
+    "New recording 426_sent0131.wav": {
+      "avg_wer": 0.9444444444444443,
+      "max_wer": 0.9444444444444444,
+      "min_wer": 0.9444444444444444,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9244186046511628,
+          "transcription": " \"I'm not a person\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9476744186046512,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9476744186046512,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9476744186046512,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9476744186046512,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9476744186046512,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9476744186046512,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9476744186046512,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9476744186046512,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9476744186046512,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9476744186046512,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 0.9444444444444444,
+          "wer_norm": 0.9444444444444444,
+          "cer_norm": 0.9476744186046512,
+          "transcription": " \"I'm not a fan\""
+        }
+      ]
+    },
+    "New recording 153_sent0159.wav": {
+      "avg_wer": 0.9416666666666665,
+      "max_wer": 0.95,
+      "min_wer": 0.85,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 0.85,
+          "wer_norm": 0.8,
+          "cer_norm": 0.7866666666666666,
+          "transcription": " \"He does not get them.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 0.95,
+          "wer_norm": 0.95,
+          "cer_norm": 0.8933333333333333,
+          "transcription": " \"I'm not a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 0.95,
+          "wer_norm": 0.95,
+          "cer_norm": 0.8933333333333333,
+          "transcription": " \"I'm not a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 0.95,
+          "wer_norm": 0.95,
+          "cer_norm": 0.8933333333333333,
+          "transcription": " \"I'm not a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 0.95,
+          "wer_norm": 0.95,
+          "cer_norm": 0.8933333333333333,
+          "transcription": " \"I'm not a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 0.95,
+          "wer_norm": 0.95,
+          "cer_norm": 0.8933333333333333,
+          "transcription": " \"I'm not a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 0.95,
+          "wer_norm": 0.95,
+          "cer_norm": 0.8933333333333333,
+          "transcription": " \"I'm not a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 0.95,
+          "wer_norm": 0.95,
+          "cer_norm": 0.8933333333333333,
+          "transcription": " \"I'm not a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 0.95,
+          "wer_norm": 0.95,
+          "cer_norm": 0.8933333333333333,
+          "transcription": " \"I'm not a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 0.95,
+          "wer_norm": 0.95,
+          "cer_norm": 0.8933333333333333,
+          "transcription": " \"I'm not a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 0.95,
+          "wer_norm": 0.95,
+          "cer_norm": 0.8933333333333333,
+          "transcription": " \"I'm not a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 0.95,
+          "wer_norm": 0.95,
+          "cer_norm": 0.8933333333333333,
+          "transcription": " \"I'm not a man\""
+        }
+      ]
+    },
+    "New recording 111_sent0003.wav": {
+      "avg_wer": 0.9404761904761906,
+      "max_wer": 1.0,
+      "min_wer": 0.2857142857142857,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 0.2857142857142857,
+          "wer_norm": 0.14285714285714285,
+          "cer_norm": 0.06818181818181818,
+          "transcription": " \"He had a episode of TIA and now he is here for follow.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9090909090909091,
+          "transcription": " \"I'm a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9090909090909091,
+          "transcription": " \"I'm a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9090909090909091,
+          "transcription": " \"I'm a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9090909090909091,
+          "transcription": " \"I'm a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9090909090909091,
+          "transcription": " \"I'm a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9090909090909091,
+          "transcription": " \"I'm a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9090909090909091,
+          "transcription": " \"I'm a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9090909090909091,
+          "transcription": " \"I'm a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9090909090909091,
+          "transcription": " \"I'm a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9090909090909091,
+          "transcription": " \"I'm a man\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9090909090909091,
+          "transcription": " \"I'm a man\""
+        }
+      ]
+    },
+    "Infective endocarditis._sent0075.wav": {
+      "avg_wer": 0.9328703703703703,
+      "max_wer": 0.9722222222222222,
+      "min_wer": 0.5,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 0.5,
+          "wer_norm": 0.4444444444444444,
+          "cer_norm": 0.3157894736842105,
+          "transcription": " \"Are you injecting the now as well chains?\" No, no. Okay and when you are injecting what you're using fresh needles at a ring stance or have used any reused needles"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 0.9722222222222222,
+          "wer_norm": 0.9166666666666666,
+          "cer_norm": 0.8421052631578947,
+          "transcription": " \"You're injecting a new project.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 0.9722222222222222,
+          "wer_norm": 0.9166666666666666,
+          "cer_norm": 0.8421052631578947,
+          "transcription": " \"You're injecting a new project.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 0.9722222222222222,
+          "wer_norm": 0.9166666666666666,
+          "cer_norm": 0.8421052631578947,
+          "transcription": " \"You're injecting a new project.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 0.9722222222222222,
+          "wer_norm": 0.9166666666666666,
+          "cer_norm": 0.8421052631578947,
+          "transcription": " \"You're injecting a new project.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 0.9722222222222222,
+          "wer_norm": 0.9166666666666666,
+          "cer_norm": 0.8421052631578947,
+          "transcription": " \"You're injecting a new project.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 0.9722222222222222,
+          "wer_norm": 0.9166666666666666,
+          "cer_norm": 0.8421052631578947,
+          "transcription": " \"You're injecting a new project.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 0.9722222222222222,
+          "wer_norm": 0.9166666666666666,
+          "cer_norm": 0.8421052631578947,
+          "transcription": " \"You're injecting a new project.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 0.9722222222222222,
+          "wer_norm": 0.9166666666666666,
+          "cer_norm": 0.8421052631578947,
+          "transcription": " \"You're injecting a new project.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 0.9722222222222222,
+          "wer_norm": 0.9166666666666666,
+          "cer_norm": 0.8421052631578947,
+          "transcription": " \"You're injecting a new project.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 0.9722222222222222,
+          "wer_norm": 0.9166666666666666,
+          "cer_norm": 0.8421052631578947,
+          "transcription": " \"You're injecting a new project.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 0.9722222222222222,
+          "wer_norm": 0.9166666666666666,
+          "cer_norm": 0.8421052631578947,
+          "transcription": " \"You're injecting a new project.\""
+        }
+      ]
+    },
+    "New recording 134_sent0114.wav": {
+      "avg_wer": 0.926470588235294,
+      "max_wer": 1.0,
+      "min_wer": 0.11764705882352941,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 0.11764705882352941,
+          "wer_norm": 0.058823529411764705,
+          "cer_norm": 0.0410958904109589,
+          "transcription": " \" Have you caught any injuries or have you had any triggers that might have caused this?\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9178082191780822,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9178082191780822,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9178082191780822,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9178082191780822,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9178082191780822,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9178082191780822,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9178082191780822,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9178082191780822,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9178082191780822,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9178082191780822,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.9178082191780822,
+          "transcription": " \"I'm not a fan\""
+        }
+      ]
+    },
+    "Dysphagia suspected esophageal cancer._sent0150.wav": {
+      "avg_wer": 0.921875,
+      "max_wer": 0.9375,
+      "min_wer": 0.875,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 0.875,
+          "wer_norm": 0.875,
+          "cer_norm": 0.8064516129032258,
+          "transcription": " \"I'm not a fan of the world\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 0.9375,
+          "wer_norm": 0.9375,
+          "cer_norm": 0.9032258064516129,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 0.9375,
+          "wer_norm": 0.9375,
+          "cer_norm": 0.9032258064516129,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 0.9375,
+          "wer_norm": 0.9375,
+          "cer_norm": 0.9032258064516129,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 0.9375,
+          "wer_norm": 0.9375,
+          "cer_norm": 0.9032258064516129,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 0.9375,
+          "wer_norm": 0.9375,
+          "cer_norm": 0.9032258064516129,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 0.9375,
+          "wer_norm": 0.9375,
+          "cer_norm": 0.9032258064516129,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 0.9375,
+          "wer_norm": 0.9375,
+          "cer_norm": 0.9032258064516129,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 0.9375,
+          "wer_norm": 0.9375,
+          "cer_norm": 0.9032258064516129,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 0.875,
+          "wer_norm": 0.875,
+          "cer_norm": 0.8064516129032258,
+          "transcription": " \"I'm not a fan of the world\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 0.9375,
+          "wer_norm": 0.9375,
+          "cer_norm": 0.9032258064516129,
+          "transcription": " \"I'm not a fan\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 0.875,
+          "wer_norm": 0.875,
+          "cer_norm": 0.8064516129032258,
+          "transcription": " \"I'm not a fan of the world\""
+        }
+      ]
+    },
+    "New recording 35_sent0000.wav": {
+      "avg_wer": 0.9047619047619047,
+      "max_wer": 0.9523809523809523,
+      "min_wer": 0.38095238095238093,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 0.38095238095238093,
+          "wer_norm": 0.2727272727272727,
+          "cer_norm": 0.18055555555555555,
+          "transcription": " \"I have to in GP Marc Anthony 29 years feeling tired for the last 1-2 weeks and now has come to the"
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 0.9523809523809523,
+          "wer_norm": 0.9545454545454546,
+          "cer_norm": 0.8194444444444444,
+          "transcription": " \"I have to give you a chance.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 0.9523809523809523,
+          "wer_norm": 0.9545454545454546,
+          "cer_norm": 0.8194444444444444,
+          "transcription": " \"I have to give you a chance.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 0.9523809523809523,
+          "wer_norm": 0.9545454545454546,
+          "cer_norm": 0.8194444444444444,
+          "transcription": " \"I have to give you a chance.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 0.9523809523809523,
+          "wer_norm": 0.9545454545454546,
+          "cer_norm": 0.7777777777777778,
+          "transcription": " \"I have to give you a month of time.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 0.9523809523809523,
+          "wer_norm": 0.9545454545454546,
+          "cer_norm": 0.7777777777777778,
+          "transcription": " \"I have to give you a month of time.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 0.9523809523809523,
+          "wer_norm": 0.9545454545454546,
+          "cer_norm": 0.7777777777777778,
+          "transcription": " \"I have to give you a month of time.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 0.9523809523809523,
+          "wer_norm": 0.9545454545454546,
+          "cer_norm": 0.7777777777777778,
+          "transcription": " \"I have to give you a month of time.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 0.9523809523809523,
+          "wer_norm": 0.9545454545454546,
+          "cer_norm": 0.7777777777777778,
+          "transcription": " \"I have to give you a month of time.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 0.9523809523809523,
+          "wer_norm": 0.9545454545454546,
+          "cer_norm": 0.7777777777777778,
+          "transcription": " \"I have to give you a month of time.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 0.9523809523809523,
+          "wer_norm": 0.9545454545454546,
+          "cer_norm": 0.7777777777777778,
+          "transcription": " \"I have to give you a month of time.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 0.9523809523809523,
+          "wer_norm": 0.9545454545454546,
+          "cer_norm": 0.7777777777777778,
+          "transcription": " \"I have to give you a month of time.\""
+        }
+      ]
+    },
+    "New recording 48_sent0150.wav": {
+      "avg_wer": 0.9041666666666667,
+      "max_wer": 0.95,
+      "min_wer": 0.9,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 0.95,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I am a good person.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 0.9,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I'm a good friend.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 0.9,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I'm a good friend.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 0.9,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I'm a good friend.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 0.9,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I'm a good friend.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 0.9,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I'm a good friend.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 0.9,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I'm a good friend.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 0.9,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I'm a good friend.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 0.9,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I'm a good friend.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 0.9,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I'm a good friend.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 0.9,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I'm a good friend.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 0.9,
+          "wer_norm": 0.9473684210526315,
+          "cer_norm": 0.8169014084507042,
+          "transcription": " \"I would say that I'm a good friend.\""
+        }
+      ]
+    },
+    "New recording 449_sent0159.wav": {
+      "avg_wer": 0.8970588235294118,
+      "max_wer": 1.0,
+      "min_wer": 0.6470588235294118,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 0.6470588235294118,
+          "wer_norm": 0.5294117647058824,
+          "cer_norm": 0.4810126582278481,
+          "transcription": " \"It can get really complicated and really serious\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 0.7058823529411765,
+          "wer_norm": 0.5882352941176471,
+          "cer_norm": 0.5569620253164557,
+          "transcription": " \"It can get really complicated and serious\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 0.7058823529411765,
+          "wer_norm": 0.5882352941176471,
+          "cer_norm": 0.5569620253164557,
+          "transcription": " \"It can get really complicated and serious\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 0.7058823529411765,
+          "wer_norm": 0.5882352941176471,
+          "cer_norm": 0.5569620253164557,
+          "transcription": " \"It can get really complicated and serious\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 1.0,
+          "transcription": " \""
+        }
+      ]
+    },
+    "Antibiotic request traveling to Thailand_sent0075.wav": {
+      "avg_wer": 0.891025641025641,
+      "max_wer": 1.0,
+      "min_wer": 0.6923076923076923,
+      "num_checkpoints": 12,
+      "stats": [
+        {
+          "checkpoint": "futo-org/acft-whisper-tiny.en",
+          "wer_raw": 0.7692307692307693,
+          "wer_norm": 0.6153846153846154,
+          "cer_norm": 0.6268656716417911,
+          "transcription": " \"What exact infections are you?\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+          "wer_raw": 0.8461538461538461,
+          "wer_norm": 0.6923076923076923,
+          "cer_norm": 0.6567164179104478,
+          "transcription": " \"What exactly infections are you?\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8656716417910447,
+          "transcription": " \"I'm not sure if I can.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8656716417910447,
+          "transcription": " \"I'm not sure if I can.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+          "wer_raw": 0.6923076923076923,
+          "wer_norm": 0.5384615384615384,
+          "cer_norm": 0.47761194029850745,
+          "transcription": " \"What exactly infections are you worried about?\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8656716417910447,
+          "transcription": " \"I'm not sure if I can.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+          "wer_raw": 0.6923076923076923,
+          "wer_norm": 0.5384615384615384,
+          "cer_norm": 0.47761194029850745,
+          "transcription": " \"What exactly infections are you worried about?\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+          "wer_raw": 0.6923076923076923,
+          "wer_norm": 0.5384615384615384,
+          "cer_norm": 0.47761194029850745,
+          "transcription": " \"What exactly infections are you worried about?\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8059701492537313,
+          "transcription": " \"I'm not going to be a good one.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8656716417910447,
+          "transcription": " \"I'm not sure if I can.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8656716417910447,
+          "transcription": " \"I'm not sure if I can.\""
+        },
+        {
+          "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+          "wer_raw": 1.0,
+          "wer_norm": 1.0,
+          "cer_norm": 0.8059701492537313,
+          "transcription": " \"I'm not going to be a good one.\""
+        }
+      ]
+    }
+  },
+  "pattern_analysis": {
+    "NEGATION_PATTERN": 13,
+    "OTHER": 19,
+    "VERY_SHORT": 18
+  }
+}

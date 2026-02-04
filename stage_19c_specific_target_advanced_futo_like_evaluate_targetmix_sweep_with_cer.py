@@ -39,9 +39,10 @@ i:\Whisper-training-env\Scripts\python.exe stage_19c_specific_target_advanced_fu
   --other_peak_ratio 1.0 ^
   --sweep_snr_db "20,10,5,0,-5" ^
   --sweep_overlap "0,0.25,0.5,0.75,1" ^
-  --dynamic_audio_ctx 0
   --auto_batch 0
   --resume
+
+  i:\Whisper-training-env\Scripts\python.exe stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py --test_manifest "I:\Record_chunks\pairs_manifest_combined_all_datasets_randomized_test_with_tempo.jsonl" --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores.csv" --checkpoint_dir "I:\Stage_17_shuffle_wer_acft_checkpoints_partialctx_tiny_en_14\20260203_095019" --mix_per_target 5 --other_peak_ratio 1.0 --sweep_snr_db "15,5,0" --sweep_overlap "0.25,0.75,1" --dynamic_audio_ctx 1 --batch_size 4 --auto_batch 0 --resume --others_dir "I:\Record_others_chunks" --others_manifest "I:\Record_others_chunks\pairs_pending_stereo.jsonl" --ffmpeg_path "ffmpeg" --percentage 10 --vad_filter 0
 
 
 Outputs (in checkpoint_dir by default)
@@ -68,6 +69,8 @@ import os
 import random
 import re
 import subprocess
+import sys
+from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
 from typing import Dict, List, Tuple, Optional, Iterable
@@ -1154,9 +1157,127 @@ def expand_pairs_with_conditions(base_pairs: List[dict], conditions: List[MixCon
 # Resume IO
 # ----------------------------
 
-def load_existing_results(out_json: Path) -> Tuple[dict, dict]:
+RUN_ARGS_VERSION = 1
+RUN_ARGS_IGNORE_KEYS = {"resume", "force_resume", "recalc_metrics"}
+
+
+def _json_friendly(obj):
+    if isinstance(obj, (Path, PureWindowsPath)):
+        return str(obj)
+    if isinstance(obj, dict):
+        return {k: _json_friendly(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_json_friendly(v) for v in obj]
+    if isinstance(obj, set):
+        return [_json_friendly(v) for v in sorted(obj)]
+    try:
+        # numpy scalars
+        if hasattr(obj, "item"):
+            return obj.item()
+    except Exception:
+        pass
+    return obj
+
+
+def _build_run_args(args: argparse.Namespace, out_json: Path) -> dict:
+    args_dict = _json_friendly(vars(args))
+    args_dict["out_json"] = str(out_json)
+    return {
+        "version": RUN_ARGS_VERSION,
+        "timestamp_utc": datetime.now(timezone.utc).isoformat(),
+        "argv": [str(a) for a in sys.argv],
+        "python": sys.executable,
+        "cwd": os.getcwd(),
+        "args": args_dict,
+    }
+
+
+def _normalize_run_args_for_compare(run_args: Optional[dict]) -> Dict[str, object]:
+    if not run_args or not isinstance(run_args, dict):
+        return {}
+    args_dict = run_args.get("args")
+    if not isinstance(args_dict, dict):
+        return {}
+    normed = {}
+    for k, v in args_dict.items():
+        if k in RUN_ARGS_IGNORE_KEYS:
+            continue
+        normed[k] = v
+    return normed
+
+
+def _diff_run_args(prev: Optional[dict], current: Optional[dict]) -> Dict[str, dict]:
+    prev_norm = _normalize_run_args_for_compare(prev)
+    curr_norm = _normalize_run_args_for_compare(current)
+    if not prev_norm or not curr_norm:
+        return {}
+    diffs: Dict[str, dict] = {}
+    for k in sorted(set(prev_norm.keys()) | set(curr_norm.keys())):
+        if prev_norm.get(k) != curr_norm.get(k):
+            diffs[k] = {"previous": prev_norm.get(k), "current": curr_norm.get(k)}
+    return diffs
+
+
+def warn_if_run_args_changed(prev: Optional[dict], current: Optional[dict]) -> None:
+    diffs = _diff_run_args(prev, current)
+    if not diffs:
+        return
+    print("⚠ Detected argument changes since last run:")
+    shown = 0
+    for k, v in diffs.items():
+        print(f"  - {k}: {v.get('previous')} -> {v.get('current')}")
+        shown += 1
+        if shown >= 20:
+            break
+    if len(diffs) > shown:
+        print(f"  ... {len(diffs) - shown} more changes")
+
+
+def _extract_run_args_from_meta(meta: Optional[dict]) -> Optional[dict]:
+    if not meta or not isinstance(meta, dict):
+        return None
+    if "run_args" in meta and isinstance(meta.get("run_args"), dict):
+        return meta.get("run_args")
+    return meta
+
+
+def _select_previous_run_args(results: dict, per_sample_meta: Optional[dict]) -> Optional[dict]:
+    if isinstance(results, dict):
+        history = results.get("run_history")
+        if isinstance(history, list) and history:
+            last = history[-1]
+            if isinstance(last, dict):
+                return last
+        if isinstance(results.get("run_args"), dict):
+            return results.get("run_args")
+    return _extract_run_args_from_meta(per_sample_meta)
+
+
+def _update_run_history(results: dict, current_run_args: dict) -> None:
+    if not isinstance(results, dict) or not isinstance(current_run_args, dict):
+        return
+    history = results.get("run_history")
+    if not isinstance(history, list):
+        history = []
+        if isinstance(results.get("run_args"), dict):
+            history.append(results.get("run_args"))
+    if not history or history[-1] != current_run_args:
+        history.append(current_run_args)
+    results["run_history"] = history
+    results["run_args"] = current_run_args
+
+
+def _pack_per_sample_payload(all_predictions: dict, run_args: Optional[dict]) -> List[dict]:
+    payload = list(all_predictions.values())
+    if not run_args:
+        return payload
+    meta = {"__meta__": {"run_args": run_args}}
+    return [meta] + payload
+
+
+def load_existing_results(out_json: Path) -> Tuple[dict, dict, Optional[dict]]:
     if not out_json.exists():
-        return {}, {}
+        return {}, {}, None
 
     try:
         with out_json.open("r", encoding="utf-8") as f:
@@ -1164,30 +1285,51 @@ def load_existing_results(out_json: Path) -> Tuple[dict, dict]:
 
         per_sample_json = out_json.parent / "evaluation_per_sample_predictions_targetmix_sweep.json"
         all_predictions = {}
+        per_sample_meta = None
         if per_sample_json.exists():
             with per_sample_json.open("r", encoding="utf-8") as f:
                 per_sample_data = json.load(f)
-                for item in per_sample_data:
-                    key = item.get("mix_key") or item.get("key")
-                    if key:
-                        all_predictions[key] = item
+                if isinstance(per_sample_data, dict):
+                    per_sample_meta = per_sample_data.get("run_args") or per_sample_data.get("__meta__")
+                    per_sample_data = (
+                        per_sample_data.get("items")
+                        or per_sample_data.get("samples")
+                        or []
+                    )
+                if isinstance(per_sample_data, list):
+                    for item in per_sample_data:
+                        if isinstance(item, dict):
+                            if "__meta__" in item and isinstance(item.get("__meta__"), dict):
+                                per_sample_meta = item.get("__meta__")
+                                if isinstance(per_sample_meta.get("run_args"), dict):
+                                    per_sample_meta = per_sample_meta.get("run_args")
+                                continue
+                            if "run_args" in item and "mix_key" not in item:
+                                if isinstance(item.get("run_args"), dict):
+                                    per_sample_meta = item.get("run_args")
+                                continue
+                            key = item.get("mix_key") or item.get("key")
+                            if key:
+                                all_predictions[key] = item
 
         print(f"✓ Loaded existing results from: {out_json}")
         print(f"✓ Found {len(results.get('models', []))} already evaluated models")
-        return results, all_predictions
+        return results, all_predictions, per_sample_meta
     except Exception as e:
         print(f"⚠ Could not load existing results: {e}")
-        return {}, {}
+        return {}, {}, None
 
 
-def save_incremental_results(results: dict, all_predictions: dict, out_json: Path) -> None:
+def save_incremental_results(results: dict, all_predictions: dict, out_json: Path, run_args: Optional[dict] = None) -> None:
     out_json.parent.mkdir(parents=True, exist_ok=True)
+    if run_args:
+        _update_run_history(results, run_args)
     with out_json.open("w", encoding="utf-8") as f:
         json.dump(results, f, indent=2, ensure_ascii=False)
 
     per_sample_json = out_json.parent / "evaluation_per_sample_predictions_targetmix_sweep.json"
     with per_sample_json.open("w", encoding="utf-8") as f:
-        json.dump(list(all_predictions.values()), f, indent=2, ensure_ascii=False)
+        json.dump(_pack_per_sample_payload(all_predictions, run_args), f, indent=2, ensure_ascii=False)
 
     print(f"✓ Incremental results saved to: {out_json}")
     print(f"✓ Per-sample predictions saved to: {per_sample_json}")
@@ -1998,7 +2140,7 @@ def main() -> None:
     rows = load_jsonl(args.test_manifest)
 
     # Optional ffmpeg fallback for broader formats
-    core_load_orig = load_audio_mono_16k
+    core_load_orig = globals()['load_audio_mono_16k']
     load_audio_mono_16k = make_loader_with_ffmpeg(str(args.ffmpeg_path), core_load_orig)
 
     if args.others_dir is not None:
@@ -2082,10 +2224,17 @@ def main() -> None:
     pair_rows = expand_pairs_with_conditions(base_pairs, conditions)
 
     # checkpoints
-    checkpoints = list(args.checkpoint_dir.glob("model_epoch_*"))
+    checkpoints = list(args.checkpoint_dir.glob("model_epoch_*")) + list(args.checkpoint_dir.glob("s20_model_epoch_*"))
     def _ckpt_key(p: Path) -> int:
         try:
-            return int(p.name.split("_")[2])
+            # Handle both "model_epoch_XXXXX" and "s20_model_epoch_XXXXX" patterns
+            parts = p.name.split("_")
+            if parts[0] == "s20" and parts[1] == "model" and parts[2] == "epoch":
+                return int(parts[3])
+            elif parts[0] == "model" and parts[1] == "epoch":
+                return int(parts[2])
+            else:
+                return 0
         except Exception:
             return 0
     checkpoints.sort(key=_ckpt_key)
@@ -2140,6 +2289,8 @@ def main() -> None:
     out_json = args.out_json
     if out_json is None:
         out_json = args.checkpoint_dir / "evaluation_results_futo_like_targetmix_sweep.json"
+    args.out_json = out_json
+    current_run_args = _build_run_args(args, out_json)
 
     results = {
         "mode": "others_dir" if args.others_dir is not None else "single_manifest",
@@ -2195,10 +2346,12 @@ def main() -> None:
     all_predictions: Dict[str, dict] = {}
 
     if args.resume or args.force_resume:
-        existing_results, existing_predictions = load_existing_results(out_json)
+        existing_results, existing_predictions, per_sample_meta = load_existing_results(out_json)
         if existing_results:
             results = existing_results
             all_predictions = existing_predictions
+        previous_run_args = _select_previous_run_args(existing_results, per_sample_meta)
+        warn_if_run_args_changed(previous_run_args, current_run_args)
 
     evaluated_models = {m["model"] for m in results.get("models", [])}
 
@@ -2262,7 +2415,7 @@ def main() -> None:
                 )
                 results["models"] = [mm for mm in results.get("models", []) if mm.get("model") != m]
                 results["models"].append({"model": m, "metrics_overall": overall, "metrics_by_condition": by_cond})
-                save_incremental_results(results, all_predictions, out_json)
+                save_incremental_results(results, all_predictions, out_json, run_args=current_run_args)
                 continue
             else:
                 print("⚠ Recalc requested but no saved predictions found; running full evaluation.")
@@ -2278,7 +2431,7 @@ def main() -> None:
         )
 
         results["models"].append({"model": m, "metrics_overall": overall, "metrics_by_condition": by_cond})
-        save_incremental_results(results, all_predictions, out_json)
+        save_incremental_results(results, all_predictions, out_json, run_args=current_run_args)
 
         print(f"samples={overall.get('samples')} skipped={overall.get('skipped')}")
         print(f"WER target micro={overall.get('wer_micro_target')} | WER other micro={overall.get('wer_micro_other')}")

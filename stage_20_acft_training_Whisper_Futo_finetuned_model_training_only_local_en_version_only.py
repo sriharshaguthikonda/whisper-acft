@@ -54,23 +54,8 @@ DEFAULT_CKPT_ROOT = os.environ.get(
     "i:/Stage_2_shuffle_Dynamic_n_ctx_stage_7_checkpoints_partialctx_tiny_en_11",
 )
 
-
-def _latest_run_tag(root: str | None):
-    if not root or not os.path.isdir(root):
-        return None
-    tags = []
-    for name in os.listdir(root):
-        p = os.path.join(root, name)
-        if os.path.isdir(p):
-            tags.append(name)
-    if not tags:
-        return None
-    return sorted(tags)[-1]
-
-
-RUN_TAG = os.environ.get("WHISPER_RUN_TAG") or _latest_run_tag(DEFAULT_CKPT_ROOT) or "20260202_033631"
-
-CHECKPOINT_DIR = os.environ.get("WHISPER_CHECKPOINT_DIR") or os.path.join(DEFAULT_CKPT_ROOT, RUN_TAG)
+# Checkpoints (single fixed directory; no run tags).
+CHECKPOINT_DIR = os.environ.get("WHISPER_CHECKPOINT_DIR") or DEFAULT_CKPT_ROOT
 
 # Track trained list inside the run dir by default; reuse Stage 18 progress unless overridden.
 TRAINED_JSONL_PATH = os.environ.get("WHISPER_TRAINED_JSONL") or os.path.join(CHECKPOINT_DIR, "trained_stage1.jsonl")
@@ -80,8 +65,7 @@ TRAINED_JSONL_PATH = os.environ.get("WHISPER_TRAINED_JSONL") or os.path.join(CHE
 # ----------------------------
 argp = argparse.ArgumentParser(description="Stage 20 ACFT training (Whisper)")
 argp.add_argument("--manifest", dest="manifest_path", help="Manifest JSONL to train from")
-argp.add_argument("--checkpoint_dir", dest="checkpoint_dir", help="Checkpoint directory (run folder)")
-argp.add_argument("--run_tag", dest="run_tag", help="Run tag under default checkpoint root")
+argp.add_argument("--checkpoint_dir", dest="checkpoint_dir", help="Checkpoint directory")
 argp.add_argument("--trained_jsonl", dest="trained_jsonl", help="Path to trained list jsonl")
 argp.add_argument("--reset_trained", action="store_true", help="Ignore trained list and start from manifest head")
 args, _unknown = argp.parse_known_args()
@@ -91,9 +75,6 @@ if args.manifest_path:
 
 if args.checkpoint_dir:
     CHECKPOINT_DIR = args.checkpoint_dir
-elif args.run_tag:
-    RUN_TAG = args.run_tag
-    CHECKPOINT_DIR = os.path.join(DEFAULT_CKPT_ROOT, RUN_TAG)
 
 if args.trained_jsonl:
     TRAINED_JSONL_PATH = args.trained_jsonl
@@ -121,6 +102,9 @@ BATCH_SIZE = 8
 GRAD_ACCUM_STEPS = 2
 LR = 5e-6
 MAX_AUDIO_SECONDS = 29.0  # we still pad features to 30s; this just filters absurdly long chunks
+BUCKET_SECS = 2.5          # duration bin width (light bucketing)
+BUCKET_TOKENS = 32         # transcript word-count bin
+BUCKET_BLOCK_SHUFFLE = 128 # shuffle within blocks after bucket flatten to avoid over-clustering
 
 # Loss weights
 LAMBDA_ACFT = 1.00       # robustness term
@@ -450,6 +434,24 @@ def pad_or_trim_to_30s(wav: np.ndarray):
     out = np.zeros((N_SAMPLES_30S,), dtype=np.float32)
     out[:n] = wav
     return out
+
+
+_duration_cache = {}
+
+
+def audio_duration_sec(path: str) -> float:
+    """Fastish duration lookup with a tiny in-memory cache."""
+    key = os.path.abspath(path)
+    if key in _duration_cache:
+        return _duration_cache[key]
+    try:
+        info = sf.info(path)
+        dur = float(info.frames) / float(info.samplerate)
+    except Exception:
+        wav, sr = decode_mono_16k(path)
+        dur = float(wav.shape[0]) / float(sr) if wav is not None and sr else 0.0
+    _duration_cache[key] = dur
+    return dur
 
 
 def shift_tokens_right(labels: torch.Tensor, pad_token_id: int, decoder_start_token_id: int):
@@ -824,14 +826,37 @@ def save_checkpoint(epoch_num: int, subset_start_idx: int, subset_count: int):
 
 
 def build_loader_from_rows(rows_for_epoch):
-    slim = []
+    # Light bucketing by duration and transcript length to avoid "one long clip kills the batch"
+    buckets = {}
+    rng = random.Random()
+
     for r in rows_for_epoch:
-        slim.append({
+        dur = audio_duration_sec(r["audio_path_local"])
+        txt = (r.get("raw_transcription") or "").strip()
+        tok_len = len(txt.split())
+        bkey = (int(dur // BUCKET_SECS), int(tok_len // BUCKET_TOKENS))
+        buckets.setdefault(bkey, []).append({
             "audio": r["audio_path_local"],
-            "raw_transcription": r.get("raw_transcription", ""),
+            "raw_transcription": txt,
         })
 
-    ds = Dataset.from_list(slim)
+    bucket_keys = list(buckets.keys())
+    rng.shuffle(bucket_keys)
+
+    ordered = []
+    for k in bucket_keys:
+        rng.shuffle(buckets[k])
+        ordered.extend(buckets[k])
+
+    if BUCKET_BLOCK_SHUFFLE > 1:
+        shuffled = []
+        for i in range(0, len(ordered), BUCKET_BLOCK_SHUFFLE):
+            block = ordered[i:i+BUCKET_BLOCK_SHUFFLE]
+            rng.shuffle(block)
+            shuffled.extend(block)
+        ordered = shuffled
+
+    ds = Dataset.from_list(ordered)
 
     pin_memory = (device == "cuda")
     loader = DataLoader(

@@ -109,11 +109,10 @@ def atomic_write_json(path: str, obj):
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_combined_all_datasets_randomized_train_no_reverb_filtered.jsonl"
+MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_combined_train_with_tempo_pause_randomized_updated.jsonl"
 
-# Make each run isolated. If you want fixed naming, set RUN_TAG manually.
-RUN_TAG = os.environ.get('WHISPER_RUN_TAG') or datetime.now().strftime('%Y%m%d_%H%M%S')
-CHECKPOINT_DIR = f"i:/Stage_2_shuffle_checkpoints_partialctx_tiny_en_13/{RUN_TAG}"
+# Checkpoints (single fixed directory; no run tags).
+CHECKPOINT_DIR = "i:/Stage_17_shuffle_wer_acft_checkpoints_partialctx_tiny_en_14"
 
 # Put run-state files INSIDE the checkpoint directory so runs do not poison each other.
 TRAINED_JSONL_PATH = os.path.join(CHECKPOINT_DIR, "trained_stage1.jsonl")
@@ -197,6 +196,26 @@ NONFINITE_CE_TOPK = 5              # how many worst samples to log per bad batch
 NONFINITE_CE_SAVE_TENSORS = False  # set True to also dump a .pt with tensors (can get big)
 NONFINITE_CE_TENSOR_DIR = os.path.join(CHECKPOINT_DIR, "debug_tensors")
 CE_SPIKE_THRESHOLD = None          # e.g. 50.0 to log extreme-but-finite CE spikes
+
+
+def _append_jsonl(path: str, obj: dict):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print("[warn] failed writing JSONL:", path, repr(e))
+
+
+def log_nonfinite_ce(keys, n_ctx: int, lr_now: float, note: str = ""):
+    rec = {
+        "ts": time.time(),
+        "note": note,
+        "n_ctx": int(n_ctx),
+        "lr": float(lr_now),
+        "keys": list(keys) if keys is not None else None,
+    }
+    _append_jsonl(NONFINITE_CE_LOG_JSONL, rec)
 
 
 class _Tee:
@@ -302,9 +321,11 @@ PROCESSOR_ID = "openai/whisper-tiny.en"  # must match the base family
 ACFT_REFERENCE_MODEL_ID = FUTO_MODEL_ID  # Reference model for ACFT (default: same as training model)
 CE_LABEL_SMOOTH = 0.05  # Label smoothing for CE loss (0.0 = disabled, 0.05 = recommended)
 LAMBDA_CE = 1.0  # Weight for cross-entropy loss
-LAMBDA_ACFT = 0.30  # Weight for ACFT robustness loss
+LAMBDA_ACFT = 0.10  # Weight for ACFT robustness loss
+# Optional: temporarily disable ACFT entirely while debugging instability.
+# LAMBDA_ACFT = 0.0
 # Optional ramp: start ACFT small then ramp up over first N optimizer steps
-ACFT_RAMP_STEPS = 200  # 0 disables ramp, 200 = ramp over first 200 steps
+ACFT_RAMP_STEPS = 800  # 0 disables ramp; higher values ramp more slowly
 
 # Dynamic audio_ctx (partial context) to teach robustness
 FORCE_FULL_AUDIO_CTX = False  # True = always use full context, False = use dynamic context
@@ -324,7 +345,7 @@ MAX_BATCH_SIZE = 40  # Maximum batch size for small files
 MAX_AUDIO_SECONDS = 30.0  # we pad features to 30s; this filters absurdly long chunks
 
 # --- Gradient clipping to prevent exploding gradients ---
-MAX_GRAD_NORM = 0.1  # Very aggressive gradient clipping to prevent NaN
+MAX_GRAD_NORM = 0.5  # Conservative clipping while debugging instability
 
 # ----------------------------
 # Learning rate + scheduler (NEW)
@@ -408,7 +429,7 @@ OPT_STEPS_PER_EPOCH = estimate_opt_steps_per_epoch(N_SAMPLES_PER_EPOCH, BATCH_SI
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 # Runtime toggle (recommended on GTX 1660 if you see NaNs): set WHISPER_DISABLE_AMP=1
-DISABLE_AMP = bool(int(os.environ.get("WHISPER_DISABLE_AMP", "0")))
+DISABLE_AMP = bool(int(os.environ.get("WHISPER_DISABLE_AMP", "1")))
 use_amp = (device == "cuda") and (not DISABLE_AMP)
 amp_dtype = torch.float16
 # Enable GradScaler only when autocast is enabled
@@ -1320,8 +1341,11 @@ def train_one_epoch(epoch_num: int, loader):
                 label_smoothing=float(CE_LABEL_SMOOTH),
             )
 
+        lr_now = float(optimizer.param_groups[0].get("lr", 0.0))
         if not _isfinite(loss_ce):
             print("[warn] non-finite CE loss; skipping batch")
+            if DEBUG_NONFINITE_CE:
+                log_nonfinite_ce(keys, n_ctx=int(n_ctx), lr_now=lr_now, note="non-finite CE")
             optimizer.zero_grad(set_to_none=True)
             accum = 0
             accum_keys = []
@@ -1384,14 +1408,18 @@ def train_one_epoch(epoch_num: int, loader):
                 scaler.unscale_(optimizer)
             torch.nn.utils.clip_grad_norm_(model_train.parameters(), float(MAX_GRAD_NORM))
 
+            did_optim_step = True
             if use_amp:
+                scale_before = float(scaler.get_scale())
                 scaler.step(optimizer)
                 scaler.update()
+                scale_after = float(scaler.get_scale())
+                did_optim_step = (scale_after >= scale_before)
             else:
                 optimizer.step()
 
             optimizer.zero_grad(set_to_none=True)
-            if scheduler is not None:
+            if scheduler is not None and did_optim_step:
                 scheduler.step()
 
             global_step += 1
@@ -1423,14 +1451,18 @@ def train_one_epoch(epoch_num: int, loader):
 
         torch.nn.utils.clip_grad_norm_(model_train.parameters(), float(MAX_GRAD_NORM))
 
+        did_optim_step = True
         if use_amp:
+            scale_before = float(scaler.get_scale())
             scaler.step(optimizer)
             scaler.update()
+            scale_after = float(scaler.get_scale())
+            did_optim_step = (scale_after >= scale_before)
         else:
             optimizer.step()
 
         optimizer.zero_grad(set_to_none=True)
-        if scheduler is not None:
+        if scheduler is not None and did_optim_step:
             scheduler.step()
 
         global_step += 1

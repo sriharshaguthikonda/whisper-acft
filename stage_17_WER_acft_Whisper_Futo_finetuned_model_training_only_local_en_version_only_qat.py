@@ -8,6 +8,15 @@
 # - Proper resume: restores global_step + scheduler and (optionally) forces LR_START
 # - Shows LR in progress bar
 # - Default: DYNAMIC_BATCH_SIZE=False while you tune LR (you can turn it back on later)
+# Reference: https://chatgpt.com/g/g-p-6969433d33d4819187ec3158a8f3745f/c/698181e1-ed48-83a6-aa73-454716c3047b
+#
+# How to use (QAT):
+# 1) Run as usual, but enable QAT via env vars:
+#    $env:WHISPER_QAT="1"
+#    $env:WHISPER_QAT_BITS="8"        # 8, 6, 5, 4 (or 16 to disable)
+#    $env:WHISPER_QAT_START_STEP="50" # delay before fake-quant starts
+# 2) Train; checkpoints are still full-precision.
+# 3) After training, quantize/export to whisper.cpp (q8_0/q5_1) as normal.
 # ============================================
 
 # ============================================
@@ -23,6 +32,7 @@ from typing import Optional, Dict
 
 import numpy as np
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from tqdm.auto import tqdm
@@ -35,6 +45,9 @@ from transformers import (
     WhisperForConditionalGeneration,
     GenerationConfig,
 )
+
+
+epoch_num_start = 0  # default; will be overridden if checkpoints exist
 
 # =============================
 # PATCH 1) Durable IO + keys
@@ -106,10 +119,10 @@ def atomic_write_json(path: str, obj):
 # ============================================
 
 # --- Data ---
-MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_combined_all_datasets_randomized_train_no_reverb_filtered.jsonl"
+MANIFEST_PATH = "I:/Record_chunks/pairs_manifest_stereo_english_only_filtered_with_uids_score_bottom_filtered.jsonl"
 
 # Checkpoints (single fixed directory; no run tags).
-CHECKPOINT_DIR = "i:/Stage_2_shuffle_checkpoints_partialctx_tiny_en_13"
+CHECKPOINT_DIR = "i:/Stage_17_no_aug_openai_wer_acft_qat6_0_checkpoints_partialctx_tiny_en_16"
 
 # Put run-state files INSIDE the checkpoint directory so runs do not poison each other.
 TRAINED_JSONL_PATH = os.path.join(CHECKPOINT_DIR, "trained_stage1.jsonl")
@@ -193,6 +206,26 @@ NONFINITE_CE_TOPK = 5              # how many worst samples to log per bad batch
 NONFINITE_CE_SAVE_TENSORS = False  # set True to also dump a .pt with tensors (can get big)
 NONFINITE_CE_TENSOR_DIR = os.path.join(CHECKPOINT_DIR, "debug_tensors")
 CE_SPIKE_THRESHOLD = None          # e.g. 50.0 to log extreme-but-finite CE spikes
+
+
+def _append_jsonl(path: str, obj: dict):
+    try:
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, "a", encoding="utf-8") as f:
+            f.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    except Exception as e:
+        print("[warn] failed writing JSONL:", path, repr(e))
+
+
+def log_nonfinite_ce(keys, n_ctx: int, lr_now: float, note: str = ""):
+    rec = {
+        "ts": time.time(),
+        "note": note,
+        "n_ctx": int(n_ctx),
+        "lr": float(lr_now),
+        "keys": list(keys) if keys is not None else None,
+    }
+    _append_jsonl(NONFINITE_CE_LOG_JSONL, rec)
 
 
 class _Tee:
@@ -289,8 +322,26 @@ VALIDATE_THREADS = 8  # lower if you hit "too many open files" on your OS
 VALIDATE_BLOCK = 256  # validate candidates in blocks
 
 # --- Model ---
-FUTO_MODEL_ID = "futo-org/acft-whisper-tiny.en"
+FUTO_MODEL_ID = "openai/whisper-tiny.en"
 PROCESSOR_ID = "openai/whisper-tiny.en"  # must match the base family
+
+# ===== Combined WER + ACFT knobs =====
+# Goal: keep WER going down, while ACFT prevents repetition / collapse when audio_ctx is dynamic.
+# Direct script parameters - modify these values as needed
+ACFT_REFERENCE_MODEL_ID = FUTO_MODEL_ID  # Reference model for ACFT (default: same as training model)
+CE_LABEL_SMOOTH = 0.05  # Label smoothing for CE loss (0.0 = disabled, 0.05 = recommended)
+LAMBDA_CE = 1.0  # Weight for cross-entropy loss
+LAMBDA_ACFT = 0.10  # Weight for ACFT robustness loss
+# Optional: temporarily disable ACFT entirely while debugging instability.
+# LAMBDA_ACFT = 0.0
+# Optional ramp: start ACFT small then ramp up over first N optimizer steps
+ACFT_RAMP_STEPS = 800  # 0 disables ramp; higher values ramp more slowly
+
+# Dynamic audio_ctx (partial context) to teach robustness
+FORCE_FULL_AUDIO_CTX = False  # True = always use full context, False = use dynamic context
+AUDIO_CTX_SAFETY_SEC = 0.20  # Safety margin in seconds for dynamic context
+AUDIO_CTX_ROUND_TO = 16  # Round context to multiples of this value
+AUDIO_CTX_JITTER_MAX = 64  # Maximum upward jitter for dynamic context
 
 TARGET_SR = 16000
 N_SAMPLES_PER_EPOCH = 5016
@@ -304,7 +355,7 @@ MAX_BATCH_SIZE = 40  # Maximum batch size for small files
 MAX_AUDIO_SECONDS = 30.0  # we pad features to 30s; this filters absurdly long chunks
 
 # --- Gradient clipping to prevent exploding gradients ---
-MAX_GRAD_NORM = 0.1  # Very aggressive gradient clipping to prevent NaN
+MAX_GRAD_NORM = 0.5  # Conservative clipping while debugging instability
 
 # ----------------------------
 # Learning rate + scheduler (NEW)
@@ -335,9 +386,7 @@ MEMORY_THRESHOLD_LOW = 0.60  # Increase batch size if memory usage < 60%
 DURATION_THRESHOLD_LARGE = 20.0  # Files longer than this get smaller batch size
 DURATION_THRESHOLD_SMALL = 10.0  # Files shorter than this can use larger batch size
 
-# Loss weights
-LAMBDA_ACFT = 0.00        # robustness term
-LAMBDA_CE = 1.00          # ASR term
+# Loss weights are now defined above (env overridable)
 
 # DataLoader knobs
 NUM_WORKERS = 0           # Windows: keep 0. Colab/Linux: 2–4 can speed up.
@@ -389,10 +438,94 @@ OPT_STEPS_PER_EPOCH = estimate_opt_steps_per_epoch(N_SAMPLES_PER_EPOCH, BATCH_SI
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
-use_amp = (device == "cuda")
+# Runtime toggle (recommended on GTX 1660 if you see NaNs): set WHISPER_DISABLE_AMP=1
+DISABLE_AMP = bool(int(os.environ.get("WHISPER_DISABLE_AMP", "1")))
+
+# ============================================
+# QAT (fake quantization during training) for whisper.cpp-style int quant
+#
+# What this does:
+# - During forward, nn.Linear weights are fake-quantized to N bits (default 8) using STE.
+# - You still SAVE normal FP weights. After training, you quantize/export to whisper.cpp .bin.
+#
+# Why this is the right fit for your pipeline:
+# - FUTO Voice Input / Keyboard expects whisper.cpp models (ggml/gguf .bin).
+# - Their published ACFT models are q8_0 (see whisper-acft README links).
+# - QAT helps the model tolerate weight quant noise before you quantize to q8_0 / q5_1.
+#
+# Enable with:
+#   $env:WHISPER_QAT="1"; $env:WHISPER_QAT_BITS="8"; $env:WHISPER_QAT_START_STEP="50"
+# ============================================
+QAT_ENABLE = bool(int(os.environ.get("WHISPER_QAT", "0")))
+QAT_BITS = int(os.environ.get("WHISPER_QAT_BITS", "6"))       # 8, 6, 5, 4
+QAT_START_STEP = int(os.environ.get("WHISPER_QAT_START_STEP", "50"))
+QAT_EXCLUDE_SUFFIXES = {
+    "proj_out", "lm_head",            # output projection (keep FP)
+    "embed_positions", "embed_tokens" # embeddings (keep FP)
+}
+QAT_VERBOSE = bool(int(os.environ.get("WHISPER_QAT_VERBOSE", "1")))
+
+
+class QATState:
+    __slots__ = ("step", "start_step")
+    def __init__(self, start_step: int = 0):
+        self.step = 0
+        self.start_step = int(start_step)
+
+
+def _fake_quant_per_row_ste(w: torch.Tensor, bits: int) -> torch.Tensor:
+    """Per-output-channel symmetric fake quant with straight-through estimator.
+    Matches the *spirit* of ggml row-wise quant (not byte-identical).
+    """
+    bits = int(bits)
+    if bits >= 16:
+        return w
+    qmax = float((1 << (bits - 1)) - 1)
+    # Work in FP32 for stable scales.
+    w_fp = w.detach().float()
+    # Per-row scale: max abs in each output row.
+    max_abs = w_fp.abs().amax(dim=1, keepdim=True).clamp_min(1e-8)
+    scale = max_abs / qmax
+    w_q = torch.round(w_fp / scale).clamp(-qmax, qmax) * scale
+    w_q = w_q.to(dtype=w.dtype)
+    # STE: forward uses quantized; backward flows through original.
+    return (w_q - w).detach() + w
+
+
+class FakeQuantLinear(nn.Module):
+    def __init__(self, linear: nn.Linear, *, bits: int, state: QATState):
+        super().__init__()
+        self.linear = linear
+        self.bits = int(bits)
+        self.state = state
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if self.state.step < self.state.start_step or self.bits >= 16:
+            return self.linear(x)
+        w = self.linear.weight
+        b = self.linear.bias
+        w_q = _fake_quant_per_row_ste(w, self.bits)
+        return F.linear(x, w_q, b)
+
+
+def inject_qat_linears(module: nn.Module, *, bits: int, state: QATState, prefix: str = ""):
+    """Recursively wraps nn.Linear with FakeQuantLinear (except excluded names)."""
+    for name, child in list(module.named_children()):
+        full = f"{prefix}.{name}" if prefix else name
+        # Exclusions: by module name suffix (cheap + good enough)
+        if any(full.endswith(suf) for suf in QAT_EXCLUDE_SUFFIXES):
+            continue
+        if isinstance(child, nn.Linear):
+            setattr(module, name, FakeQuantLinear(child, bits=int(bits), state=state))
+        else:
+            inject_qat_linears(child, bits=int(bits), state=state, prefix=full)
+
+
+# If QAT is enabled, disabling AMP is the safest default (fake-quant uses FP32 scales).
+use_amp = (device == "cuda") and (not DISABLE_AMP) and (not QAT_ENABLE)
 amp_dtype = torch.float16
-use_grad_scaler = (device == "cuda")
-scaler = torch.amp.GradScaler("cuda", enabled=use_grad_scaler)
+# Enable GradScaler only when autocast is enabled
+scaler = torch.amp.GradScaler("cuda", enabled=use_amp)
 
 print("Device:", device)
 if device == "cuda":
@@ -776,6 +909,9 @@ def fix_whisper_special_tokens(processor, model):
 
 def strip_leading_token(labels, token_id: int, pad_id: int):
     """If every sequence begins with token_id (and it's not padding), drop that column."""
+    # Safety: if token_id is not initialised yet, do nothing.
+    if token_id is None:
+        return labels
     # labels are int64 tensor shaped [B, T]
     if labels.numel() == 0:
         return labels
@@ -914,20 +1050,21 @@ def collate_batch(examples):
     # CRITICAL: Strip leading SOT token from labels to prevent pathological training
     labels = strip_leading_token(labels, token_id=SOT_ID, pad_id=PAD_ID)
     
-    # Also adjust attention_mask if we stripped a token
-    attn_mask = tok["attention_mask"]
-    if attn_mask is not None and attn_mask.shape[1] == labels.shape[1] + 1:
-        attn_mask = attn_mask[:, 1:]
-
-    # Check the potentially sliced attention mask, not the original
-    if attn_mask is None or attn_mask.sum().item() == 0:
+    # NOTE:
+    # We DO NOT return a decoder attention mask here, because the decoder inputs are shifted
+    # (decoder_input_ids = shift_tokens_right(...)) inside the training loop.
+    # Using tokenizer's attention_mask directly for the decoder is WRONG when right-padding:
+    # it masks out the last real token after shifting.
+    # We'll build decoder_attention_mask from decoder_input_ids in the train loop.
+    labels_attention_mask = tok.get("attention_mask")
+    if labels_attention_mask is None or labels_attention_mask.sum().item() == 0:
         return None
 
     return {
         "lengths": torch.tensor(lengths_sec, dtype=torch.float32),
         "input_features": feats.input_features,
         "labels": labels,
-        "attention_mask": attn_mask,  # Use adjusted attention mask
+        "labels_attention_mask": labels_attention_mask,
         "meta_audio": meta_audio,
         "meta_audio_orig": meta_audio_orig,
         "meta_uid": meta_uid,
@@ -939,204 +1076,7 @@ def collate_batch(examples):
 
 
 # ============================================
-# Debug helpers: log the exact sample(s) behind NaN/Inf CE loss
-# ============================================
-
-def _safe_snip(s, max_len: int = 180) -> str:
-    if s is None:
-        return ""
-    s = str(s).replace("\r", " ").replace("\n", " ")
-    return s[:max_len]
-
-
-def _append_jsonl_line(path: str, obj: dict):
-    os.makedirs(os.path.dirname(path), exist_ok=True)
-    with open(path, "a", encoding="utf-8", errors="replace") as f:
-        f.write(json.dumps(obj, ensure_ascii=False) + "\n")
-
-
-def _tensor_stats(x: torch.Tensor) -> dict:
-    # Safe summary that won't crash on NaNs/Infs
-    try:
-        xf = torch.nan_to_num(x.detach().float(), nan=0.0, posinf=0.0, neginf=0.0)
-        return {
-            "shape": list(x.shape),
-            "dtype": str(x.dtype),
-            "min": float(xf.min().item()),
-            "max": float(xf.max().item()),
-            "mean": float(xf.mean().item()),
-        }
-    except Exception:
-        return {"shape": list(getattr(x, "shape", [])), "dtype": str(getattr(x, "dtype", ""))}
-
-
-def diagnose_nonfinite_ce_samples(
-    logits: torch.Tensor,
-    labels: torch.Tensor,
-    meta_audio: list,
-    meta_audio_orig: list,
-    meta_text: list,
-    meta_uid: list,
-    meta_row_index: list,
-    topk: int = 5,
-):
-    """Return top-k suspicious samples (per-sample CE, NaN flags, invalid labels, etc.)."""
-    out = []
-    if logits is None or labels is None:
-        return out
-
-    with torch.no_grad():
-        bs, t, v = logits.shape
-        logits_det = logits.detach()
-        labels_det = labels.detach()
-
-        # Flags
-        nonfinite_logits = (~torch.isfinite(logits_det)).any(dim=(1, 2))
-        invalid_labels = ((labels_det != -100) & ((labels_det < 0) | (labels_det >= v))).any(dim=1)
-        empty_labels = (labels_det != -100).sum(dim=1) == 0
-
-        # Per-sample CE (float32, reduction=mean)
-        losses = torch.full((bs,), float("nan"), device=logits_det.device, dtype=torch.float32)
-        for i in range(bs):
-            if bool(invalid_labels[i]) or bool(empty_labels[i]):
-                continue
-            m = labels_det[i] != -100
-            if not bool(m.any()):
-                continue
-            li = logits_det[i, m].float()
-            ti = labels_det[i, m]
-            try:
-                losses[i] = F.cross_entropy(li, ti, reduction="mean")
-            except Exception:
-                # leave as NaN
-                pass
-
-        losses_cpu = losses.detach().float().cpu().numpy()
-
-        def sort_key(i: int):
-            li = losses_cpu[i]
-            bad = bool(nonfinite_logits[i]) or bool(invalid_labels[i]) or bool(empty_labels[i]) or (not np.isfinite(li))
-            # bad first; then NaN; then Inf; then largest finite
-            return (
-                0 if bad else 1,
-                0 if np.isnan(li) else 1,
-                0 if np.isinf(li) else 1,
-                -(li if np.isfinite(li) else 0.0),
-            )
-
-        idxs = list(range(bs))
-        idxs.sort(key=sort_key)
-
-        take = idxs[: max(1, int(topk))]
-        for i in take:
-            li = float(losses_cpu[i]) if np.isfinite(losses_cpu[i]) else None
-            # logits range for that sample (safe)
-            try:
-                lf = torch.nan_to_num(logits_det[i].float(), nan=0.0, posinf=0.0, neginf=0.0)
-                lmin = float(lf.min().item())
-                lmax = float(lf.max().item())
-            except Exception:
-                lmin = lmax = None
-
-            out.append(
-                {
-                    "i": int(i),
-                    "audio": meta_audio[i] if i < len(meta_audio) else None,
-                    "audio_orig": meta_audio_orig[i] if i < len(meta_audio_orig) else None,
-                    "uid": meta_uid[i] if i < len(meta_uid) else None,
-                    "epoch_row_index": meta_row_index[i] if i < len(meta_row_index) else None,
-                    "text": _safe_snip(meta_text[i] if i < len(meta_text) else "", 220),
-                    "token_count": int((labels_det[i] != -100).sum().item()),
-                    "nonfinite_logits": bool(nonfinite_logits[i].item()),
-                    "invalid_labels": bool(invalid_labels[i].item()),
-                    "empty_labels": bool(empty_labels[i].item()),
-                    "ce": li,
-                    "logits_min": lmin,
-                    "logits_max": lmax,
-                }
-            )
-    return out
-
-
-def log_nonfinite_ce_batch(
-    *,
-    kind: str,
-    epoch_num: int,
-    batch_idx: int,
-    global_step: int,
-    n_ctx: int | None,
-    lr: float | None,
-    meta_audio: list,
-    meta_audio_orig: list,
-    meta_text: list,
-    meta_uid: list,
-    meta_row_index: list,
-    lengths: torch.Tensor | None,
-    labels: torch.Tensor | None,
-    attn_mask: torch.Tensor | None,
-    logits: torch.Tensor | None,
-    loss_ce: torch.Tensor | None,
-    extra: dict | None = None,
-):
-    if not DEBUG_NONFINITE_CE:
-        return
-
-    rec = {
-        "ts": time.strftime("%Y-%m-%d %H:%M:%S"),
-        "kind": kind,
-        "epoch": int(epoch_num),
-        "batch_idx": int(batch_idx),
-        "global_step": int(global_step),
-        "n_ctx": int(n_ctx) if n_ctx is not None else None,
-        "lr": float(lr) if lr is not None else None,
-        "loss_ce": (float(loss_ce.item()) if (loss_ce is not None and torch.isfinite(loss_ce)) else None),
-        "lengths_stats": _tensor_stats(lengths) if lengths is not None else None,
-        "labels_stats": _tensor_stats(labels) if labels is not None else None,
-        "attn_mask_stats": _tensor_stats(attn_mask) if attn_mask is not None else None,
-        "logits_stats": _tensor_stats(logits) if logits is not None else None,
-        "top_samples": diagnose_nonfinite_ce_samples(
-            logits, labels, meta_audio, meta_audio_orig, meta_text, meta_uid, meta_row_index, topk=NONFINITE_CE_TOPK
-        )
-        if logits is not None and labels is not None
-        else [],
-        "extra": extra or {},
-    }
-
-    _append_jsonl_line(NONFINITE_CE_LOG_JSONL, rec)
-
-    if NONFINITE_CE_SAVE_TENSORS and logits is not None and labels is not None:
-        os.makedirs(NONFINITE_CE_TENSOR_DIR, exist_ok=True)
-        pt_path = os.path.join(
-            NONFINITE_CE_TENSOR_DIR,
-            f"bad_{kind}_e{epoch_num:06d}_b{batch_idx:06d}_gs{global_step:09d}.pt",
-        )
-        try:
-            torch.save(
-                {
-                    "epoch": int(epoch_num),
-                    "batch_idx": int(batch_idx),
-                    "global_step": int(global_step),
-                    "n_ctx": int(n_ctx) if n_ctx is not None else None,
-                    "lr": float(lr) if lr is not None else None,
-                    "meta_audio": meta_audio,
-                    "meta_audio_orig": meta_audio_orig,
-                    "meta_uid": meta_uid,
-                    "meta_row_index": meta_row_index,
-                    "meta_text": meta_text,
-                    "lengths": lengths.detach().cpu() if lengths is not None else None,
-                    "labels": labels.detach().cpu(),
-                    "attn_mask": attn_mask.detach().cpu() if attn_mask is not None else None,
-                    "logits": logits.detach().cpu(),
-                },
-                pt_path,
-            )
-            print(f"[debug] saved bad batch tensors -> {pt_path}")
-        except Exception as e:
-            print(f"[debug] FAILED to save tensors: {e}")
-
-
-# ============================================
-# CELL 5/9 — Models + optimizer + scheduler
+# CELL 5/9 — Models + optimizer + scheduler (RESTORED)
 # ============================================
 
 try:
@@ -1178,8 +1118,8 @@ def load_student_from_checkpoint_or_base(model_dir: str | None):
     if model_dir and os.path.isdir(model_dir):
         print("Loading student from checkpoint:", model_dir)
         return WhisperForConditionalGeneration.from_pretrained(model_dir, generation_config=gen_config)
-    print("Loading student from base:", FUTO_MODEL_ID)
-    return WhisperForConditionalGeneration.from_pretrained(FUTO_MODEL_ID, generation_config=gen_config)
+    print("Loading student from base:", PROCESSOR_ID)
+    return WhisperForConditionalGeneration.from_pretrained(PROCESSOR_ID, generation_config=gen_config)
 
 
 latest_ckpt_epoch, latest_model_dir, latest_state_path = find_latest_checkpoint_epoch(CHECKPOINT_DIR)
@@ -1194,7 +1134,7 @@ if latest_state_path:
 
 trained_based_epoch = len(trained_set) // max(1, int(N_SAMPLES_PER_EPOCH))
 ckpt_based_epoch = (latest_ckpt_epoch + 1) if latest_ckpt_epoch is not None else 0
-epoch_num_start = max(trained_based_epoch, ckpt_based_epoch)
+epoch_num_start = max(int(trained_based_epoch), int(ckpt_based_epoch))
 print(f"Auto epoch start: {epoch_num_start} (trained_based={trained_based_epoch}, ckpt_based={ckpt_based_epoch})")
 
 model_train = load_student_from_checkpoint_or_base(latest_model_dir)
@@ -1203,11 +1143,11 @@ model_train.train()
 
 # Fix critical token configuration issues
 SOT_ID = fix_whisper_special_tokens(processor, model_train)
-DECODER_START_ID = SOT_ID  # Use the corrected SOT ID
+DECODER_START_ID = SOT_ID
 
-want_acft = (LAMBDA_ACFT > 0.0)
+want_acft = (float(LAMBDA_ACFT) > 0.0)
 if want_acft:
-    model_ref = WhisperForConditionalGeneration.from_pretrained(FUTO_MODEL_ID, generation_config=gen_config)
+    model_ref = WhisperForConditionalGeneration.from_pretrained(ACFT_REFERENCE_MODEL_ID, generation_config=gen_config)
     model_ref.to(device)
     model_ref.eval()
     for p in model_ref.parameters():
@@ -1215,25 +1155,20 @@ if want_acft:
 else:
     model_ref = None
 
-optimizer = torch.optim.AdamW(model_train.parameters(), lr=LR_START)
+optimizer = torch.optim.AdamW(model_train.parameters(), lr=float(LR_START))
 
-# Track optimizer steps globally (NEW)
+# Track optimizer steps globally
 global_step = 0
 
-# Scheduler (warmup + epoch decay) (NEW)
+# Scheduler (warmup + epoch decay)
 scheduler = None
 if USE_SCHEDULER:
     def lr_mult(step: int) -> float:
-        # warmup
         if step < WARMUP_STEPS:
             return float(step) / max(1.0, float(WARMUP_STEPS))
-
-        # epoch-based decay after warmup
         post = step - WARMUP_STEPS
         epoch_i = int(post // max(1, OPT_STEPS_PER_EPOCH))
         mult = (DECAY_GAMMA ** epoch_i)
-
-        # floor
         floor_mult = float(LR_FLOOR) / float(LR_START)
         if mult < floor_mult:
             mult = floor_mult
@@ -1244,59 +1179,49 @@ if USE_SCHEDULER:
 else:
     print("[lr] Scheduler disabled: constant LR")
 
-# Add gradient clipping for stability
-MAX_GRAD_NORM = 1.0
-
 # Resume optimizer/scaler/scheduler/global_step
 if latest_state is not None:
     try:
         if latest_state.get("optimizer") is not None:
             optimizer.load_state_dict(latest_state["optimizer"])
             print("Resumed optimizer state.")
-        if use_grad_scaler and latest_state.get("scaler") is not None:
+        if use_amp and latest_state.get("scaler") is not None:
             scaler.load_state_dict(latest_state["scaler"])
             print("Resumed GradScaler state.")
-
         global_step = int(latest_state.get("global_step", 0) or 0)
-
         if scheduler is not None and latest_state.get("scheduler") is not None:
             try:
                 scheduler.load_state_dict(latest_state["scheduler"])
                 print("Resumed scheduler state.")
             except Exception as e:
                 print("WARNING: failed to resume scheduler:", repr(e))
-
     except Exception as e:
         print("WARNING: failed to resume optimizer/scaler:", repr(e))
 
-# Force LR on resume (critical if you changed LR_START) - SAFE VERSION
 if RESUME_CLAMP_LR:
-    clamp_optimizer_lr(optimizer, LR_START)
-    # Also make sure scheduler base_lrs don't exceed LR_START
+    clamp_optimizer_lr(optimizer, float(LR_START))
     if scheduler is not None and hasattr(scheduler, 'base_lrs'):
         scheduler.base_lrs = [min(float(b), float(LR_START)) for b in scheduler.base_lrs]
     print(f"[lr] Clamped LR to LR_START on resume: {LR_START} (global_step={global_step})")
-elif RESUME_OVERRIDE_LR:
-    for pg in optimizer.param_groups:
-        pg["lr"] = LR_START
-    if scheduler is not None:
-        # Ensure scheduler base_lrs reflect LR_START
-        scheduler.base_lrs = [LR_START for _ in optimizer.param_groups]
-        try:
-            # Align scheduler to global_step
-            scheduler.last_epoch = max(-1, global_step - 1)
-        except Exception:
-            pass
-    print(f"[lr] Forced LR_START on resume: {LR_START} (global_step={global_step})")
+
+# ---- QAT inject (student model only; ref model stays FP) ----
+qat_state = None
+if QAT_ENABLE:
+    if QAT_BITS not in (4, 5, 6, 8, 16):
+        raise SystemExit(f"Invalid WHISPER_QAT_BITS={QAT_BITS}. Use 8,6,5,4 (or 16 to disable).")
+    qat_state = QATState(start_step=int(QAT_START_STEP))
+    inject_qat_linears(model_train, bits=int(QAT_BITS), state=qat_state)
+    if QAT_VERBOSE:
+        print(f"[qat] enabled: bits={QAT_BITS} | start_step={QAT_START_STEP} | excluded={sorted(QAT_EXCLUDE_SUFFIXES)}")
 
 cleanup_memory("after model load")
 
 
 # ============================================
-# CELL 6/9 — Partial encoder + losses
+# CELL 6/9 — Partial encoder + losses (RESTORED)
 # ============================================
 
-FULL_ENCODER_CONTEXT_LENGTH = int(model_train.config.max_source_positions)  # 1500
+FULL_ENCODER_CONTEXT_LENGTH = int(getattr(model_train.config, "max_source_positions", 1500))
 
 
 def compute_partially_encoder(whisper_model, input_features: torch.Tensor, n_audio_ctx: int):
@@ -1308,7 +1233,7 @@ def compute_partially_encoder(whisper_model, input_features: torch.Tensor, n_aud
     elif diff < 0:
         input_features = input_features[:, :, :target_mel_seq_len]
 
-    if n_audio_ctx == FULL_ENCODER_CONTEXT_LENGTH:
+    if int(n_audio_ctx) == int(FULL_ENCODER_CONTEXT_LENGTH):
         return whisper_model.encoder(input_features).last_hidden_state
 
     enc = whisper_model.encoder
@@ -1336,25 +1261,44 @@ def compute_partially_encoder(whisper_model, input_features: torch.Tensor, n_aud
     return hs
 
 
-CTX_BUCKETS = [256, 384, 512, 768, 1024, 1500]
+def pick_n_ctx_from_batch(
+    lengths_sec: torch.Tensor,
+    max_embed_positions: int,
+    *,
+    full_ctx: int,
+    safety_sec: float = 0.20,
+    round_to: int = 16,
+    jitter_max: int = 64,
+) -> int:
+    if not lengths_sec.numel():
+        return int(min(full_ctx, max_embed_positions))
 
+    max_len = float(lengths_sec.max().item())
+    base = (float(full_ctx) / 30.0) * (max_len + float(safety_sec))
+    base = int(math.ceil(base))
 
-def pick_n_ctx_from_batch(lengths_sec: torch.Tensor, max_embed_positions: int):
-    # Whisper encoder has 1500 time steps for 30s -> 50 steps/sec
-    max_dur = float(lengths_sec.max().item()) if lengths_sec.numel() else 30.0
-    required = int(math.ceil(max_dur * 50.0))
-    required = max(1, min(required, max_embed_positions))
+    if round_to and round_to > 1:
+        base = int(math.ceil(base / round_to) * round_to)
 
-    for b in CTX_BUCKETS:
-        if b >= required:
-            return int(min(b, max_embed_positions))
-    return int(min(max_embed_positions, FULL_ENCODER_CONTEXT_LENGTH))
+    base = max(1, min(base, max_embed_positions))
+
+    jitter = min(int(jitter_max), max(0, base // 10))
+    if jitter > 0:
+        add = int(torch.randint(0, jitter + 1, (1,), device=lengths_sec.device).item())
+        n_ctx = base + add
+    else:
+        n_ctx = base
+
+    return int(max(1, min(n_ctx, max_embed_positions)))
 
 
 def masked_hidden_mse(hs_pred: torch.Tensor, hs_tgt: torch.Tensor, attn_mask: torch.Tensor):
-    mask = attn_mask.unsqueeze(0).unsqueeze(-1).to(dtype=hs_pred.dtype)
+    hs_pred = hs_pred.float()
+    hs_tgt = hs_tgt.float()
+    mask = attn_mask.unsqueeze(0).unsqueeze(-1).to(dtype=torch.float32)  # [1,B,T,1]
     diff2 = (hs_pred - hs_tgt).pow(2) * mask
-    return diff2.sum() / mask.sum().clamp_min(1.0)
+    denom = mask.sum() * float(hs_pred.shape[0]) * float(hs_pred.shape[-1])
+    return diff2.sum(dtype=torch.float32) / denom.clamp_min(1.0)
 
 
 def get_lm_head(model: WhisperForConditionalGeneration):
@@ -1366,7 +1310,7 @@ def get_lm_head(model: WhisperForConditionalGeneration):
 
 
 # ============================================
-# CELL 7/9 — Checkpointing
+# CELL 7/9 — Checkpointing (RESTORED)
 # ============================================
 
 
@@ -1376,50 +1320,28 @@ def save_checkpoint(epoch_num: int, subset_start_idx: int, subset_count: int):
     model_dir = os.path.join(CHECKPOINT_DIR, f"model_epoch_{epoch_num:06d}")
     os.makedirs(model_dir, exist_ok=True)
 
+    # Save model weights/config
     model_train.to("cpu").save_pretrained(model_dir)
     model_train.to(device)
 
-    current_lr = float(optimizer.param_groups[0]["lr"])
-
     state = {
-        "epoch": epoch_num,
-        "subset_start_idx": subset_start_idx,
-        "subset_count": subset_count,
+        "epoch": int(epoch_num),
+        "subset_start_idx": int(subset_start_idx),
+        "subset_count": int(subset_count),
         "optimizer": optimizer.state_dict(),
-        "scaler": scaler.state_dict() if use_grad_scaler else None,
         "scheduler": scheduler.state_dict() if scheduler is not None else None,
+        "scaler": scaler.state_dict() if use_amp else None,
         "global_step": int(global_step),
-        "timestamp": time.time(),
-        "model_id": FUTO_MODEL_ID,
-        "processor_id": PROCESSOR_ID,
-        "lr_current": current_lr,
-        "lr_start": float(LR_START),
-        "lr_floor": float(LR_FLOOR),
-        "warmup_steps": int(WARMUP_STEPS),
-        "decay_gamma": float(DECAY_GAMMA),
-        "use_scheduler": bool(USE_SCHEDULER),
-        "batch_size": BATCH_SIZE,
-        "grad_accum_steps": GRAD_ACCUM_STEPS,
-        "n_samples_per_epoch": N_SAMPLES_PER_EPOCH,
-        "lambda_acft": LAMBDA_ACFT,
-        "lambda_ce": LAMBDA_CE,
-        "use_local_cache": USE_LOCAL_CACHE,
-        "validate_audio_in_selector": VALIDATE_AUDIO_IN_SELECTOR,
-        "dynamic_batch_size": bool(DYNAMIC_BATCH_SIZE),
+        "ts": time.time(),
     }
 
     state_path = os.path.join(CHECKPOINT_DIR, f"training_state_epoch_{epoch_num:06d}.pt")
-    tmp_state_path = state_path + ".tmp"
-    torch.save(state, tmp_state_path)
-    os.replace(tmp_state_path, state_path)
-
-    print("Saved checkpoint:", model_dir)
-    cleanup_memory(f"after save checkpoint {epoch_num}")
-    return model_dir, state_path
+    torch.save(state, state_path)
+    print("✓ Saved checkpoint:", model_dir)
 
 
 # ============================================
-# CELL 8/9 — DataLoader + training loop
+# CELL 8/9 — Training loop (RESTORED)
 # ============================================
 
 
@@ -1436,375 +1358,240 @@ def build_loader_from_rows(rows_for_epoch):
             "raw_transcription": r.get("raw_transcription", ""),
             "audio_path_orig": r.get("audio_path"),
             "key": r.get("key") or canonical_audio_key(r.get("audio_path")),
-            "uid": r.get("uid"),  # Fix: Add uid for meta_uid tracking in collate_batch
+            "uid": r.get("uid"),
         })
 
     ds = Dataset.from_list(slim)
 
-    loader = DataLoader(
+    return DataLoader(
         ds,
-        batch_size=BATCH_SIZE,
+        batch_size=int(BATCH_SIZE),
         shuffle=True,
         collate_fn=collate_batch,
-        num_workers=NUM_WORKERS,
+        num_workers=int(NUM_WORKERS),
         pin_memory=(device == "cuda"),
+        drop_last=False,
     )
 
-    return loader
 
-
-def _is_oom(e: BaseException) -> bool:
-    msg = str(e).lower()
-    return isinstance(e, torch.cuda.OutOfMemoryError) or ("out of memory" in msg)
+def _isfinite(x: torch.Tensor) -> bool:
+    return bool(torch.isfinite(x).all().item())
 
 
 def train_one_epoch(epoch_num: int, loader):
-    """Drop-in replacement body for your existing train_one_epoch."""
-
-    global global_step  # keep your existing global
+    global global_step
 
     model_train.train()
     optimizer.zero_grad(set_to_none=True)
-
     lm_head = get_lm_head(model_train)
 
+    # Track unscaled loss so avg_loss is comparable across different GRAD_ACCUM_STEPS.
     running = 0.0
-    steps = 0
-    batch_sizes_used = []
-    durations_seen = []
+    n_batches = 0
 
-    # NEW: count *successful* micro-batches for grad accumulation
-    accum_ok = 0
-    
-    # PATCH 7: Track trained keys for this epoch
+    accum = 0
     trained_keys_epoch = set()
     accum_keys = []
 
-    pbar = tqdm(loader, desc=f"Epoch {epoch_num}")
+    pbar = tqdm(loader, desc=f"Epoch {epoch_num}", leave=False)
 
     for batch_idx, batch in enumerate(pbar):
         if batch is None:
             continue
 
-        # Optional: do a LIGHT cleanup now and then (does NOT skip)
-        if (batch_idx + 1) % CLEANUP_EVERY_N_STEPS == 0:
-            cleanup_memory(f"pre batch {batch_idx+1}")
+        # Keep QAT schedule in sync with optimiser steps.
+        if qat_state is not None:
+            qat_state.step = int(global_step)
 
-        # Initialise for safe logging in except blocks
-        n_ctx = None
-        bs = None
+        input_features = batch["input_features"].to(device, non_blocking=True)
+        labels = batch["labels"].to(device, non_blocking=True)
+        # Build decoder attention mask from decoder_input_ids (correct for right-padding + shifting)
+        # NOTE: we keep labels_attention_mask only for debugging/inspection.
+        labels_attention_mask = batch.get("labels_attention_mask")
+        lengths = batch["lengths"].to(device, non_blocking=True)
+        keys = batch.get("keys") or []
 
-        try:
-            # Meta (kept on CPU; used only for debugging/logging)
-            meta_audio = batch.get("meta_audio", [])
-            meta_audio_orig = batch.get("meta_audio_orig", meta_audio)
-            meta_text = batch.get("meta_text", [])
-            meta_uid = batch.get("meta_uid", [])
-            meta_row_index = batch.get("meta_row_index", [])
-
-            input_features = batch["input_features"].to(device, non_blocking=True)
-            lengths = batch["lengths"].to(device, non_blocking=True)
-            labels = batch["labels"].to(device, non_blocking=True)
-            attn_mask = batch["attention_mask"].to(device, non_blocking=True)
-
-            bs = int(input_features.shape[0])
-            avg_duration_in_batch = float(lengths.mean().item())
-            batch_sizes_used.append(bs)
-            durations_seen.append(avg_duration_in_batch)
-
-            if not torch.isfinite(input_features).all():
-                print("BAD FEATURES (non-finite). Skipping batch.")
-                cur_lr = float(optimizer.param_groups[0]["lr"])
-                log_nonfinite_ce_batch(
-                    kind="bad_features",
-                    epoch_num=epoch_num,
-                    batch_idx=batch_idx,
-                    global_step=global_step,
-                    n_ctx=n_ctx,
-                    lr=cur_lr,
-                    meta_audio=meta_audio,
-                    meta_audio_orig=meta_audio_orig,
-                    meta_text=meta_text,
-                    meta_uid=meta_uid,
-                    meta_row_index=meta_row_index,
-                    lengths=lengths,
-                    labels=labels,
-                    attn_mask=attn_mask,
-                    logits=None,
-                    loss_ce=None,
-                    extra={"reason": "input_features contains NaN/Inf"},
-                )
-                optimizer.zero_grad(set_to_none=True)
-                accum_ok = 0
-                accum_keys = []  # PATCH 7: Reset accum_keys when skipping batch
-                continue
-
-            decoder_input_ids = shift_tokens_right(
-                labels,
-                pad_token_id=PAD_ID,
-                decoder_start_token_id=DECODER_START_ID,
+        max_embed_positions = int(model_train.model.encoder.embed_positions.weight.shape[0])
+        if FORCE_FULL_AUDIO_CTX:
+            n_ctx = int(FULL_ENCODER_CONTEXT_LENGTH)
+        else:
+            n_ctx = pick_n_ctx_from_batch(
+                lengths,
+                max_embed_positions,
+                full_ctx=int(FULL_ENCODER_CONTEXT_LENGTH),
+                safety_sec=float(AUDIO_CTX_SAFETY_SEC),
+                round_to=int(AUDIO_CTX_ROUND_TO),
+                jitter_max=int(AUDIO_CTX_JITTER_MAX),
             )
 
-            # Safety: ensure decoder_input_ids and attention_mask lengths match
-            assert decoder_input_ids.shape[1] == attn_mask.shape[1], (
-                f"decoder_input_ids len {decoder_input_ids.shape[1]} != attention_mask len {attn_mask.shape[1]}"
+        # Prepare decoder inputs
+        labels_for_shift = labels.clone()
+        labels_for_shift[labels_for_shift == -100] = int(PAD_ID)
+        decoder_input_ids = shift_tokens_right(labels_for_shift, int(PAD_ID), int(DECODER_START_ID))
+        decoder_attention_mask = (decoder_input_ids != int(PAD_ID)).to(dtype=torch.long, device=device)
+
+        with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
+            enc_partial = compute_partially_encoder(model_train.model, input_features, int(n_ctx))
+            dec_partial = model_train.model.decoder(
+                input_ids=decoder_input_ids,
+                attention_mask=decoder_attention_mask,
+                encoder_hidden_states=enc_partial,
+                output_hidden_states=True,
+                use_cache=False,
+            )
+            logits = lm_head(dec_partial.last_hidden_state)
+            loss_ce = F.cross_entropy(
+                logits.reshape(-1, logits.shape[-1]),
+                labels.reshape(-1),
+                ignore_index=-100,
+                label_smoothing=float(CE_LABEL_SMOOTH),
             )
 
-            max_embed_positions = model_train.model.encoder.embed_positions.weight.shape[0]
-            #n_ctx = pick_n_ctx_from_batch(lengths, max_embed_positions)
-            # Use full context length instead of dynamic n_ctx for better training
-            n_ctx = FULL_ENCODER_CONTEXT_LENGTH
+        lr_now = float(optimizer.param_groups[0].get("lr", 0.0))
+        if not _isfinite(loss_ce):
+            print("[warn] non-finite CE loss; skipping batch")
+            if DEBUG_NONFINITE_CE:
+                log_nonfinite_ce(keys, n_ctx=int(n_ctx), lr_now=lr_now, note="non-finite CE")
+            optimizer.zero_grad(set_to_none=True)
+            accum = 0
+            accum_keys = []
+            continue
 
-            with torch.amp.autocast("cuda", enabled=use_amp, dtype=amp_dtype):
-                enc_partial = compute_partially_encoder(model_train.model, input_features, n_ctx)
-
-                dec_partial = model_train.model.decoder(
+        if want_acft:
+            # Reference forward pass in full precision for stability
+            with torch.no_grad(), torch.amp.autocast("cuda", enabled=False):
+                enc_full = compute_partially_encoder(model_ref.model, input_features, int(FULL_ENCODER_CONTEXT_LENGTH))
+                dec_full = model_ref.model.decoder(
                     input_ids=decoder_input_ids,
-                    attention_mask=attn_mask,
-                    encoder_hidden_states=enc_partial,
-                    output_hidden_states=want_acft,
+                    attention_mask=decoder_attention_mask,
+                    encoder_hidden_states=enc_full,
+                    output_hidden_states=True,
                     use_cache=False,
                 )
 
-                logits = lm_head(dec_partial.last_hidden_state)
+            hs_p = torch.stack(dec_partial.hidden_states, dim=0)
+            hs_f = torch.stack(dec_full.hidden_states, dim=0)
 
-                loss_ce = torch.nn.functional.cross_entropy(
-                    logits.reshape(-1, logits.shape[-1]),
-                    labels.reshape(-1),
-                    ignore_index=-100,
-                )
-
-                if not torch.isfinite(loss_ce):
-                    print("Non-finite CE loss. Logging + skipping batch.")
-                    cur_lr = float(optimizer.param_groups[0]["lr"])
-                    log_nonfinite_ce_batch(
-                        kind="nonfinite_ce",
-                        epoch_num=epoch_num,
-                        batch_idx=batch_idx,
-                        global_step=global_step,
-                        n_ctx=n_ctx,
-                        lr=cur_lr,
-                        meta_audio=meta_audio,
-                        meta_audio_orig=meta_audio_orig,
-                        meta_text=meta_text,
-                        meta_uid=meta_uid,
-                        meta_row_index=meta_row_index,
-                        lengths=lengths,
-                        labels=labels,
-                        attn_mask=attn_mask,
-                        logits=logits,
-                        loss_ce=loss_ce,
-                        extra={"reason": "CE is NaN/Inf"},
-                    )
-                    # Print the top suspects immediately to console (so you don't have to open the jsonl).
-                    try:
-                        suspects = diagnose_nonfinite_ce_samples(
-                            logits, labels, meta_audio, meta_audio_orig, meta_text, meta_uid, meta_row_index, topk=NONFINITE_CE_TOPK
-                        )
-                        if suspects:
-                            print("[debug] Top suspect samples:")
-                            for s in suspects:
-                                print(
-                                    f"  - ce={s.get('ce')} | nonfinite_logits={s.get('nonfinite_logits')} | invalid_labels={s.get('invalid_labels')} | "
-                                    f"audio={s.get('audio_orig') or s.get('audio')} | uid={s.get('uid')} | text='{_safe_snip(s.get('text'), 120)}'"
-                                )
-                    except Exception as _e:
-                        print("[debug] Failed to compute suspects:", _e)
-
-                    optimizer.zero_grad(set_to_none=True)
-                    accum_ok = 0
-                    accum_keys = []  # PATCH 7: Reset accum_keys when skipping batch
-                    continue
-
-                if CE_SPIKE_THRESHOLD is not None and float(loss_ce.item()) >= float(CE_SPIKE_THRESHOLD):
-                    cur_lr = float(optimizer.param_groups[0]["lr"])
-                    log_nonfinite_ce_batch(
-                        kind="ce_spike",
-                        epoch_num=epoch_num,
-                        batch_idx=batch_idx,
-                        global_step=global_step,
-                        n_ctx=n_ctx,
-                        lr=cur_lr,
-                        meta_audio=meta_audio,
-                        meta_audio_orig=meta_audio_orig,
-                        meta_text=meta_text,
-                        meta_uid=meta_uid,
-                        meta_row_index=meta_row_index,
-                        lengths=lengths,
-                        labels=labels,
-                        attn_mask=attn_mask,
-                        logits=logits,
-                        loss_ce=loss_ce,
-                        extra={"reason": "CE spike", "threshold": float(CE_SPIKE_THRESHOLD)},
-                    )
-
-                if want_acft:
-                    with torch.no_grad():
-                        enc_full = compute_partially_encoder(
-                            model_ref.model, input_features, FULL_ENCODER_CONTEXT_LENGTH
-                        )
-                        dec_full = model_ref.model.decoder(
-                            input_ids=decoder_input_ids,
-                            attention_mask=attn_mask,
-                            encoder_hidden_states=enc_full,
-                            output_hidden_states=True,
-                            use_cache=False,
-                        )
-
-                    hs_p = torch.stack(dec_partial.hidden_states, dim=0)
-                    hs_f = torch.stack(dec_full.hidden_states, dim=0)
-                    loss_acft = masked_hidden_mse(hs_p, hs_f, attn_mask)
-                else:
-                    loss_acft = torch.zeros((), device=device)
-
-                loss = (LAMBDA_CE * loss_ce) + (LAMBDA_ACFT * loss_acft)
-                loss = loss / float(GRAD_ACCUM_STEPS)
-
-                if not torch.isfinite(loss):
-                    print("Non-finite total loss. Skipping batch.")
-                    optimizer.zero_grad(set_to_none=True)
-                    accum_ok = 0
-                    accum_keys = []  # PATCH 7: Reset accum_keys when skipping batch
-                    continue
-
-            # Backward (can OOM) — keep inside try
-            if use_grad_scaler:
-                scaler.scale(loss).backward()
-            else:
-                loss.backward()
-
-            accum_ok += 1
-            did_opt_step = False
-            
-            # PATCH 7: Track keys from this batch for potential training
-            accum_keys.extend(batch.get("keys") or [])
-
-            if accum_ok >= GRAD_ACCUM_STEPS:
-                if use_grad_scaler:
-                    scaler.unscale_(optimizer)
-
-                torch.nn.utils.clip_grad_norm_(model_train.parameters(), MAX_GRAD_NORM)
-
-                if use_grad_scaler:
-                    scaler.step(optimizer)
-                    scaler.update()
-                else:
-                    optimizer.step()
-
+            if (not _isfinite(hs_p)) or (not _isfinite(hs_f)):
+                print("[warn] non-finite hidden states in ACFT; skipping batch")
                 optimizer.zero_grad(set_to_none=True)
-                accum_ok = 0
-                did_opt_step = True
-                
-                # PATCH 7: Update trained_keys_epoch with keys from this optimizer step
-                trained_keys_epoch.update(accum_keys)
+                accum = 0
                 accum_keys = []
-
-                if scheduler is not None:
-                    scheduler.step()
-
-                global_step += 1
-
-            # Practical guardrail: quick sanity decode every N steps to detect repetition collapse
-            # TEMPORARILY DISABLED TO SEE WHAT ACTUALLY HAPPENS
-            # if global_step % 200 == 0:
-            #     try:
-            #         # Simple repetition check on recent logits
-            #         with torch.no_grad():
-            #             # Check if any token repeats excessively in the last batch
-            #             if hasattr(logits, 'argmax'):
-            #                 predicted_tokens = logits.argmax(dim=-1)
-            #                 # Look for excessive repetition in sequence dimension
-            #                 for seq_idx in range(predicted_tokens.shape[0]):
-            #                     seq_tokens = predicted_tokens[seq_idx].cpu().numpy()
-            #                     # Count consecutive repeats
-            #                     max_consecutive = 1
-            #                     current_consecutive = 1
-            #                     for i in range(1, len(seq_tokens)):
-            #                         if seq_tokens[i] == seq_tokens[i-1] and seq_tokens[i] != 0:  # ignore padding
-            #                             current_consecutive += 1
-            #                             max_consecutive = max(max_consecutive, current_consecutive)
-            #                         else:
-            #                             current_consecutive = 1
-            #                     
-            #                     if max_consecutive > 20:
-            #                         raise SystemExit(f'Detected repetition collapse: token repeated {max_consecutive} times consecutively. Stopping to protect checkpoint.')
-            #     except Exception as e:
-            #         if 'repetition collapse' in str(e):
-            #             raise e
-            #         print(f"[warn] Repetition check failed: {e}")
-            
-            # DEBUG: Print some info about the first few batches
-            if global_step < 5:
-                print(f"[debug] Step {global_step}: loss={loss.item():.6f}, ce={loss_ce.item():.4f}")
-                if hasattr(logits, 'argmax'):
-                    predicted_tokens = logits.argmax(dim=-1)
-                    print(f"[debug] Predicted tokens shape: {predicted_tokens.shape}")
-                    print(f"[debug] Sample predicted tokens (first sequence): {predicted_tokens[0][:20].tolist()}")
-
-            running += float(loss.item())
-            steps += 1
-
-            cur_lr = float(optimizer.param_groups[0]["lr"])
-            pbar.set_postfix({
-                "loss": f"{(running / max(1, steps)):.6f}",
-                "ce": f"{loss_ce.item():.4f}",
-                "acft": f"{loss_acft.item():.4f}" if want_acft else "off",
-                "n_ctx": int(n_ctx),
-                "bs": int(bs),
-                "lr": f"{cur_lr:.2e}",
-                "gs": int(global_step),
-                "mem": f"{get_memory_usage_ratio():.1%}",
-            })
-
-        except Exception as e:
-            if _is_oom(e):
-                print(f"[mem] OOM -> skipping batch {batch_idx} | bs={bs} n_ctx={n_ctx} | {e}")
-                optimizer.zero_grad(set_to_none=True)
-                accum_ok = 0
-                accum_keys = []  # PATCH 7: Reset accum_keys when skipping batch
-                cleanup_memory(f"after OOM batch {batch_idx}")
                 continue
-            raise
 
-        finally:
-            # Ensure we drop references so CUDA can reuse memory.
-            try:
-                del batch
-            except Exception:
-                pass
-            for name in (
-                "input_features",
-                "lengths",
-                "labels",
-                "attn_mask",
-                "decoder_input_ids",
-                "enc_partial",
-                "dec_partial",
-                "logits",
-                "loss_ce",
-                "loss_acft",
-                "loss",
-            ):
-                if name in locals():
-                    try:
-                        del locals()[name]
-                    except Exception:
-                        pass
-            if want_acft:
-                for name in ("enc_full", "dec_full", "hs_p", "hs_f"):
-                    if name in locals():
-                        try:
-                            del locals()[name]
-                        except Exception:
-                            pass
+            loss_acft = masked_hidden_mse(hs_p, hs_f, decoder_attention_mask)
+            if not _isfinite(loss_acft):
+                print("[warn] non-finite ACFT loss; skipping batch")
+                optimizer.zero_grad(set_to_none=True)
+                accum = 0
+                accum_keys = []
+                continue
+        else:
+            loss_acft = torch.zeros((), device=device)
 
-    cleanup_memory(f"end epoch {epoch_num}")
-    return running / max(1, steps), trained_keys_epoch
+        if want_acft and int(ACFT_RAMP_STEPS) > 0:
+            ramp = min(1.0, float(global_step) / float(max(1, int(ACFT_RAMP_STEPS))))
+            lambda_acft_eff = float(LAMBDA_ACFT) * ramp
+        else:
+            lambda_acft_eff = float(LAMBDA_ACFT)
+
+        loss = (float(LAMBDA_CE) * loss_ce) + (lambda_acft_eff * loss_acft)
+        loss = loss / float(GRAD_ACCUM_STEPS)
+
+        if use_amp:
+            scaler.scale(loss).backward()
+        else:
+            loss.backward()
+
+        running += float(loss.detach().cpu().item()) * float(GRAD_ACCUM_STEPS)
+        n_batches += 1
+        accum += 1
+        accum_keys.extend(list(keys))
+
+        # step
+        if accum >= int(GRAD_ACCUM_STEPS):
+            if use_amp:
+                scaler.unscale_(optimizer)
+            torch.nn.utils.clip_grad_norm_(model_train.parameters(), float(MAX_GRAD_NORM))
+
+            did_optim_step = True
+            if use_amp:
+                scale_before = float(scaler.get_scale())
+                scaler.step(optimizer)
+                scaler.update()
+                scale_after = float(scaler.get_scale())
+                did_optim_step = (scale_after >= scale_before)
+            else:
+                optimizer.step()
+
+            optimizer.zero_grad(set_to_none=True)
+            if scheduler is not None and did_optim_step:
+                scheduler.step()
+
+            global_step += 1
+            trained_keys_epoch.update(accum_keys)
+            accum_keys = []
+            accum = 0
+
+        lr_now = float(optimizer.param_groups[0].get("lr", 0.0))
+        pbar.set_postfix({
+            "loss": float(loss.detach().cpu().item()) * float(GRAD_ACCUM_STEPS),
+            "ce": float(loss_ce.detach().cpu().item()),
+            "acft": float(loss_acft.detach().cpu().item()) if want_acft else 0.0,
+            "n_ctx": int(n_ctx),
+            "bs": int(input_features.shape[0]),
+            "lr": lr_now,
+        })
+
+    # Final flush: don't throw away the last partial accumulation.
+    # Without this, you permanently skip a tail of samples every epoch (pointer advances).
+    if accum > 0:
+        scale_fix = float(GRAD_ACCUM_STEPS) / float(accum)
+
+        if use_amp:
+            scaler.unscale_(optimizer)
+        # Rescale grads so the effective divisor is `accum` not `GRAD_ACCUM_STEPS`.
+        for p in model_train.parameters():
+            if p.grad is not None:
+                p.grad.mul_(scale_fix)
+
+        torch.nn.utils.clip_grad_norm_(model_train.parameters(), float(MAX_GRAD_NORM))
+
+        did_optim_step = True
+        if use_amp:
+            scale_before = float(scaler.get_scale())
+            scaler.step(optimizer)
+            scaler.update()
+            scale_after = float(scaler.get_scale())
+            did_optim_step = (scale_after >= scale_before)
+        else:
+            optimizer.step()
+
+        optimizer.zero_grad(set_to_none=True)
+        if scheduler is not None and did_optim_step:
+            scheduler.step()
+
+        global_step += 1
+        trained_keys_epoch.update(accum_keys)
+
+    avg_loss = (running / max(1, n_batches))
+    return avg_loss, trained_keys_epoch
 
 
 # ============================================
 # CELL 9/9 — Main loop with async prefetch (works in BOTH modes)
 # ============================================
+
+# Fail fast with a helpful error if the Stage-18 middle section is missing.
+_required = ["build_loader_from_rows", "train_one_epoch", "save_checkpoint"]
+_missing = [name for name in _required if name not in globals()]
+if _missing:
+    raise SystemExit(
+        "This file is missing core training functions: " + ", ".join(_missing) + "\n"
+        "You likely copied only parts of your Stage 18 script.\n"
+        "Fix: re-add the missing middle section (models/optimizer/scheduler + train loop + checkpoint code) "
+        "from your working Stage 18 script, then re-run."
+    )
 
 
 def cleanup_trained_drive_audio(drive_paths, mode: str, allowed_prefix: str, archive_dir: str):
