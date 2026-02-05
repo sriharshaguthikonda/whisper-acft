@@ -1,0 +1,4 @@
+- [x] Inspect sample JSON schema and identify segment structure
+- [x] Locate Groq Whisper helper scripts/utilities for reuse
+- [x] Implement NFA corrections verification script
+- [ ] Run verification script on sample files and review report

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""stage_19d_plot_eval_charts.py
+r"""stage_19d_plot_eval_charts.py
 
 Make charts + a compact leaderboard for Stage 19c sweep outputs.
 
@@ -10,15 +10,15 @@ A JSON produced by:
 
 Outputs
 -------
-- PNG charts (bar charts, pareto, per-model heatmaps, SNR curves)
+- PNG charts (bar charts, pareto, ranked leaderboards, robustness boxplots,
+  overlap/SNR curves, bump ranks, scorecard, per-model heatmaps)
 - model_summary.csv
-- evaluation_charts_bundle.zip
 
 Usage (Windows PowerShell)
 -------------------------
 I:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\stage_19d_plot_eval_charts.py `
   --in_json "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx6\evaluation_results_futo_like_targetmix_sweep.json" `
-  --out_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx6\eval_charts"
+  --out_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx6"
 
 Notes
 -----
@@ -31,7 +31,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import zipfile
 from pathlib import Path
 
 import numpy as np
@@ -51,7 +50,22 @@ def _beep() -> None:
 
 def short_model_name(s: str) -> str:
     s = str(s).replace("\\", "/")
-    return s.split("/")[-1]
+    name = s.split("/")[-1]
+    # Replace invalid Windows filename characters
+    for char in ['<', '>', ':', '"', '|', '?', '*']:
+        name = name.replace(char, '_')
+    return name
+
+
+def get_epoch_number(model_name: str) -> int:
+    """Extract epoch number from model name for sorting."""
+    import re
+    # Look for pattern like model_epoch_000000
+    match = re.search(r'model_epoch_(\d+)', model_name)
+    if match:
+        return int(match.group(1))
+    # For base model, return -1 so it comes first
+    return -1 if 'acft-whisper' in model_name else 999999
 
 
 def zscore(series: pd.Series) -> pd.Series:
@@ -66,6 +80,155 @@ def save_fig(path: Path) -> None:
     plt.tight_layout()
     plt.savefig(path, dpi=200)
     plt.close()
+
+
+def normalize_score(series: pd.Series, higher_is_better: bool) -> pd.Series:
+    s = pd.to_numeric(series, errors="coerce")
+    if s.isna().all():
+        return s
+    lo = s.min()
+    hi = s.max()
+    if pd.isna(lo) or pd.isna(hi) or (hi - lo) == 0:
+        return pd.Series(0.5, index=s.index)
+    if higher_is_better:
+        return (s - lo) / (hi - lo)
+    return (hi - s) / (hi - lo)
+
+
+def pick_top_models(df: pd.DataFrame, top_k: int = 8) -> list[str]:
+    df_sorted = df.sort_values("separation_score", ascending=False)
+    top = df_sorted["model_short"].head(top_k).tolist()
+    base = df_sorted[df_sorted["epoch_number"] == -1]["model_short"].tolist()
+    for b in base:
+        if b not in top:
+            top.insert(0, b)
+    return top
+
+
+def ranked_barh(
+    df: pd.DataFrame,
+    metric: str,
+    title: str,
+    xlabel: str,
+    out_path: Path,
+    higher_is_better: bool = True,
+    top_k: int | None = None,
+) -> None:
+    s = df[["model_short", metric]].copy()
+    s[metric] = pd.to_numeric(s[metric], errors="coerce")
+    s = s.dropna()
+    if s.empty:
+        return
+    s = s.sort_values(metric, ascending=not higher_is_better)
+    if top_k:
+        s = s.head(top_k)
+    plt.figure(figsize=(9, max(4, 0.35 * len(s))))
+    plt.barh(s["model_short"], s[metric])
+    plt.xlabel(xlabel)
+    plt.title(title)
+    plt.gca().invert_yaxis()
+    save_fig(out_path)
+
+
+def boxplot_by_model(
+    df_long: pd.DataFrame,
+    metric: str,
+    model_order: list[str],
+    title: str,
+    xlabel: str,
+    out_path: Path,
+) -> None:
+    if df_long.empty:
+        return
+    data = []
+    labels = []
+    for m in model_order:
+        vals = pd.to_numeric(
+            df_long.loc[df_long["model_short"] == m, metric], errors="coerce"
+        ).dropna()
+        if len(vals) == 0:
+            continue
+        data.append(vals.to_numpy())
+        labels.append(m)
+    if not data:
+        return
+    plt.figure(figsize=(9, max(4, 0.3 * len(labels))))
+    plt.boxplot(data, tick_labels=labels, vert=False, showfliers=False)
+    plt.xlabel(xlabel)
+    plt.title(title)
+    save_fig(out_path)
+
+
+def bump_rank_chart(
+    df_long: pd.DataFrame,
+    data: dict,
+    metric: str,
+    title: str,
+    out_path: Path,
+    higher_is_better: bool = True,
+    top_models: list[str] | None = None,
+) -> None:
+    if df_long.empty:
+        return
+    conds = data.get("conditions") or []
+    if not conds:
+        return
+    conds_sorted = sorted(conds, key=lambda c: (float(c["snr_db"]), float(c["overlap"])))
+    cond_ids = [c["cond_id"] for c in conds_sorted]
+    cond_labels = [
+        f"{float(c['snr_db']):+g}dB ov{float(c['overlap']):.2f}" for c in conds_sorted
+    ]
+
+    pivot = df_long.pivot_table(
+        index="model_short", columns="cond_id", values=metric, aggfunc="mean"
+    )
+    pivot = pivot.reindex(columns=cond_ids)
+    ranks = pivot.rank(axis=0, ascending=not higher_is_better, method="min")
+    if top_models:
+        ordered = [m for m in top_models if m in ranks.index]
+        ranks = ranks.loc[ordered]
+    if ranks.empty:
+        return
+
+    x = np.arange(len(cond_ids))
+    plt.figure(figsize=(10, 6))
+    for model in ranks.index:
+        plt.plot(x, ranks.loc[model].values, marker="o", label=model)
+    plt.gca().invert_yaxis()
+    plt.xticks(x, cond_labels, rotation=30, ha="right")
+    plt.ylabel("Rank (1 = best)")
+    plt.title(title)
+    plt.legend()
+    save_fig(out_path)
+
+
+def parallel_scorecard(
+    df: pd.DataFrame,
+    metrics: list[tuple[str, str, bool]],
+    top_models: list[str],
+    out_path: Path,
+) -> None:
+    if df.empty:
+        return
+    norm_cols = {}
+    for col, label, higher_is_better in metrics:
+        norm_cols[label] = normalize_score(df[col], higher_is_better)
+    norm_df = pd.DataFrame(norm_cols, index=df["model_short"])
+    ordered = [m for m in top_models if m in norm_df.index]
+    norm_df = norm_df.loc[ordered]
+    if norm_df.empty:
+        return
+    labels = list(norm_df.columns)
+    x = np.arange(len(labels))
+    plt.figure(figsize=(10, 6))
+    for model in norm_df.index:
+        plt.plot(x, norm_df.loc[model].values, marker="o", label=model)
+    plt.xticks(x, labels, rotation=30, ha="right")
+    plt.ylim(0, 1)
+    plt.ylabel("Normalized score (1 = best)")
+    plt.title("Scorecard (normalized across models)")
+    plt.legend()
+    save_fig(out_path)
 
 
 def build_summary_df(models: list[dict]) -> pd.DataFrame:
@@ -106,13 +269,18 @@ def build_summary_df(models: list[dict]) -> pd.DataFrame:
 
     df = pd.DataFrame(rows)
 
+    # Add epoch number for sorting
+    df["epoch_number"] = df["model"].apply(get_epoch_number)
+    
     # Composite ranking: separation + robustness, penalise target WER
     df["separation_score"] = (
         zscore(df["win_rate_target_closer"]).fillna(0)
         + zscore(df["avg_margin_other_minus_target"]).fillna(0)
         - zscore(df["wer_micro_target"]).fillna(0)
     )
-    df = df.sort_values("separation_score", ascending=False).reset_index(drop=True)
+    
+    # Sort by epoch number (ascending) to show training progression
+    df = df.sort_values("epoch_number", ascending=True).reset_index(drop=True)
     return df
 
 
@@ -174,6 +342,9 @@ def heatmap_for_model(
             j = ov_vals.index(ov)
             grid[i, j] = float(met[metric_key])
 
+    if np.isnan(grid).all():
+        return
+
     ms = short_model_name(model_entry.get("model", "unknown"))
     plt.figure(figsize=(8, 6))
     plt.imshow(grid, aspect="auto", interpolation="nearest")
@@ -214,6 +385,8 @@ def main() -> None:
         ]
     ].to_csv(summary_csv, index=False)
 
+    top_models = pick_top_models(df, top_k=8)
+
     # Bar charts
     plt.figure(figsize=(10, 5))
     plt.bar(df["model_short"], df["win_rate_target_closer"])
@@ -253,6 +426,32 @@ def main() -> None:
         )
     save_fig(out_dir / "04_pareto_targetwer_vs_margin.png")
 
+    # Leaderboard-style ranked charts
+    ranked_barh(
+        df,
+        metric="separation_score",
+        title="Composite separation score (higher is better)",
+        xlabel="Separation score",
+        out_path=out_dir / "07_leaderboard_separation_score.png",
+        higher_is_better=True,
+    )
+    ranked_barh(
+        df,
+        metric="win_rate_worst_case",
+        title="Worst-case win rate across conditions (higher is better)",
+        xlabel="Worst-case win rate",
+        out_path=out_dir / "08_worst_case_win_rate.png",
+        higher_is_better=True,
+    )
+    ranked_barh(
+        df,
+        metric="margin_worst_case",
+        title="Worst-case margin across conditions (higher is better)",
+        xlabel="Worst-case margin (WER_other - WER_target)",
+        out_path=out_dir / "09_worst_case_margin.png",
+        higher_is_better=True,
+    )
+
     # SNR curves
     df_long = build_long_df(data)
     if not df_long.empty:
@@ -282,8 +481,76 @@ def main() -> None:
         plt.legend()
         save_fig(out_dir / "06_margin_vs_snr.png")
 
+        df_ov = (
+            df_long.groupby(["model_short", "overlap"], as_index=False)
+            .agg(win_rate=("win_rate", "mean"), margin=("margin", "mean"))
+            .sort_values(["model_short", "overlap"])
+        )
+
+        plt.figure(figsize=(8, 6))
+        for ms in df_ov["model_short"].unique():
+            s = df_ov[df_ov["model_short"] == ms]
+            plt.plot(s["overlap"], s["win_rate"], marker="o", label=ms)
+        plt.xlabel("Overlap placement ratio (0=start, 1=end)")
+        plt.ylabel("Mean win rate (over SNRs)")
+        plt.title("Win rate vs overlap (mean across SNRs)")
+        plt.legend()
+        save_fig(out_dir / "10_winrate_vs_overlap.png")
+
+        plt.figure(figsize=(8, 6))
+        for ms in df_ov["model_short"].unique():
+            s = df_ov[df_ov["model_short"] == ms]
+            plt.plot(s["overlap"], s["margin"], marker="o", label=ms)
+        plt.xlabel("Overlap placement ratio (0=start, 1=end)")
+        plt.ylabel("Mean margin (WER_other - WER_target)")
+        plt.title("Separation margin vs overlap (mean across SNRs)")
+        plt.legend()
+        save_fig(out_dir / "11_margin_vs_overlap.png")
+
+        boxplot_by_model(
+            df_long,
+            metric="win_rate",
+            model_order=df["model_short"].tolist(),
+            title="Win-rate distribution across conditions",
+            xlabel="Win rate (higher is better)",
+            out_path=out_dir / "12_boxplot_winrate_by_condition.png",
+        )
+        boxplot_by_model(
+            df_long,
+            metric="margin",
+            model_order=df["model_short"].tolist(),
+            title="Margin distribution across conditions",
+            xlabel="Margin (WER_other - WER_target)",
+            out_path=out_dir / "13_boxplot_margin_by_condition.png",
+        )
+        bump_rank_chart(
+            df_long,
+            data,
+            metric="win_rate",
+            title="Rank by condition (win rate)",
+            out_path=out_dir / "14_bump_rank_by_condition.png",
+            higher_is_better=True,
+            top_models=top_models,
+        )
+        parallel_scorecard(
+            df,
+            metrics=[
+                ("win_rate_target_closer", "Win rate", True),
+                ("avg_margin_other_minus_target", "Margin", True),
+                ("wer_micro_target", "WER_target", False),
+                ("wer_micro_other", "WER_other", False),
+                ("win_rate_worst_case", "Worst win", True),
+                ("margin_worst_case", "Worst margin", True),
+            ],
+            top_models=top_models,
+            out_path=out_dir / "15_scorecard_parallel_coords.png",
+        )
+
     # Per-model heatmaps
-    for m in data.get("models") or []:
+    models = data.get("models") or []
+    # Sort models by epoch number for consistent ordering
+    models = sorted(models, key=lambda m: get_epoch_number(m.get("model", "")))
+    for m in models:
         heatmap_for_model(
             data,
             m,
@@ -301,15 +568,7 @@ def main() -> None:
             cbar_label="Avg margin (WER_other - WER_target)",
         )
 
-    # Zip bundle
-    zip_out = out_dir.parent / "evaluation_charts_bundle.zip"
-    with zipfile.ZipFile(zip_out, "w", compression=zipfile.ZIP_DEFLATED) as z:
-        for fp in sorted(out_dir.glob("*.png")):
-            z.write(fp, arcname=f"eval_charts/{fp.name}")
-        z.write(summary_csv, arcname="eval_charts/model_summary.csv")
-
     print("Wrote:", out_dir)
-    print("Bundle:", zip_out)
     _beep()
 
 

@@ -16,17 +16,18 @@ pip install numpy soundfile tqdm
 Example
 -------
 python stage_6_add_noise_to_high_score_audio_chunks_manifest_with_noise.py \
-  --in_manifest "i:/Record_chunks/pairs_pending.stereo.english_only.filtered.jsonl" \
-  --out_manifest "i:/Record_chunks/pairs_pending.stereo.english_only.filtered_with_mix.jsonl" \
+  --in_manifest "i:/Record_chunks/pairs_manifest_stereo_english_only_filtered_with_uids_score_bottom_filtered.jsonl" \
+  --out_manifest "i:/Record_chunks/only_noise_mixed.jsonl" \
   --noises_dir "i:/noise/RIRS_NOISES/pointsource_noises" \
   --scores_csv "i:/whisper-acft/speaker_sort_scores.csv" \
-  --out_dir "i:/Record_chunks/noisy_mixed" \
+  --out_dir "i:/Record_chunks_noisy_mixed" \
   --stage_name "noise_mix" \
+  --seen_db "I:\Record_chunks\seen_stage6_noise_mix.sqlite" \
   --ratio 0.5 \
-  --copies 1 \
+  --copies 4 \
   --snr_db_min 5 --snr_db_max 20 \
-  --max_bad_to_good_ratio 1.0 --good_floor_db -45 \
-  --workers 8
+  --max_bad_to_good_ratio 1.0 --good_floor_db -125 \
+  --workers 4
 """
 
 from __future__ import annotations
@@ -50,7 +51,6 @@ from tqdm import tqdm
 from pipeline_uid_utils import (
     SQLiteSeenSet,
     canonicalise_path,
-    default_seen_db,
     is_valid_wav,
     safe_unlink,
     atomic_write_wav_pcm16,
@@ -436,9 +436,11 @@ def main() -> None:
     out_dir.mkdir(parents=True, exist_ok=True)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     
-    # Setup seen database (stable default)
-    seen_db = args.seen_db or default_seen_db(out_path, args.stage_name)
-    seen = SQLiteSeenSet(seen_db)
+    # Setup seen database (consistent with stages 7 and 9 pattern)
+    if not args.seen_db:
+        # Create explicit path like stages 7 and 9: manifest_parent/seen_stage6_{stage_name}.sqlite
+        args.seen_db = str(out_path.parent / f"seen_stage6_{args.stage_name}.sqlite")
+    seen = SQLiteSeenSet(args.seen_db)
     
     # Load target keys once (if provided)
     if args.scores_csv:

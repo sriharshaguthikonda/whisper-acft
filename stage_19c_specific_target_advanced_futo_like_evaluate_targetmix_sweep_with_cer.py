@@ -31,18 +31,29 @@ Resume-safe
 
 usage
 ---------------------------------------------------
-i:\Whisper-training-env\Scripts\python.exe stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py ^ 
-  --test_manifest "I:\Record_chunks\pairs_manifest_local_english_only_filtered_with_mix_and_others_voices_mixed_aug_gain_aug_rir_real_randomized_bottom_filtered_test.jsonl" ^
-  --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores_sorted.csv" ^
-  --checkpoint_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_8" ^
-  --mix_per_target 1 ^
-  --other_peak_ratio 1.0 ^
-  --sweep_snr_db "20,10,5,0,-5" ^
-  --sweep_overlap "0,0.25,0.5,0.75,1" ^
-  --auto_batch 0
-  --resume
 
-  i:\Whisper-training-env\Scripts\python.exe stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py --test_manifest "I:\Record_chunks\pairs_manifest_combined_all_datasets_randomized_test_with_tempo.jsonl" --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores.csv" --checkpoint_dir "I:\Stage_17_shuffle_wer_acft_checkpoints_partialctx_tiny_en_14\20260203_095019" --mix_per_target 5 --other_peak_ratio 1.0 --sweep_snr_db "15,5,0" --sweep_overlap "0.25,0.75,1" --dynamic_audio_ctx 1 --batch_size 4 --auto_batch 0 --resume --others_dir "I:\Record_others_chunks" --others_manifest "I:\Record_others_chunks\pairs_pending_stereo.jsonl" --ffmpeg_path "ffmpeg" --percentage 10 --vad_filter 0
+i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py" `
+  --test_manifest "I:\Record_chunks\pairs_manifest_combined_all_datasets_randomized_test_with_tempo.jsonl" `
+  --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores.csv" `
+  --checkpoint_dir "I:\Stage_17_aug_futo_wer_dora_dyn_ctx_qat6_0_chkpts_tiny_en_19" `
+  --mix_per_target 5 `
+  --other_peak_ratio 1.0 `
+  --sweep_snr_db "15,5,0" `
+  --sweep_overlap "0.25,0.75,1" `
+  --dynamic_audio_ctx 1 `
+  --batch_size 4 `
+  --auto_batch 0 `
+  --resume `
+  --others_dir "I:\Record_others_chunks" `
+  --others_manifest "I:\Record_others_chunks\pairs_pending_stereo.jsonl" `
+  --ffmpeg_path "ffmpeg" `
+  --percentage 10 `
+  --vad_filter 0 `
+  --lora_merge `
+  --lora_base_model "futo-org/acft-whisper-tiny.en" `
+  --groq_verify `
+
+  --recalc_metrics
 
 
 Outputs (in checkpoint_dir by default)
@@ -1459,9 +1470,16 @@ def eval_one_model(
     vad_trimmer: Optional[SileroVADTrimmer],
     all_predictions: dict,
     out_json: Path,
+    *,
+    lora_merge: bool,
+    lora_base_model: Optional[str],
 ) -> Tuple[Dict, Dict[str, Dict]]:
 
-    model = WhisperForConditionalGeneration.from_pretrained(model_id_or_path)
+    model = _load_model_for_eval(
+        model_id_or_path,
+        lora_merge=bool(lora_merge),
+        lora_base_model=lora_base_model,
+    )
     model.to(cfg.device)
     model.eval()
 
@@ -1499,7 +1517,7 @@ def eval_one_model(
     if cfg.vad.enabled and vad_trimmer is None:
         vad_trimmer = SileroVADTrimmer()
 
-    model_name = Path(model_id_or_path).name if Path(model_id_or_path).exists() else model_id_or_path
+    model_name = _model_pred_key(model_id_or_path, bool(lora_merge))
 
     audio_cache = AudioCacheLRU(cfg.audio_cache_bytes)
 
@@ -2041,6 +2059,104 @@ def beep() -> None:
             pass
 
 
+def _is_peft_adapter_dir(p: Path) -> bool:
+    return p.is_dir() and (p / "adapter_config.json").is_file()
+
+
+def _model_pred_key(model_id_or_path: str, lora_merge: bool) -> str:
+    p = Path(model_id_or_path)
+    name = p.name if p.exists() else model_id_or_path
+    if lora_merge and _is_peft_adapter_dir(p):
+        return f"{name}__merged"
+    return name
+
+
+def _model_results_key(model_id_or_path: str, lora_merge: bool) -> str:
+    if lora_merge and _is_peft_adapter_dir(Path(model_id_or_path)):
+        return f"{model_id_or_path}::merged"
+    return model_id_or_path
+
+
+def _load_model_for_eval(model_id_or_path: str, *, lora_merge: bool, lora_base_model: Optional[str]):
+    if lora_merge and _is_peft_adapter_dir(Path(model_id_or_path)):
+        if not lora_base_model:
+            raise RuntimeError("LoRA merge requested but no --lora_base_model provided.")
+        try:
+            from peft import PeftModel  # type: ignore
+        except Exception as e:
+            raise RuntimeError("LoRA merge requested but 'peft' is not installed. pip install -U peft") from e
+
+        print(f"[lora] merging adapter: {model_id_or_path}")
+        print(f"[lora] base model: {lora_base_model}")
+        base = WhisperForConditionalGeneration.from_pretrained(lora_base_model)
+        peft_model = PeftModel.from_pretrained(base, model_id_or_path, is_trainable=False)
+        try:
+            merged = peft_model.merge_and_unload(progressbar=True, safe_merge=True)
+        except TypeError:
+            merged = peft_model.merge_and_unload()
+        return merged
+
+    return WhisperForConditionalGeneration.from_pretrained(model_id_or_path)
+
+
+def _run_groq_verify(base_pairs: List[dict], checkpoint_dir: Path) -> None:
+    if not base_pairs:
+        return
+
+    script = Path(__file__).with_name("update_targetmix_transcripts_with_groq.py")
+    if not script.exists():
+        print("⚠ Groq verify requested but update_targetmix_transcripts_with_groq.py not found; skipping.")
+        return
+
+    payload = []
+    for bp in base_pairs:
+        payload.append(
+            {
+                "target_audio_path": bp.get("target_audio_path"),
+                "other_audio_path": bp.get("other_audio_path"),
+                "target_reference": bp.get("target_ref", ""),
+                "other_reference": bp.get("other_ref", ""),
+            }
+        )
+
+    tmp_json = checkpoint_dir / "groq_verify_pairs.json"
+    tmp_json.parent.mkdir(parents=True, exist_ok=True)
+    with tmp_json.open("w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    print(f"▶ Groq verify: {len(payload)} pairs (unique audio handled by script)")
+    subprocess.run([sys.executable, str(script), "--input_json", str(tmp_json), "--inplace"], check=True)
+
+    data = json.loads(tmp_json.read_text(encoding="utf-8"))
+    t_map: Dict[str, str] = {}
+    o_map: Dict[str, str] = {}
+    for obj in data:
+        if not isinstance(obj, dict):
+            continue
+        tp = obj.get("target_audio_path")
+        tr = obj.get("target_reference")
+        if isinstance(tp, str) and isinstance(tr, str) and tr.strip():
+            t_map[_norm_windows_key(tp)] = tr.strip()
+        op = obj.get("other_audio_path")
+        orf = obj.get("other_reference")
+        if isinstance(op, str) and isinstance(orf, str) and orf.strip():
+            o_map[_norm_windows_key(op)] = orf.strip()
+
+    t_updated = 0
+    o_updated = 0
+    for bp in base_pairs:
+        t_key = _norm_windows_key(str(bp.get("target_audio_path", "")))
+        o_key = _norm_windows_key(str(bp.get("other_audio_path", "")))
+        if t_key in t_map:
+            bp["target_ref"] = t_map[t_key]
+            t_updated += 1
+        if o_key in o_map:
+            bp["other_ref"] = o_map[o_key]
+            o_updated += 1
+
+    print(f"✓ Groq verify applied refs: target={t_updated} other={o_updated}")
+
+
 # ----------------------------
 # Main
 # ----------------------------
@@ -2058,6 +2174,12 @@ def main() -> None:
     ap.add_argument("--base_model", default="futo-org/acft-whisper-tiny.en")
     ap.add_argument("--compare_openai_tiny", action="store_true")
     ap.add_argument("--base_processor_id", default="openai/whisper-tiny.en")
+    ap.add_argument("--lora_merge", action="store_true",
+                    help="If set, merge PEFT/LoRA adapter checkpoints into the base model before evaluation.")
+    ap.add_argument("--lora_base_model", default=None,
+                    help="Base model id/path to merge LoRA adapters into (defaults to --base_processor_id).")
+    ap.add_argument("--groq_verify", action="store_true",
+                    help="Transcribe target/other audio with Groq before evaluation to refresh references.")
 
     ap.add_argument("--device", default="cuda" if torch.cuda.is_available() else "cpu")
 
@@ -2126,6 +2248,9 @@ def main() -> None:
                     help="Recompute metrics from saved predictions for already-evaluated models without new inference.")
 
     args = ap.parse_args()
+
+    if args.lora_merge and not args.lora_base_model:
+        args.lora_base_model = args.base_processor_id
 
     if args.batch_size <= 0:
         args.batch_size = 8 if str(args.device).startswith("cuda") and torch.cuda.is_available() else 1
@@ -2205,6 +2330,9 @@ def main() -> None:
             percentage=float(args.percentage),
             seed=int(args.seed),
         )
+
+    if args.groq_verify:
+        _run_groq_verify(base_pairs, args.checkpoint_dir)
 
     snr_list = parse_float_list(args.sweep_snr_db) or [10.0]
     if args.disable_overlap_sweep:
@@ -2390,17 +2518,18 @@ def main() -> None:
     vad_trimmer = SileroVADTrimmer() if cfg.vad.enabled else None
 
     for m in models:
-        model_already_done = m in evaluated_models
-        model_name = Path(m).name if Path(m).exists() else m
+        model_results_key = _model_results_key(m, bool(args.lora_merge))
+        model_already_done = model_results_key in evaluated_models
+        model_name = _model_pred_key(m, bool(args.lora_merge))
         wants_recalc = args.recalc_metrics or args.force_resume
 
         if model_already_done and not wants_recalc:
-            print(f"\n⏭ Skipping already evaluated model: {m}")
+            print(f"\n⏭ Skipping already evaluated model: {model_results_key}")
             continue
 
         print("\n" + "=" * 80)
         if model_already_done and wants_recalc:
-            print(f"Re-evaluating metrics from saved predictions: {m}")
+            print(f"Re-evaluating metrics from saved predictions: {model_results_key}")
         else:
             print(f"Evaluating: {m}")
         print("=" * 80)
@@ -2413,8 +2542,8 @@ def main() -> None:
                 overall, by_cond = recompute_metrics_from_saved_predictions(
                     all_predictions, model_name, cfg.normalize_mode, active_keys=active_keys
                 )
-                results["models"] = [mm for mm in results.get("models", []) if mm.get("model") != m]
-                results["models"].append({"model": m, "metrics_overall": overall, "metrics_by_condition": by_cond})
+                results["models"] = [mm for mm in results.get("models", []) if mm.get("model") != model_results_key]
+                results["models"].append({"model": model_results_key, "metrics_overall": overall, "metrics_by_condition": by_cond})
                 save_incremental_results(results, all_predictions, out_json, run_args=current_run_args)
                 continue
             else:
@@ -2428,9 +2557,11 @@ def main() -> None:
             vad_trimmer=vad_trimmer,
             all_predictions=all_predictions,
             out_json=out_json,
+            lora_merge=bool(args.lora_merge),
+            lora_base_model=args.lora_base_model,
         )
 
-        results["models"].append({"model": m, "metrics_overall": overall, "metrics_by_condition": by_cond})
+        results["models"].append({"model": model_results_key, "metrics_overall": overall, "metrics_by_condition": by_cond})
         save_incremental_results(results, all_predictions, out_json, run_args=current_run_args)
 
         print(f"samples={overall.get('samples')} skipped={overall.get('skipped')}")
