@@ -353,13 +353,17 @@ set_peft_overrides(
     # The feed-forward blocks are typically fc1/fc2.
     # If any name errors, remove that module name.
     WHISPER_LORA_TARGET_MODULES="q_proj,k_proj,v_proj,out_proj,fc1,fc2",
+    WHISPER_LORA_USE_DORA="1",
+    WHISPER_LORA_USE_RSLORA="1",
+    # optional (often helps convergence + quantisation friendliness):
+    # WHISPER_LORA_INIT="pissa",
 )
 
 # ===== Combined WER + ACFT knobs =====
 # Goal: keep WER going down, while ACFT prevents repetition / collapse when audio_ctx is dynamic.
 # Direct script parameters - modify these values as needed
 ACFT_REFERENCE_MODEL_ID = FUTO_MODEL_ID  # Reference model for ACFT (default: same as training model)
-CE_LABEL_SMOOTH = 0.02  # 0.05 can blunt learning for ASR; 0.0–0.02 tends to behave better
+CE_LABEL_SMOOTH = 0.02  # 0.05 can blunt learning for ASR; 0.0-0.02 tends to behave better
 LAMBDA_CE = 1.0  # Weight for cross-entropy loss
 LAMBDA_ACFT = 0.00  # Weight for ACFT robustness loss
 # Optional: temporarily disable ACFT entirely while debugging instability.
@@ -368,7 +372,7 @@ LAMBDA_ACFT = 0.00  # Weight for ACFT robustness loss
 ACFT_RAMP_STEPS = 800  # 0 disables ramp; higher values ramp more slowly
 
 # Dynamic audio_ctx (partial context) to teach robustness
-FORCE_FULL_AUDIO_CTX = True   # Start stable; switch back to dynamic later once WER is moving
+FORCE_FULL_AUDIO_CTX = False  # True = always use full context, False = use dynamic context
 AUDIO_CTX_SAFETY_SEC = 0.20  # Safety margin in seconds for dynamic context
 AUDIO_CTX_ROUND_TO = 16  # Round context to multiples of this value
 AUDIO_CTX_JITTER_MAX = 64  # Maximum upward jitter for dynamic context
@@ -491,10 +495,10 @@ QAT_BITS = int(os.environ.get("WHISPER_QAT_BITS", "6"))       # 8, 6, 5, 4
 QAT_START_STEP = int(os.environ.get("WHISPER_QAT_START_STEP", "600"))
 QAT_EXCLUDE_SUFFIXES = {
     "proj_out", "lm_head",            # output projection (keep FP)
-    "embed_positions", "embed_tokens" # embeddings (keep FP)
+    "embed_positions", "embed_tokens",# embeddings (keep FP)
     # Keep PEFT/LoRA/DoRA adapter weights FP during training.
     # Quantising trainable adapters early is a very reliable way to kill learning.
-    ,"lora_A","lora_B","lora_dropout","lora_embedding_A","lora_embedding_B","lora_magnitude_vector"
+    "lora_A", "lora_B", "lora_dropout", "lora_embedding_A", "lora_embedding_B", "lora_magnitude_vector",
 }
 QAT_VERBOSE = bool(int(os.environ.get("WHISPER_QAT_VERBOSE", "1")))
 
@@ -1881,3 +1885,5 @@ def repair_trained_jsonl(in_path: str, out_path: str):
 beep_notification(1000, 500)
 time.sleep(0.1)
 beep_notification(1200, 500)
+
+# ============================================
