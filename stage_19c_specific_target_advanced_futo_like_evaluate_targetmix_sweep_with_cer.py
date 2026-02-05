@@ -35,7 +35,7 @@ usage
 i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py" `
   --test_manifest "I:\Record_chunks\pairs_manifest_combined_all_datasets_randomized_test_with_tempo.jsonl" `
   --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores.csv" `
-  --checkpoint_dir "I:\Stage_17_aug_futo_wer_dora_dyn_ctx_qat6_0_chkpts_tiny_en_19" `
+  --checkpoint_dir "I:\Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_tiny_en_21" `
   --mix_per_target 5 `
   --other_peak_ratio 1.0 `
   --sweep_snr_db "15,5,0" `
