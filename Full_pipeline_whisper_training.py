@@ -30,8 +30,42 @@ PIPELINE_STATE_FILE = f"{DRIVE_SYNC_ROOT}/pipeline_state.json"
 PIPELINE_LOG = f"{DATA_ROOT}/pipeline.log"
 DRIVE_SUMMARY_LOG = f"{DRIVE_SYNC_ROOT}/pipeline_summary.log"
 
+# Caches (avoid re-downloading HF/transformers/torch assets)
+CACHE_ROOT = "/content/cache"
+HF_HOME = f"{CACHE_ROOT}/hf"
+TRANSFORMERS_CACHE = f"{CACHE_ROOT}/transformers"
+TORCH_HOME = f"{CACHE_ROOT}/torch"
+SYNC_CACHE_TO_DRIVE = True
+CACHE_DRIVE_ROOT = f"{DATA_ROOT_DRIVE}/cache"
+
+# Copy strategy
+COPY_TRANSCRIPTS_FOR_STAGE1 = True
+COPY_AUDIO_FOR_STAGE1 = False  # set True if stage 1 should use local audio
+BACKGROUND_COPY_LATER = False  # set True to copy non-stage1 deps in background
+
+# Output verification
+VERIFY_OUTPUTS = True
+VERIFY_JSONL_SAMPLE = 5
+
+# Optional: rclone (faster on huge transfers; requires rclone config)
+USE_RCLONE = False
+RCLONE_REMOTE = ""  # e.g. "gdrive:MyDrive"
+RCLONE_TRANSFERS = 8
+
 TRANSCRIPT_DIR = f"{DATA_ROOT}/Transcriptions_corrected"
 AUDIO_SOURCE_DIR = f"{DATA_ROOT}/Record_harsha"
+
+TRANSCRIPT_DIR_DRIVE = f"{DATA_ROOT_DRIVE}/Transcriptions_corrected"
+TRANSCRIPT_DIR_LOCAL = f"{LOCAL_DATA_ROOT}/Transcriptions_corrected"
+AUDIO_SOURCE_DIR_DRIVE = f"{DATA_ROOT_DRIVE}/Record_harsha"
+AUDIO_SOURCE_DIR_LOCAL = f"{LOCAL_DATA_ROOT}/Record_harsha"
+
+if USE_LOCAL_DATA:
+    TRANSCRIPT_DIR_STAGE1 = TRANSCRIPT_DIR_LOCAL if COPY_TRANSCRIPTS_FOR_STAGE1 else TRANSCRIPT_DIR_DRIVE
+    AUDIO_SOURCE_DIR_STAGE1 = AUDIO_SOURCE_DIR_LOCAL if COPY_AUDIO_FOR_STAGE1 else AUDIO_SOURCE_DIR_DRIVE
+else:
+    TRANSCRIPT_DIR_STAGE1 = TRANSCRIPT_DIR
+    AUDIO_SOURCE_DIR_STAGE1 = AUDIO_SOURCE_DIR
 CHUNKS_DIR = f"{DATA_ROOT}/Record_chunks"
 
 TARGET_REF_DIR = f"{DATA_ROOT}/Record_only_by_harsha"
@@ -128,10 +162,14 @@ COMMON_SEGMENTS_STATE = f"{REPO_DIR}/most_commonly_spoken_segments_state.json"
 
 # %%
 # ---------- SETUP ----------
-import os, sys, subprocess, shlex, re, shutil, json, time, threading
+import os, sys, subprocess, shlex, re, shutil, json, time, threading, hashlib
 from pathlib import Path
 
 os.environ["DEBIAN_FRONTEND"] = "noninteractive"
+os.environ["HF_HOME"] = HF_HOME
+os.environ["TRANSFORMERS_CACHE"] = TRANSFORMERS_CACHE
+os.environ["TORCH_HOME"] = TORCH_HOME
+Path(CACHE_ROOT).mkdir(parents=True, exist_ok=True)
 if not HF_TOKEN:
     HF_TOKEN = os.environ.get("HF_TOKEN", "")
 if not HF_TOKEN and not SKIP_STAGE_3:
@@ -142,6 +180,16 @@ if not HF_TOKEN and not SKIP_STAGE_3:
         HF_TOKEN = ""
 if HF_TOKEN:
     os.environ["HF_TOKEN"] = HF_TOKEN
+
+try:
+    import orjson as _orjson  # type: ignore
+    HAS_ORJSON = True
+    def json_loads(s: str):
+        return _orjson.loads(s)
+except Exception:
+    HAS_ORJSON = False
+    def json_loads(s: str):
+        return json.loads(s)
 
 def log(msg: str) -> None:
     print(msg)
@@ -230,6 +278,16 @@ def patch_winsound_stage17(path):
     else:
         print(f"warn: winsound import line not found in {path}")
 
+def file_hash(path: Path, chunk_size: int = 1024 * 1024) -> str:
+    h = hashlib.sha256()
+    with path.open("rb") as f:
+        while True:
+            b = f.read(chunk_size)
+            if not b:
+                break
+            h.update(b)
+    return h.hexdigest()
+
 def sync_files_to_drive(paths, label=""):
     if not (SYNC_IMPORTANT_TO_DRIVE and USE_LOCAL_DATA):
         return
@@ -247,6 +305,17 @@ def sync_files_to_drive(paths, label=""):
         except ValueError:
             dst = dst_root / src.name
         dst.parent.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            try:
+                if dst.stat().st_size == src.stat().st_size and dst.stat().st_mtime >= src.stat().st_mtime:
+                    continue
+            except Exception:
+                pass
+            try:
+                if dst.stat().st_size == src.stat().st_size and file_hash(dst) == file_hash(src):
+                    continue
+            except Exception:
+                pass
         shutil.copy2(src, dst)
         copied += 1
     if copied:
@@ -305,7 +374,12 @@ def copy_path_from_drive(local_path: str, label=""):
         return
     dst.parent.mkdir(parents=True, exist_ok=True)
     if src.is_dir():
-        run(["rsync", "-a", "--info=progress2", f"{src}/", f"{dst}/"])
+        if USE_RCLONE and RCLONE_REMOTE:
+            rel = src.relative_to(Path(DATA_ROOT_DRIVE))
+            remote_src = f"{RCLONE_REMOTE}/{rel.as_posix()}"
+            run(["rclone", "copy", remote_src, str(dst), "--transfers", str(RCLONE_TRANSFERS)])
+        else:
+            run(["rsync", "-a", "--info=progress2", f"{src}/", f"{dst}/"])
     else:
         shutil.copy2(src, dst)
     log(f"[copy] {label} {src} -> {dst}")
@@ -344,6 +418,77 @@ def ensure_local_paths(paths, label=""):
     if missing:
         raise RuntimeError(f"[{label}] required paths missing: {missing}")
 
+def collect_jsonl_paths(jsonl_path: str, key: str) -> list[str]:
+    out = set()
+    p = Path(jsonl_path)
+    if not p.exists():
+        return []
+    with p.open("r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json_loads(line)
+            except Exception:
+                continue
+            val = obj.get(key)
+            if isinstance(val, str) and val:
+                out.add(val)
+    return sorted(out)
+
+def rel_paths_to_drive(paths: list[str]) -> list[str]:
+    rels = []
+    for p in paths:
+        try:
+            rel = Path(p).relative_to(Path(DATA_ROOT_DRIVE))
+            rels.append(rel.as_posix())
+            continue
+        except Exception:
+            pass
+        try:
+            rel = Path(p).relative_to(Path(DATA_ROOT))
+            rels.append(rel.as_posix())
+            continue
+        except Exception:
+            pass
+    return rels
+
+def rsync_files_from(rel_paths: list[str], src_root: str, dst_root: str, label=""):
+    if not rel_paths:
+        return
+    tmp = Path("/tmp/rsync_files.txt")
+    tmp.write_text("\n".join(rel_paths) + "\n", encoding="utf-8")
+    run(["rsync", "-a", "--info=progress2", f"--files-from={tmp}", f"{src_root}/", f"{dst_root}/"])
+    log(f"[copy] files-from {label}: {len(rel_paths)} files")
+
+def rewrite_paths_in_jsonl(jsonl_path: str, old_root: str, new_root: str, keys: list[str]) -> None:
+    p = Path(jsonl_path)
+    if not p.exists():
+        return
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    changed = 0
+    with p.open("r", encoding="utf-8", errors="ignore") as f_in, tmp.open("w", encoding="utf-8") as f_out:
+        for line in f_in:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json_loads(line)
+            except Exception:
+                continue
+            for k in keys:
+                v = obj.get(k)
+                if isinstance(v, str) and v.startswith(old_root):
+                    obj[k] = new_root + v[len(old_root):]
+                    changed += 1
+            f_out.write(json.dumps(obj, ensure_ascii=False) + "\n")
+    if changed:
+        os.replace(tmp, p)
+        log(f"[rewrite] {jsonl_path}: {changed} path(s) updated")
+    else:
+        tmp.unlink(missing_ok=True)
+
 def load_pipeline_state() -> dict:
     if not SYNC_IMPORTANT_TO_DRIVE:
         return {"completed": []}
@@ -351,7 +496,7 @@ def load_pipeline_state() -> dict:
     if not p.exists():
         return {"completed": []}
     try:
-        state = json.loads(p.read_text(encoding="utf-8"))
+        state = json_loads(p.read_text(encoding="utf-8"))
     except Exception:
         return {"completed": []}
     if "completed" not in state:
@@ -387,6 +532,43 @@ def update_stage_state(stage, status):
     save_pipeline_state(state)
     log_drive_summary(f"{time.strftime('%Y-%m-%d %H:%M:%S')} {stage} {status}")
 
+EXPECTED_JSONL_KEYS = {
+    "tasks_pending.jsonl": ["audio_path", "out_wav"],
+    "pairs_pending.jsonl": ["audio_path"],
+}
+
+def expected_keys_for(path: Path) -> list[str] | None:
+    name = path.name
+    if name in EXPECTED_JSONL_KEYS:
+        return EXPECTED_JSONL_KEYS[name]
+    if name.startswith("pairs_manifest_"):
+        return ["audio_path"]
+    return None
+
+def verify_jsonl(path: Path) -> bool:
+    try:
+        required_keys = expected_keys_for(path)
+        parsed = 0
+        with path.open("r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json_loads(line)
+                except Exception:
+                    return False
+                if required_keys:
+                    for k in required_keys:
+                        if k not in obj:
+                            return False
+                parsed += 1
+                if parsed >= max(1, VERIFY_JSONL_SAMPLE):
+                    break
+        return parsed > 0
+    except Exception:
+        return False
+
 def outputs_ok(paths) -> bool:
     for p in paths:
         path = Path(p)
@@ -399,6 +581,9 @@ def outputs_ok(paths) -> bool:
         else:
             if not path.exists() or path.stat().st_size <= 0:
                 return False
+            if VERIFY_OUTPUTS and path.suffix.lower() == ".jsonl":
+                if not verify_jsonl(path):
+                    return False
     return True
 
 def assert_outputs(paths, stage):
@@ -445,8 +630,8 @@ def check_required_paths():
             missing.append(f"{label}: {path}")
 
     if not SKIP_STAGE_1:
-        req(TRANSCRIPT_DIR, "TRANSCRIPT_DIR")
-        req(AUDIO_SOURCE_DIR, "AUDIO_SOURCE_DIR")
+        req(TRANSCRIPT_DIR_STAGE1, "TRANSCRIPT_DIR_STAGE1")
+        req(AUDIO_SOURCE_DIR_STAGE1, "AUDIO_SOURCE_DIR_STAGE1")
 
     if missing:
         raise RuntimeError("Missing required paths:\n" + "\n".join(missing))
@@ -460,6 +645,7 @@ MAX_WORKERS = max(1, CPU_COUNT)
 FFMPEG_WORKERS = MAX_WORKERS
 TASK_WORKERS = MAX_WORKERS
 AUG_WORKERS = MAX_WORKERS
+FFMPEG_THREADS = max(1, min(4, max(1, MAX_WORKERS // max(1, FFMPEG_WORKERS))))
 
 if AUTO_WORKERS:
     SPEAKER_WORKERS = MAX_WORKERS
@@ -475,7 +661,10 @@ os.chdir(REPO_DIR)
 # %%
 # ---------- SYSTEM DEPS ----------
 run(["apt-get", "update", "-y"])
-run(["apt-get", "install", "-y", "ffmpeg", "sox", "rsync"])
+pkgs = ["ffmpeg", "sox", "rsync"]
+if USE_RCLONE:
+    pkgs.append("rclone")
+run(["apt-get", "install", "-y"] + pkgs)
 
 # %%
 # ---------- COPY DATA TO LOCAL ----------
@@ -483,19 +672,24 @@ if USE_LOCAL_DATA:
     Path(LOCAL_DATA_ROOT).mkdir(parents=True, exist_ok=True)
 
     # Copy only what's needed for Stage 1 first (fast startup)
-    stage1_paths = [TRANSCRIPT_DIR, AUDIO_SOURCE_DIR]
+    stage1_paths = []
+    if COPY_TRANSCRIPTS_FOR_STAGE1:
+        stage1_paths.append(TRANSCRIPT_DIR_LOCAL)
+    if COPY_AUDIO_FOR_STAGE1:
+        stage1_paths.append(AUDIO_SOURCE_DIR_LOCAL)
     for p in stage1_paths:
         copy_path_from_drive(p, label="stage1")
 
-    # Copy other heavy dependencies in the background while Stage 1 runs
-    later_paths = [
-        TARGET_REF_DIR,
-        OTHER_REF_DIR if OTHER_REF_DIR else "",
-        OTHER_VOICES_DIR,
-        NOISE_DIR,
-        RIR_DIR,
-    ]
-    start_background_copy(later_paths, label="bg")
+    # Optional background copy (disabled by default)
+    if BACKGROUND_COPY_LATER:
+        later_paths = [
+            TARGET_REF_DIR,
+            OTHER_REF_DIR if OTHER_REF_DIR else "",
+            OTHER_VOICES_DIR,
+            NOISE_DIR,
+            RIR_DIR,
+        ]
+        start_background_copy(later_paths, label="bg")
 
 # %%
 # ---------- RESTORE SYNCED FILES ----------
@@ -507,14 +701,14 @@ PY = sys.executable
 run([PY, "-m", "pip", "install", "-q", "-U", "pip"])
 run([PY, "-m", "pip", "install", "-q",
      "transformers", "datasets", "accelerate",
-     "soundfile", "librosa", "numpy", "pandas", "scipy", "tqdm",
+     "soundfile", "librosa", "numpy", "pandas", "scipy", "tqdm", "orjson",
      "jiwer", "edlib", "pyannote.audio", "huggingface_hub"])
 
 # %%
 # ---------- PATCH WINDOWS-SPECIFIC PATHS ----------
-replace_line("stage_1_Manifest_creation_local_only.py", "TRANSCRIPT_DIR", TRANSCRIPT_DIR)
+replace_line("stage_1_Manifest_creation_local_only.py", "TRANSCRIPT_DIR", TRANSCRIPT_DIR_STAGE1)
 replace_line("stage_1_Manifest_creation_local_only.py", "CHUNKS_DIR", CHUNKS_DIR)
-replace_line("stage_1_Manifest_creation_local_only.py", "AUDIO_SOURCE_DIR", AUDIO_SOURCE_DIR)
+replace_line("stage_1_Manifest_creation_local_only.py", "AUDIO_SOURCE_DIR", AUDIO_SOURCE_DIR_STAGE1)
 
 replace_line("Stage_16_move_test_chunks_update_test_manifest.py", "manifest_path", STAGE13_TEST)
 replace_line("Stage_16_move_test_chunks_update_test_manifest.py", "target_dir", TEST_CHUNKS_DIR)
@@ -539,6 +733,13 @@ if should_run("stage_1", [TASKS_PENDING, PAIRS_PENDING]):
     update_stage_state("stage_1", "running")
     run([PY, "stage_1_Manifest_creation_local_only.py"])
     assert_outputs([TASKS_PENDING, PAIRS_PENDING], "stage_1")
+    # If stage1 ran on Drive paths, rewrite to local root for downstream stages.
+    if USE_LOCAL_DATA:
+        if not COPY_AUDIO_FOR_STAGE1:
+            rewrite_paths_in_jsonl(TASKS_PENDING, DATA_ROOT_DRIVE, DATA_ROOT, ["audio_path"])
+            rewrite_paths_in_jsonl(PAIRS_PENDING, DATA_ROOT_DRIVE, DATA_ROOT, ["audio_path", "source_audio"])
+        if not COPY_TRANSCRIPTS_FOR_STAGE1:
+            rewrite_paths_in_jsonl(PAIRS_PENDING, DATA_ROOT_DRIVE, DATA_ROOT, ["transcript_json"])
     sync_files_to_drive([TASKS_PENDING, PAIRS_PENDING], label="stage1")
     update_stage_state("stage_1", "done")
 
@@ -549,13 +750,23 @@ if should_run("stage_1", [TASKS_PENDING, PAIRS_PENDING]):
 # ---------- STAGE 2 ----------
 if should_run("stage_2", [STAGE2_MANIFEST]):
     update_stage_state("stage_2", "running")
+    # Copy only audio referenced by tasks_pending.jsonl (and transcripts from pairs_pending.jsonl)
+    if USE_LOCAL_DATA:
+        audio_paths = collect_jsonl_paths(TASKS_PENDING, "audio_path")
+        rel_audio = rel_paths_to_drive(audio_paths)
+        rsync_files_from(rel_audio, DATA_ROOT_DRIVE, DATA_ROOT, label="audio_for_stage2")
+
+        transcript_paths = collect_jsonl_paths(PAIRS_PENDING, "transcript_json")
+        rel_transcripts = rel_paths_to_drive(transcript_paths)
+        rsync_files_from(rel_transcripts, DATA_ROOT_DRIVE, DATA_ROOT, label="transcripts_for_stage2")
+
     run([PY, "stage_2_chunk_transcripts_sentence_parallel.py",
          "--tasks_pending_path", TASKS_PENDING,
          "--pairs_pending_path", PAIRS_PENDING,
          "--out_pairs_path", STAGE2_MANIFEST,
          "--ffmpeg_workers", str(FFMPEG_WORKERS),
          "--task_workers", str(TASK_WORKERS),
-         "--ffmpeg_threads", "1",
+         "--ffmpeg_threads", str(FFMPEG_THREADS),
          "--stereo_policy", "split_drop_dupes"])
     assert_outputs([STAGE2_MANIFEST], "stage_2")
     sync_files_to_drive([STAGE2_MANIFEST], label="stage2")
