@@ -1,7 +1,7 @@
 import os, json, pathlib, subprocess, hashlib, wave, threading
 import numpy as np
 from tqdm.auto import tqdm
-from transformers import WhisperProcessor
+from transformers import AutoTokenizer
 
 # Try to use orjson for faster JSON parsing if available
 try:
@@ -74,8 +74,21 @@ MANIFEST_PATH = str(CHUNKS_DIR_P / "pairs_manifest.jsonl")
 PENDING_PAIRS_PATH = str(CHUNKS_DIR_P / "pairs_pending.jsonl")
 PENDING_TASKS_PATH = str(CHUNKS_DIR_P / "tasks_pending.jsonl")
 
-# Use the *base* processor (has preprocessor_config.json etc.)
-processor = WhisperProcessor.from_pretrained(BASE_PROCESSOR_ID)
+# Use tokenizer only to estimate label token lengths (avoid WhisperProcessor -> torchvision dependency).
+def _load_tokenizer():
+    try:
+        from transformers import WhisperTokenizerFast
+        return WhisperTokenizerFast.from_pretrained(BASE_PROCESSOR_ID)
+    except Exception:
+        pass
+    try:
+        from transformers import WhisperTokenizer
+        return WhisperTokenizer.from_pretrained(BASE_PROCESSOR_ID)
+    except Exception:
+        pass
+    return AutoTokenizer.from_pretrained(BASE_PROCESSOR_ID)
+
+tokenizer = _load_tokenizer()
 
 # Stage 1 is manifest planning only. Loading model weights is wasted time.
 model = None
@@ -381,7 +394,7 @@ def _estimate_segment_tokens(segments: list) -> list:
             useful_txt.append(t)
 
     if useful_txt:
-        enc = processor.tokenizer(useful_txt, add_special_tokens=False)
+        enc = tokenizer(useful_txt, add_special_tokens=False)
         lens = [len(ids) for ids in enc["input_ids"]]
         for i, L in zip(useful_idx, lens):
             seg_tok[i] = int(L)

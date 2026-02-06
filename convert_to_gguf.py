@@ -56,7 +56,12 @@ def export_merged_seq2seq(
     ensure_dir(export_dir)
 
     # Load your fine-tuned encoder/decoder
-    ckpt = WhisperModel.from_pretrained(checkpoint_dir, token=hf_token)
+    try:
+        ckpt = WhisperModel.from_pretrained(checkpoint_dir, token=hf_token)
+    except Exception:
+        # Fall back to a full seq2seq checkpoint (e.g., merged PEFT)
+        seq2seq = WhisperForConditionalGeneration.from_pretrained(checkpoint_dir, token=hf_token)
+        ckpt = seq2seq.model
 
     # Load base seq2seq model (brings proj_out / output head)
     gen = WhisperForConditionalGeneration.from_pretrained(base_model_id, token=hf_token)

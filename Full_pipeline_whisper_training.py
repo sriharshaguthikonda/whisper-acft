@@ -52,6 +52,10 @@ USE_RCLONE = False
 RCLONE_REMOTE = ""  # e.g. "gdrive:MyDrive"
 RCLONE_TRANSFERS = 8
 
+# Torch/torchvision compatibility fix (for pyannote/lightning)
+FIX_TORCHVISION = True
+TORCH_INDEX_URL = ""  # optional override, e.g. "https://download.pytorch.org/whl/cu121"
+
 # Optional: pre-stage1 audio copy using existing tasks_pending.jsonl from Drive
 PRESTAGE1_AUDIO_COPY = False
 PRESTAGE1_TASKS_PENDING = f"{DATA_ROOT_DRIVE}/Record_chunks/tasks_pending.jsonl"
@@ -84,6 +88,8 @@ TEST_CHUNKS_DIR = f"{DATA_ROOT}/Record_test_chunks"
 CHECKPOINT_DIR = f"{DATA_ROOT}/stage17_checkpoints"
 STAGE17_SCRIPT = "stage_17_WER_acft_Whisper_Futo_finetuned_model_training_only_local_en_version_only_qat_dora.py"
 START_FRESH = 0  # 1 = refuse to resume if checkpoints exist
+BASE_MODEL_ID = "futo-org/acft-whisper-small.en"
+PROCESSOR_ID = "openai/whisper-small.en"
 
 HF_TOKEN = ""  # optional; set in env or enter when prompted
 DEVICE = "cuda"  # "cpu" if no GPU
@@ -125,6 +131,33 @@ SKIP_STAGE_14 = False
 SKIP_STAGE_15 = False
 SKIP_STAGE_16 = False
 SKIP_STAGE_17 = False
+
+# Post-train: evaluation + charts + export
+RUN_EVAL_19C = False
+RUN_EVAL_19D = False
+EVAL_19C_SCRIPT = "evaluation_19c.py"
+EVAL_19D_SCRIPT = "evaluation_19d.py"
+EVAL_19C_ARGS = []  # e.g. ["--model", "path", "--data", "path"]
+EVAL_19D_ARGS = []
+EVAL_19C_OUT_JSON = f"{DATA_ROOT}/eval_19c.json"
+EVAL_19D_OUT_JSON = f"{DATA_ROOT}/eval_19d.json"
+
+CHARTS_DIR = f"{DATA_ROOT}/charts"
+CHARTS_DRIVE_DIR = f"{DRIVE_SYNC_ROOT}/charts"
+SAVE_CHARTS_TO_DRIVE = True
+
+# LoRA/DoRA merge + export
+PEFT_ENABLED = False  # set True if using LoRA/DoRA
+MERGE_PEFT_AFTER_STAGE17 = True
+MERGED_MODEL_DIR = f"{DATA_ROOT}/stage17_merged_best"
+
+# GGUF/GGML conversion (uses convert_to_gguf.py)
+RUN_GGUF_CONVERSION = True
+GGUF_QTYPE = "Q8_0"  # Q4_0/Q5_0/Q5_1/Q8_0 or "" for FP16
+WHISPER_CPP_ROOT = f"{REPO_DIR}/whisper.cpp"
+WHISPER_OPENAI_REPO = f"{REPO_DIR}/whisper"
+GGUF_EXPORT_DIR = f"{DATA_ROOT}/gguf_export"
+GGUF_OUT_DIR = f"{DATA_ROOT}/gguf_output"
 
 # %%
 # ---------- DERIVED PATHS ----------
@@ -184,6 +217,8 @@ if not HF_TOKEN and not SKIP_STAGE_3:
         HF_TOKEN = ""
 if HF_TOKEN:
     os.environ["HF_TOKEN"] = HF_TOKEN
+if PEFT_ENABLED:
+    os.environ["WHISPER_USE_PEFT"] = "1"
 
 try:
     import orjson as _orjson  # type: ignore
@@ -230,6 +265,20 @@ def run(cmd):
     else:
         log("$ " + " ".join(shlex.quote(str(c)) for c in cmd))
         subprocess.run([str(c) for c in cmd], check=True)
+
+def run_stage(cmd):
+    if isinstance(cmd, str):
+        log(f"$ {cmd}")
+        p = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    else:
+        log("$ " + " ".join(shlex.quote(str(c)) for c in cmd))
+        p = subprocess.run([str(c) for c in cmd], capture_output=True, text=True)
+    if p.stdout:
+        print("STDOUT:\n", p.stdout)
+    if p.stderr:
+        print("STDERR:\n", p.stderr)
+    if p.returncode != 0:
+        raise subprocess.CalledProcessError(p.returncode, p.args, output=p.stdout, stderr=p.stderr)
 
 def seed_manifest(src, dst):
     src_p, dst_p = Path(src), Path(dst)
@@ -281,6 +330,159 @@ def patch_winsound_stage17(path):
         p.write_text(txt.replace(needle, repl), encoding="utf-8")
     else:
         print(f"warn: winsound import line not found in {path}")
+
+def patch_winsound_simple(path):
+    p = Path(path)
+    txt = p.read_text(encoding="utf-8")
+    if "_WinSoundShim" in txt or "import winsound" not in txt:
+        return
+    new = txt.replace(
+        "import winsound",
+        "try:\n    import winsound  # type: ignore\n"
+        "except Exception:\n"
+        "    class _WinSoundShim:\n"
+        "        def Beep(self, *a, **k):\n            pass\n"
+        "    winsound = _WinSoundShim()"
+    )
+    if new != txt:
+        p.write_text(new, encoding="utf-8")
+
+def patch_stage1_tokenizer(path):
+    p = Path(path)
+    txt = p.read_text(encoding="utf-8")
+    if "WhisperProcessor" not in txt:
+        return
+    txt = txt.replace("from transformers import WhisperProcessor", "from transformers import AutoTokenizer")
+    old = "processor = WhisperProcessor.from_pretrained(BASE_PROCESSOR_ID)"
+    new = (
+        "def _load_tokenizer():\n"
+        "    try:\n"
+        "        from transformers import WhisperTokenizerFast\n"
+        "        return WhisperTokenizerFast.from_pretrained(BASE_PROCESSOR_ID)\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    try:\n"
+        "        from transformers import WhisperTokenizer\n"
+        "        return WhisperTokenizer.from_pretrained(BASE_PROCESSOR_ID)\n"
+        "    except Exception:\n"
+        "        pass\n"
+        "    return AutoTokenizer.from_pretrained(BASE_PROCESSOR_ID)\n\n"
+        "tokenizer = _load_tokenizer()"
+    )
+    if old in txt:
+        txt = txt.replace(old, new)
+    txt = txt.replace("processor.tokenizer(", "tokenizer(")
+    p.write_text(txt, encoding="utf-8")
+
+def stage_banner(name: str) -> None:
+    log("\n\n" + "=" * 20 + f" {name} " + "=" * 20)
+
+def is_peft_checkpoint_dir(path: str) -> bool:
+    return Path(path, "adapter_config.json").exists()
+
+def find_latest_checkpoint_dir(checkpoint_dir: str) -> str | None:
+    p = Path(checkpoint_dir)
+    if not p.exists():
+        return None
+    best = None
+    best_epoch = -1
+    for child in p.iterdir():
+        if child.is_dir() and child.name.startswith("model_epoch_"):
+            try:
+                epoch = int(child.name.split("_")[-1])
+            except Exception:
+                continue
+            if epoch > best_epoch:
+                best_epoch = epoch
+                best = str(child)
+    return best
+
+def best_checkpoint_dir() -> str | None:
+    return find_latest_checkpoint_dir(CHECKPOINT_DIR)
+
+def sync_charts_to_drive(paths):
+    if not SAVE_CHARTS_TO_DRIVE:
+        return
+    dst_root = Path(CHARTS_DRIVE_DIR)
+    dst_root.mkdir(parents=True, exist_ok=True)
+    copied = 0
+    for p in paths:
+        src = Path(p)
+        if not src.exists():
+            continue
+        dst = dst_root / src.name
+        shutil.copy2(src, dst)
+        copied += 1
+    if copied:
+        log(f"[sync] charts -> {dst_root} ({copied} file(s))")
+
+def save_chart_from_metrics(json_path: str, out_png: str, title: str) -> None:
+    import matplotlib.pyplot as plt
+    p = Path(json_path)
+    if not p.exists():
+        raise FileNotFoundError(f"Metrics JSON not found: {json_path}")
+    data = json_loads(p.read_text(encoding="utf-8"))
+
+    plt.figure(figsize=(8, 4))
+    if isinstance(data, list) and data and isinstance(data[0], dict):
+        # Try line plot: epoch vs wer
+        xs, ys = [], []
+        for row in data:
+            if "epoch" in row and ("wer" in row or "avg_wer_target" in row):
+                xs.append(row.get("epoch"))
+                ys.append(row.get("wer", row.get("avg_wer_target")))
+        if xs and ys:
+            plt.plot(xs, ys, marker="o")
+            plt.xlabel("epoch")
+            plt.ylabel("WER")
+        else:
+            # Fallback: histogram of WER-like values
+            vals = [row.get("wer") for row in data if isinstance(row.get("wer"), (int, float))]
+            if vals:
+                plt.hist(vals, bins=20)
+                plt.xlabel("WER")
+                plt.ylabel("count")
+    elif isinstance(data, dict):
+        keys = ["avg_wer_target", "avg_wer_other", "wer"]
+        vals = {k: data[k] for k in keys if k in data and isinstance(data[k], (int, float))}
+        if vals:
+            plt.bar(list(vals.keys()), list(vals.values()))
+            plt.ylabel("WER")
+
+    plt.title(title)
+    Path(out_png).parent.mkdir(parents=True, exist_ok=True)
+    plt.tight_layout()
+    plt.savefig(out_png)
+    plt.close()
+
+def _torch_index_url() -> str:
+    if TORCH_INDEX_URL:
+        return TORCH_INDEX_URL
+    try:
+        import torch
+        cuda = (torch.version.cuda or "").strip()
+    except Exception:
+        return "https://download.pytorch.org/whl/cpu"
+    if cuda.startswith("12.4"):
+        return "https://download.pytorch.org/whl/cu124"
+    if cuda.startswith("12.1"):
+        return "https://download.pytorch.org/whl/cu121"
+    if cuda.startswith("11.8"):
+        return "https://download.pytorch.org/whl/cu118"
+    return "https://download.pytorch.org/whl/cpu"
+
+def ensure_torchvision_compat():
+    if not FIX_TORCHVISION:
+        return
+    try:
+        import torchvision  # noqa: F401
+        return
+    except Exception as e:
+        log(f"[fix] torchvision import failed: {e}")
+    url = _torch_index_url()
+    log(f"[fix] reinstall torch/torchvision/torchaudio from {url}")
+    run([PY, "-m", "pip", "install", "-q", "--upgrade", "--force-reinstall",
+         "torch", "torchvision", "torchaudio", "--index-url", url])
 
 def file_hash(path: Path, chunk_size: int = 1024 * 1024) -> str:
     h = hashlib.sha256()
@@ -705,7 +907,9 @@ if AUTO_WORKERS:
 if not Path(REPO_DIR).exists():
     run(["git", "clone", REPO_URL, REPO_DIR])
 else:
-    run(["git", "-C", REPO_DIR, "pull"])
+    run(["git", "-C", REPO_DIR, "fetch", "--all", "--prune"])
+    # Hard reset to remote HEAD to avoid stale local changes
+    run(["git", "-C", REPO_DIR, "reset", "--hard", "origin/HEAD"])
 os.chdir(REPO_DIR)
 
 # %%
@@ -755,23 +959,29 @@ PY = sys.executable
 run([PY, "-m", "pip", "install", "-q", "-U", "pip"])
 run([PY, "-m", "pip", "install", "-q",
      "transformers", "datasets", "accelerate",
-     "soundfile", "librosa", "numpy", "pandas", "scipy", "tqdm", "orjson",
+     "soundfile", "librosa", "numpy", "pandas", "scipy", "tqdm", "orjson", "matplotlib",
      "jiwer", "edlib", "pyannote.audio", "huggingface_hub"])
+
+# Fix torchvision mismatch if needed (pyannote/lightning uses torchmetrics->torchvision)
+ensure_torchvision_compat()
 
 # %%
 # ---------- PATCH WINDOWS-SPECIFIC PATHS ----------
 replace_line("stage_1_Manifest_creation_local_only.py", "TRANSCRIPT_DIR", TRANSCRIPT_DIR_STAGE1)
 replace_line("stage_1_Manifest_creation_local_only.py", "CHUNKS_DIR", CHUNKS_DIR)
 replace_line("stage_1_Manifest_creation_local_only.py", "AUDIO_SOURCE_DIR", AUDIO_SOURCE_DIR_STAGE1)
-
-replace_line("Stage_16_move_test_chunks_update_test_manifest.py", "manifest_path", STAGE13_TEST)
-replace_line("Stage_16_move_test_chunks_update_test_manifest.py", "target_dir", TEST_CHUNKS_DIR)
+replace_line("stage_1_Manifest_creation_local_only.py", "ACFT_MODEL_ID", BASE_MODEL_ID)
+replace_line("stage_1_Manifest_creation_local_only.py", "BASE_PROCESSOR_ID", PROCESSOR_ID)
 
 replace_line(STAGE17_SCRIPT, "MANIFEST_PATH", STAGE15_TRAIN)
 replace_line(STAGE17_SCRIPT, "CHECKPOINT_DIR", CHECKPOINT_DIR)
+replace_line(STAGE17_SCRIPT, "FUTO_MODEL_ID", BASE_MODEL_ID)
+replace_line(STAGE17_SCRIPT, "PROCESSOR_ID", PROCESSOR_ID)
 
 patch_winsound_stage14("stage_14_remove_target_files_from_manifest.py")
 patch_winsound_stage17(STAGE17_SCRIPT)
+patch_stage1_tokenizer("stage_1_Manifest_creation_local_only.py")
+patch_winsound_simple("stage17_merge_peft_checkpoint_to_full_model.py")
 
 # %%
 # ---------- CONFIG SANITY CHECKS ----------
@@ -784,8 +994,9 @@ check_required_paths()
 # %%
 # ---------- STAGE 1 ----------
 if should_run("stage_1", [TASKS_PENDING, PAIRS_PENDING]):
+    stage_banner("STAGE 1")
     update_stage_state("stage_1", "running")
-    run([PY, "stage_1_Manifest_creation_local_only.py"])
+    run_stage([PY, "stage_1_Manifest_creation_local_only.py"])
     assert_outputs([TASKS_PENDING, PAIRS_PENDING], "stage_1")
     # If stage1 ran on Drive paths, rewrite to local root for downstream stages.
     if USE_LOCAL_DATA:
@@ -803,6 +1014,7 @@ if should_run("stage_1", [TASKS_PENDING, PAIRS_PENDING]):
 # %%
 # ---------- STAGE 2 ----------
 if should_run("stage_2", [STAGE2_MANIFEST]):
+    stage_banner("STAGE 2")
     update_stage_state("stage_2", "running")
     # Copy only audio referenced by tasks_pending.jsonl (and transcripts from pairs_pending.jsonl)
     if USE_LOCAL_DATA:
@@ -814,7 +1026,7 @@ if should_run("stage_2", [STAGE2_MANIFEST]):
         rel_transcripts = rel_paths_to_drive(transcript_paths)
         rsync_files_from(rel_transcripts, DATA_ROOT_DRIVE, DATA_ROOT, label="transcripts_for_stage2")
 
-    run([PY, "stage_2_chunk_transcripts_sentence_parallel.py",
+    run_stage([PY, "stage_2_chunk_transcripts_sentence_parallel.py",
          "--tasks_pending_path", TASKS_PENDING,
          "--pairs_pending_path", PAIRS_PENDING,
          "--out_pairs_path", STAGE2_MANIFEST,
@@ -828,6 +1040,7 @@ if should_run("stage_2", [STAGE2_MANIFEST]):
 # %%
 # ---------- STAGE 3 ----------
 if should_run("stage_3", [SCORES_CSV]):
+    stage_banner("STAGE 3")
     ensure_local_paths([TARGET_REF_DIR] + ([OTHER_REF_DIR] if OTHER_REF_DIR else []), label="stage_3")
     update_stage_state("stage_3", "running")
     cmd = [
@@ -848,14 +1061,15 @@ if should_run("stage_3", [SCORES_CSV]):
         cmd += ["--dry_run", "--copy"]
     else:
         cmd += ["--copy"]
-    run(cmd)
+    run_stage(cmd)
     assert_outputs([SCORES_CSV], "stage_3")
     update_stage_state("stage_3", "done")
 # %%
 # ---------- STAGE 3b ----------
 if should_run("stage_3b", [STAGE3B_MANIFEST]):
+    stage_banner("STAGE 3B")
     update_stage_state("stage_3b", "running")
-    run([PY, "stage_3b_filter_english_only.py",
+    run_stage([PY, "stage_3b_filter_english_only.py",
          "--input", STAGE2_MANIFEST,
          "--output", STAGE3B_MANIFEST,
          "--min-english-ratio", "0.7"])
@@ -864,8 +1078,9 @@ if should_run("stage_3b", [STAGE3B_MANIFEST]):
 # %%
 # ---------- STAGE 4 ----------
 if should_run("stage_4", [STAGE4_MANIFEST]):
+    stage_banner("STAGE 4")
     update_stage_state("stage_4", "running")
-    run([PY, "stage_4_Delete_common_fillers_words_from_manifest.py",
+    run_stage([PY, "stage_4_Delete_common_fillers_words_from_manifest.py",
          "--input", STAGE3B_MANIFEST,
          "--output", STAGE4_MANIFEST,
          "--state-file", COMMON_SEGMENTS_STATE,
@@ -875,11 +1090,12 @@ if should_run("stage_4", [STAGE4_MANIFEST]):
 # %%
 # ---------- STAGE 6 ----------
 if should_run("stage_6", [STAGE6_MANIFEST]):
+    stage_banner("STAGE 6")
     ensure_local_paths([NOISE_DIR], label="stage_6")
     update_stage_state("stage_6", "running")
     Path(SEEN_DIR).mkdir(parents=True, exist_ok=True)
     seed_manifest(STAGE4_MANIFEST, STAGE6_MANIFEST)
-    run([PY, "stage_6_add_noise_to_high_score_audio_chunks_manifest_with_noise.py",
+    run_stage([PY, "stage_6_add_noise_to_high_score_audio_chunks_manifest_with_noise.py",
          "--in_manifest", STAGE4_MANIFEST,
          "--out_manifest", STAGE6_MANIFEST,
          "--noises_dir", NOISE_DIR,
@@ -899,10 +1115,11 @@ if should_run("stage_6", [STAGE6_MANIFEST]):
 # %%
 # ---------- STAGE 7 ----------
 if should_run("stage_7", [STAGE7_MANIFEST]):
+    stage_banner("STAGE 7")
     ensure_local_paths([OTHER_VOICES_DIR], label="stage_7")
     update_stage_state("stage_7", "running")
     seed_manifest(STAGE6_MANIFEST, STAGE7_MANIFEST)
-    run([PY, "stage_7_add_others_voices_to_my_audio_fast_idempotent.py",
+    run_stage([PY, "stage_7_add_others_voices_to_my_audio_fast_idempotent.py",
          "--in_manifest", STAGE6_MANIFEST,
          "--out_manifest", STAGE7_MANIFEST,
          "--other_voices_dir", OTHER_VOICES_DIR,
@@ -921,9 +1138,10 @@ if should_run("stage_7", [STAGE7_MANIFEST]):
 # %%
 # ---------- STAGE 8 ----------
 if should_run("stage_8", [STAGE8_MANIFEST]):
+    stage_banner("STAGE 8")
     update_stage_state("stage_8", "running")
     seed_manifest(STAGE7_MANIFEST, STAGE8_MANIFEST)
-    run([PY, "stage_8_add_random_gain_to_high_score_voices_parallel_idempotent.py",
+    run_stage([PY, "stage_8_add_random_gain_to_high_score_voices_parallel_idempotent.py",
          "--in_manifest", STAGE7_MANIFEST,
          "--out_manifest", STAGE8_MANIFEST,
          "--out_dir", GAIN_OUT_DIR,
@@ -939,10 +1157,11 @@ if should_run("stage_8", [STAGE8_MANIFEST]):
 # %%
 # ---------- STAGE 9 ----------
 if should_run("stage_9", [STAGE9_MANIFEST]):
+    stage_banner("STAGE 9")
     ensure_local_paths([RIR_DIR], label="stage_9")
     update_stage_state("stage_9", "running")
     seed_manifest(STAGE8_MANIFEST, STAGE9_MANIFEST)
-    run([PY, "stage_9_add_reverb_idempotent.py",
+    run_stage([PY, "stage_9_add_reverb_idempotent.py",
          "--in_manifest", STAGE8_MANIFEST,
          "--out_manifest", STAGE9_MANIFEST,
          "--rir_dir", RIR_DIR,
@@ -957,9 +1176,10 @@ if should_run("stage_9", [STAGE9_MANIFEST]):
 # %%
 # ---------- STAGE 10b ----------
 if should_run("stage_10b", [STAGE10B_MANIFEST]):
+    stage_banner("STAGE 10B")
     update_stage_state("stage_10b", "running")
     seed_manifest(STAGE9_MANIFEST, STAGE10B_MANIFEST)
-    run([PY, "stage_10_b_add_speech_tempo_pause_aware_idempotent.py",
+    run_stage([PY, "stage_10_b_add_speech_tempo_pause_aware_idempotent.py",
          "--in_manifest", STAGE9_MANIFEST,
          "--out_manifest", STAGE10B_MANIFEST,
          "--out_dir", TEMPO_OUT_DIR,
@@ -981,8 +1201,9 @@ if should_run("stage_10b", [STAGE10B_MANIFEST]):
 # %%
 # ---------- STAGE 12 ----------
 if should_run("stage_12", [STAGE12_MANIFEST]):
+    stage_banner("STAGE 12")
     update_stage_state("stage_12", "running")
-    run([PY, "stage_12_remove_bottom_percent_by_speaker_scores.py",
+    run_stage([PY, "stage_12_remove_bottom_percent_by_speaker_scores.py",
          "--input_manifest", STAGE10B_MANIFEST,
          "--output_manifest", STAGE12_MANIFEST,
          "--speaker_scores_csv", SCORES_CSV,
@@ -992,8 +1213,9 @@ if should_run("stage_12", [STAGE12_MANIFEST]):
 # %%
 # ---------- STAGE 13 ----------
 if should_run("stage_13", [STAGE13_TRAIN, STAGE13_TEST]):
+    stage_banner("STAGE 13")
     update_stage_state("stage_13", "running")
-    run([PY, "stage_13_group_split_train_test.py",
+    run_stage([PY, "stage_13_group_split_train_test.py",
          "--input_manifest", STAGE12_MANIFEST,
          "--test_manifest", STAGE13_TEST,
          "--train_manifest", STAGE13_TRAIN,
@@ -1004,8 +1226,9 @@ if should_run("stage_13", [STAGE13_TRAIN, STAGE13_TEST]):
 # %%
 # ---------- STAGE 14 ----------
 if should_run("stage_14", [STAGE14_TRAIN]):
+    stage_banner("STAGE 14")
     update_stage_state("stage_14", "running")
-    run([PY, "stage_14_remove_target_files_from_manifest.py",
+    run_stage([PY, "stage_14_remove_target_files_from_manifest.py",
          "--input_manifest", STAGE13_TRAIN,
          "--output_manifest", STAGE14_TRAIN,
          "--speaker_scores_csv", SCORES_CSV])
@@ -1014,14 +1237,15 @@ if should_run("stage_14", [STAGE14_TRAIN]):
 # %%
 # ---------- STAGE 15 ----------
 if should_run("stage_15", [STAGE15_TRAIN]):
+    stage_banner("STAGE 15")
     update_stage_state("stage_15", "running")
     if USE_ADVANCED_RANDOMIZE:
-        run([PY, "stage_15_b_advanced_randomize_manifest.py",
+        run_stage([PY, "stage_15_b_advanced_randomize_manifest.py",
              "--input_manifest", STAGE14_TRAIN,
              "--output_manifest", STAGE15_TRAIN,
              "--seed", str(RANDOM_SEED)])
     else:
-        run([PY, "stage_15_a_randomize_manifest.py",
+        run_stage([PY, "stage_15_a_randomize_manifest.py",
              "--input_manifest", STAGE14_TRAIN,
              "--output_manifest", STAGE15_TRAIN,
              "--seed", str(RANDOM_SEED)])
@@ -1030,18 +1254,102 @@ if should_run("stage_15", [STAGE15_TRAIN]):
 # %%
 # ---------- STAGE 16 ----------
 if should_run("stage_16", [STAGE13_TEST]):
+    stage_banner("STAGE 16")
     update_stage_state("stage_16", "running")
-    run([PY, "Stage_16_move_test_chunks_update_test_manifest.py"])
+    run_stage([
+        PY, "Stage_16_move_test_chunks_update_test_manifest.py",
+        "--manifest_path", STAGE13_TEST,
+        "--target_dir", TEST_CHUNKS_DIR,
+        "--mode", "move",
+        "--backup_suffix", ".backup",
+    ])
     assert_outputs([STAGE13_TEST], "stage_16")
     update_stage_state("stage_16", "done")
 # %%
 # ---------- STAGE 17 ----------
 if should_run("stage_17", [CHECKPOINT_DIR]):
+    stage_banner("STAGE 17")
     update_stage_state("stage_17", "running")
     os.environ["WHISPER_START_FRESH"] = str(START_FRESH)
-    run([PY, STAGE17_SCRIPT])
+    run_stage([PY, STAGE17_SCRIPT])
     assert_outputs([CHECKPOINT_DIR], "stage_17")
     update_stage_state("stage_17", "done")
+
+# %%
+# ---------- STAGE 18: MERGE PEFT (if enabled) ----------
+MERGED_MODEL_READY = False
+BEST_CHECKPOINT_DIR = best_checkpoint_dir()
+if MERGE_PEFT_AFTER_STAGE17 and PEFT_ENABLED:
+    stage_banner("STAGE 18: MERGE PEFT")
+    if not BEST_CHECKPOINT_DIR:
+        raise RuntimeError("No checkpoint found to merge.")
+    run_stage([
+        PY, "stage17_merge_peft_checkpoint_to_full_model.py",
+        "--peft_dir", BEST_CHECKPOINT_DIR,
+        "--out_dir", MERGED_MODEL_DIR,
+        "--base_model_id", BASE_MODEL_ID,
+    ])
+    assert_outputs([MERGED_MODEL_DIR], "stage_18_merge_peft")
+    MERGED_MODEL_READY = True
+
+# %%
+# ---------- STAGE 19C: EVALUATION ----------
+if RUN_EVAL_19C:
+    stage_banner("STAGE 19C: EVALUATION")
+    if not Path(EVAL_19C_SCRIPT).exists():
+        raise RuntimeError(f"Eval script not found: {EVAL_19C_SCRIPT}")
+    if not EVAL_19C_ARGS:
+        log("[warn] EVAL_19C_ARGS is empty; set args if your script requires them.")
+    run_stage([PY, EVAL_19C_SCRIPT] + [str(x) for x in EVAL_19C_ARGS])
+    if EVAL_19C_OUT_JSON:
+        assert_outputs([EVAL_19C_OUT_JSON], "stage_19c_eval")
+
+# %%
+# ---------- STAGE 19D: EVALUATION ----------
+if RUN_EVAL_19D:
+    stage_banner("STAGE 19D: EVALUATION")
+    if not Path(EVAL_19D_SCRIPT).exists():
+        raise RuntimeError(f"Eval script not found: {EVAL_19D_SCRIPT}")
+    if not EVAL_19D_ARGS:
+        log("[warn] EVAL_19D_ARGS is empty; set args if your script requires them.")
+    run_stage([PY, EVAL_19D_SCRIPT] + [str(x) for x in EVAL_19D_ARGS])
+    if EVAL_19D_OUT_JSON:
+        assert_outputs([EVAL_19D_OUT_JSON], "stage_19d_eval")
+
+# %%
+# ---------- STAGE 19E: CHARTS ----------
+if RUN_EVAL_19C or RUN_EVAL_19D:
+    stage_banner("STAGE 19E: CHARTS")
+    charts = []
+    if EVAL_19C_OUT_JSON and Path(EVAL_19C_OUT_JSON).exists():
+        out_png = str(Path(CHARTS_DIR) / "eval_19c.png")
+        save_chart_from_metrics(EVAL_19C_OUT_JSON, out_png, "Evaluation 19C")
+        charts.append(out_png)
+    if EVAL_19D_OUT_JSON and Path(EVAL_19D_OUT_JSON).exists():
+        out_png = str(Path(CHARTS_DIR) / "eval_19d.png")
+        save_chart_from_metrics(EVAL_19D_OUT_JSON, out_png, "Evaluation 19D")
+        charts.append(out_png)
+    if charts:
+        sync_charts_to_drive(charts)
+
+# %%
+# ---------- STAGE 20: GGUF/GGML CONVERSION ----------
+if RUN_GGUF_CONVERSION:
+    stage_banner("STAGE 20: GGUF/GGML CONVERSION")
+    src_ckpt = MERGED_MODEL_DIR if MERGED_MODEL_READY else (BEST_CHECKPOINT_DIR or "")
+    if not src_ckpt:
+        raise RuntimeError("No checkpoint found for conversion.")
+    run_stage([
+        PY, "convert_to_gguf.py",
+        "--checkpoint_dir", src_ckpt,
+        "--export_dir", GGUF_EXPORT_DIR,
+        "--out_dir", GGUF_OUT_DIR,
+        "--whisper_cpp", WHISPER_CPP_ROOT,
+        "--whisper_repo", WHISPER_OPENAI_REPO,
+        "--base_model", BASE_MODEL_ID,
+        "--processor", PROCESSOR_ID,
+        "--qtype", GGUF_QTYPE,
+    ])
 
 # %%
 # ---------- SYNC CACHE ----------

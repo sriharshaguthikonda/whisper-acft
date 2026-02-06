@@ -137,7 +137,7 @@ def atomic_write_json(path: str, obj):
 MANIFEST_PATH = "I:/Record_chunks/combined_all_manifests.jsonl"
 
 # Checkpoints (single fixed directory; no run tags).
-CHECKPOINT_DIR = "i:/Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_tiny_en_21"
+CHECKPOINT_DIR = "i:/Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_22"
 
 # Put run-state files INSIDE the checkpoint directory so runs do not poison each other.
 TRAINED_JSONL_PATH = os.path.join(CHECKPOINT_DIR, "trained_stage1.jsonl")
@@ -344,19 +344,20 @@ PROCESSOR_ID = "openai/whisper-tiny.en"  # must match the base family
 # Adjust these values here instead of setting WHISPER_* env vars.
 set_peft_overrides(
     WHISPER_USE_PEFT="1",
-    # If you're not seeing WER move, this is usually too little capacity.
-    # Start with broader coverage + a bit more regularisation, then pare back.
-    WHISPER_LORA_R=32,
-    WHISPER_LORA_ALPHA=64,
-    WHISPER_LORA_DROPOUT=0.10,
-    # Whisper attention uses q_proj/k_proj/v_proj/out_proj.
-    # The feed-forward blocks are typically fc1/fc2.
-    # If any name errors, remove that module name.
-    WHISPER_LORA_TARGET_MODULES="q_proj,k_proj,v_proj,out_proj,fc1,fc2",
+    # DoRA is powerful, but your current setting is *very* high-capacity for this dataset.
+    # Bring it down to reduce immediate collapse/repetition.
+    WHISPER_LORA_R=8,
+    WHISPER_LORA_ALPHA=16,
+    WHISPER_LORA_DROPOUT=0.15,
+    # Start with attention projections only. Adding fc1/fc2 often overfits fast.
+    WHISPER_LORA_TARGET_MODULES="q_proj,v_proj,out_proj",
+
+    # If your stage17_main_utils_peft supports these, keep them explicit:
     WHISPER_LORA_USE_DORA="1",
     WHISPER_LORA_USE_RSLORA="1",
-    # optional (often helps convergence + quantisation friendliness):
-    # WHISPER_LORA_INIT="pissa",
+
+    # Saves merged base+adapter (safetensors) each epoch for easy deployment
+    WHISPER_PEFT_SAVE_MERGED_EACH_EPOCH="1",
 )
 
 # ===== Combined WER + ACFT knobs =====
@@ -365,14 +366,14 @@ set_peft_overrides(
 ACFT_REFERENCE_MODEL_ID = FUTO_MODEL_ID  # Reference model for ACFT (default: same as training model)
 CE_LABEL_SMOOTH = 0.02  # 0.05 can blunt learning for ASR; 0.0-0.02 tends to behave better
 LAMBDA_CE = 1.0  # Weight for cross-entropy loss
-LAMBDA_ACFT = 0.00  # Weight for ACFT robustness loss
+LAMBDA_ACFT = 0.08  # Weight for ACFT robustness loss
 # Optional: temporarily disable ACFT entirely while debugging instability.
 # LAMBDA_ACFT = 0.0
 # Optional ramp: start ACFT small then ramp up over first N optimizer steps
-ACFT_RAMP_STEPS = 800  # 0 disables ramp; higher values ramp more slowly
+ACFT_RAMP_STEPS = 1500  # 0 disables ramp; higher values ramp more slowly
 
 # Dynamic audio_ctx (partial context) to teach robustness
-FORCE_FULL_AUDIO_CTX = False  # True = always use full context, False = use dynamic context
+FORCE_FULL_AUDIO_CTX = False  # keep dynamic audio context, but stabilise with ACFT
 AUDIO_CTX_SAFETY_SEC = 0.20  # Safety margin in seconds for dynamic context
 AUDIO_CTX_ROUND_TO = 16  # Round context to multiples of this value
 AUDIO_CTX_JITTER_MAX = 64  # Maximum upward jitter for dynamic context
