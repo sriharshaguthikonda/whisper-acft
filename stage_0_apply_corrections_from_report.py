@@ -31,12 +31,12 @@ Usage
 -----
 i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\stage_0_apply_corrections_from_report.py"\
   --report "rename_and_corrected_transcript_report.json" \
-  --transcripts-dir "I:\P2GPT_google_drive\My Drive\nfa_corrected\patched_json" \
-  --output-dir "I:\\P2GPT_google_drive\\My Drive\\Transcriptions_patched_corrected" \
+  --transcripts-dir "I:\Transcriptions" \
+  --output-dir "I:\Transcriptions_corrected" \
   --mode auto \
   --strict_words \
-  --conflicts-files "I:\\P2GPT_google_drive\\My Drive\\Transcriptions_patched_corrected\\stage_0_apply_corrections_from_report_conflicts_files.txt" \
-  --conflicts-csv "I:\\P2GPT_google_drive\\My Drive\\Transcriptions_patched_corrected\\stage_0_apply_corrections_from_report_conflicts_segments.csv"
+  --conflicts-files "I:\Transcriptions_corrected\\stage_0_apply_corrections_from_report_conflicts_files.txt" \
+  --conflicts-csv "I:\Transcriptions_corrected\\stage_0_apply_corrections_from_report_conflicts_segments.csv"
 
 Notes
 -----
