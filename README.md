@@ -1,3 +1,248 @@
+<<<<<<< HEAD
+=======
+# How to Actually Do This
+
+This guide walks through the full workflow: from raw audio files to corrected transcripts and training data for Whisper finetuning.
+
+---
+
+## 1. Prepare Your Audio Files
+
+1. Collect all your audio files into a single directory.  
+   - Example: `I:\Record`
+
+---
+
+## 2. Transcribe Audio Files with Groq
+
+Use the Colab notebook to transcribe all audio files to JSON transcripts.
+
+- Notebook:  
+  `I:\P2GPT_google_drive\My Drive\Colab Notebooks\Transcribe_google_drive_with_groq.ipynb`
+
+**Output:**
+
+- Transcript JSON files saved to a directory, e.g.:  
+  `I:\P2GPT_google_drive\My Drive\Transcriptions`
+
+---
+
+## 3. Rename Audio Files & Fix Bad Transcript Names
+
+If the audio/transcript names are poor or inconsistent, use:
+
+- Script: `rename_and_correct_transcripts_with_groq.py`
+- Usage: 
+
+```bash
+python i:\whisper-acft\rename_and_correct_transcripts_with_groq.py --transcripts-dir "i:\P2GPT_google_drive\My Drive\Transcriptions" --audio-dir "i:\Record" --report rename_and_corrected_transcript_report.json --retry-backoff-base 2
+```
+
+This will:
+
+- Propose better audio filenames.
+- Fix transcript JSON `text` (basic corrections).
+- Produce a JSON report of proposed changes.
+
+---
+
+## 4. Same as step 3 - Generate a Corrections Report
+
+Run the script to generate a detailed corrections report:
+
+```bash
+python i:\whisper-acft\rename_and_correct_transcripts_with_groq.py --transcripts-dir "i:\P2GPT_google_drive\My Drive\Transcriptions" --audio-dir "i:\Record" --report rename_and_corrected_transcript_report.json --retry-backoff-base 2
+```
+
+**What this report includes:**
+
+- Original audio name
+- Proposed new audio name
+- Transcript file path
+- Corrected transcript text (including minor/grammatical and ASR corrections)
+
+---
+
+## 5. Apply Corrections from the Report
+
+Use the report to update the actual JSON transcripts.
+
+- Script: `apply_corrections_from_report.py`
+
+Example (adjust paths as needed):
+
+```bash
+python "i:\whisper-acft\apply_corrections_from_report.py" ^
+  --report "i:\whisper-acft\rename_and_corrected_transcript_report.json" ^
+  --transcripts-dir "I:\P2GPT_google_drive\My Drive\Transcriptions" ^
+  --output-dir "I:\P2GPT_google_drive\My Drive\Transcriptions_corrected"
+```
+
+**Result:**
+
+- Cleaned / corrected transcript JSON files in:  
+  `I:\P2GPT_google_drive\My Drive\Transcriptions_corrected`
+
+---
+
+## 6. Create Subtitle Files (VTT & ASS)
+
+We now convert corrected JSON transcripts into subtitle formats for manual editing.
+[CHATGPT conversation](https://chatgpt.com/c/694ec078-b8ac-8322-9c70-74019044d581)
+
+- Script: `convert_json_transcripts_to_vtt_and_ass.py`
+
+Example:
+
+```bash
+python "i:\whisper-acft\convert_json_transcripts_to_vtt_and_ass.py" ^
+  --input-dir "I:\P2GPT_google_drive\My Drive\Transcriptions_corrected" ^
+  --output-dir "I:\P2GPT_google_drive\My Drive\Transcriptions_corrected" ^
+  --overwrite ^
+  --workers 4 ^
+  --write-ass
+```
+
+**This will:**
+
+- Generate `.vtt` and `.ass` subtitle files.
+- One subtitle file per transcript JSON.
+
+> In future steps, `.ass` files will be opened and edited with [Subtitle Edit].
+
+---
+
+## 7. Manually Edit Subtitle Files
+
+This is the tedious (but high-quality) manual correction phase.
+
+1. **Copy subtitle files**  
+   Copy the `.ass` (or `.vtt`) files into the directory that contains the **matching** audio files (same base filenames).
+
+2. **Open with Subtitle Edit**
+   - Launch Subtitle Edit.
+   - Open the subtitle file (it should automatically load the corresponding audio file).
+
+3. **Edit and save**
+   - Correct text, timing, and formatting as needed.
+   - Ensure auto-save is enabled or manually save frequently.
+   - Repeat for all subtitle files.
+
+**Goal:**  
+High-quality, human-validated subtitles aligned to audio.
+
+---
+
+## 8. Sync Back Subtitle Changes to JSON Transcripts
+
+Once subtitles are manually edited, those corrections should be applied back to the JSON transcripts.
+
+> Placeholder: this step depends on your tooling/script.  
+> The goal is to:
+> - Read the edited subtitle files (ASS/VTT).
+> - Align them with the existing JSON transcripts.
+> - Replace/update segment texts and timings accordingly.
+
+(Insert or implement the script/tool that performs this sync.)
+
+---
+
+## 9. Chunk Audio for Training (Sentence-Level Segments)
+
+Use the chunking notebook to create training chunks and a manifest.
+
+- Notebook:  
+  `I:\P2GPT_google_drive\My Drive\Colab Notebooks\Chunking_for_Whisper_training_sentences.ipynb`
+
+### 9.1. Create a Manifest File
+
+The chunking process typically needs a **manifest** that references:
+
+- Audio file paths
+- Corresponding `transcript.json` files
+- Segment `start`/`end` timestamps and text
+
+The notebook will:
+
+1. Read the corrected transcript JSONs.
+2. Use per-sentence (or per-segment) `start` and `end` times.
+3. Generate a manifest file describing all segments.
+
+### 9.2. Perform Chunking
+
+Using the manifest, the notebook will:
+
+- Slice audio into chunks based on segment start/end times.
+- Produce many smaller audio files suitable for training.
+
+---
+
+## 10. If training for a particular speaker, filter by speaker
+
+Using the script `sort_audio_files_by_speaker.py`, we can filter the audio files by speaker.
+
+Usage:
+```bash
+python sort_audio_files_by_speaker.py ^
+  --in "I:\Record_chunks" ^
+  --ref "I:\Record_harsha\CRISPR Data analysis final (slow paced) - Dr Sri Harsha Guthikonda.mp3" ^
+  --target_out "I:\Record_chunks_harsha" ^
+  --other_out "I:\Record_chunks_other" ^
+  --dry_run ^
+  --state_file "scoring_chunks_for_harsha_voice_state.json"
+```
+
+The script will:
+
+- Compare each chunk in `I:\Record_chunks` against the reference voice file.
+- Write chunks that match the reference speaker into `I:\Record_chunks_harsha`.
+- Write non-matching chunks into `I:\Record_chunks_other`.
+
+Remove `--dry_run` once you are happy with the selection and want the files to actually be copied/moved.
+
+the scores and file names will be in this file after dryrun = (speaker_sort_scores.csv)
+
+---
+
+## 11. Train the Whisper Model
+
+Once chunks and manifest are ready, run the training notebook.
+
+- Notebook:  
+  `I:\P2GPT_google_drive\My Drive\Colab Notebooks\Whisper_training_only.ipynb`
+
+**Notes:**
+
+- Strongly recommended: use a GPU (Colab, local GPU, or cloud).  
+- CPU-only training is possible but very slow.
+
+---
+
+## 12. Evaluate the Trained Model
+
+Finally, evaluate checkpoints from training.
+
+- Script: `local_eval.py`  
+  Example path:  
+  `i:\whisper-acft\local_eval.py`
+
+You can:
+
+- Compare different checkpoints.
+- Measure WER/CER on your evaluation set.
+- Usually, later checkpoints perform best, but you should verify empirically.
+
+
+
+
+---
+&nbsp;
+
+&nbsp;
+---
+
+
+>>>>>>> save-bin
 # Finetuning Whisper for dynamic audio context robustness
 
 ![Result of process](result.png)

@@ -1,0 +1,218 @@
+[
+  {
+    "checkpoint": "base_model",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 1.3703291416168213
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.6960451602935791
+      }
+    ],
+    "avg_processing_time": 1.0331871509552002,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000000",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.7482893466949463
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.5896692276000977
+      }
+    ],
+    "avg_processing_time": 0.668979287147522,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000001",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.563133716583252
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.5195634365081787
+      }
+    ],
+    "avg_processing_time": 0.5413485765457153,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000002",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.5170118808746338
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.544910192489624
+      }
+    ],
+    "avg_processing_time": 0.5309610366821289,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000003",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.5356795787811279
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.5683844089508057
+      }
+    ],
+    "avg_processing_time": 0.5520319938659668,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000004",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.570899486541748
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.548494815826416
+      }
+    ],
+    "avg_processing_time": 0.559697151184082,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000005",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.470339298248291
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.735936164855957
+      }
+    ],
+    "avg_processing_time": 0.603137731552124,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000006",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.4870188236236572
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.585756778717041
+      }
+    ],
+    "avg_processing_time": 0.5363878011703491,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000007",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.5017449855804443
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.8046286106109619
+      }
+    ],
+    "avg_processing_time": 0.6531867980957031,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000008",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.5087590217590332
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.7296645641326904
+      }
+    ],
+    "avg_processing_time": 0.6192117929458618,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000009",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.49193668365478516
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you. Ask what you can do for your country.",
+        "processing_time": 0.5241601467132568
+      }
+    ],
+    "avg_processing_time": 0.508048415184021,
+    "total_files": 2,
+    "status": "success"
+  },
+  {
+    "checkpoint": "i:\\checkpoints_partialctx\\model_epoch_000010",
+    "results": [
+      {
+        "file": "jfk.mp3",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.4665491580963135
+      },
+      {
+        "file": "jfk.wav",
+        "transcription": " And so my fellow Americans ask not what your country can do for you, ask what you can do for your country.",
+        "processing_time": 0.5302627086639404
+      }
+    ],
+    "avg_processing_time": 0.49840593338012695,
+    "total_files": 2,
+    "status": "success"
+  }
+]

@@ -1,0 +1,393 @@
+{
+  "meta": {
+    "updated_at": "2025-12-28T16:53:12",
+    "threshold": 0.8,
+    "margin": 0.05,
+    "target_sr": 16000,
+    "model_id": "speechbrain/spkrec-ecapa-voxceleb",
+    "device": "cuda",
+    "segment_seconds": 10.0,
+    "segments": 3,
+    "allow_ffmpeg_fallback": true,
+    "write_all": true,
+    "write_selected_only": false,
+    "force_channel": -1,
+    "print_sims": true,
+    "write_raw_channels": true,
+    "ctc_h_max": 3.0,
+    "ctc_beta": 1.2,
+    "ctc_estimation_top_db": 6.0,
+    "specsub_beta": 1.3,
+    "specsub_floor": 0.05,
+    "enable_deepfilter": true,
+    "enable_denoiser": true,
+    "denoiser_preset": "dns64"
+  },
+  "decisions": {
+    "I:\\Record\\A Teenager's Struggle_ Navigating Sexuality and Mental Health.m4a": {
+      "channel_index": 1,
+      "similarity": 0.47604647278785706,
+      "second_similarity": 0.4660106599330902,
+      "margin": 0.010035812854766846,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\A Teenager's Struggle_ Navigating Sexuality and Mental Health.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\A Teenager's Struggle_ Navigating Sexuality and Mental Health.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\A Teenager's Struggle_ Navigating Sexuality and Mental Health.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\A Teenager's Struggle_ Navigating Sexuality and Mental Health.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\A Teenager's Struggle_ Navigating Sexuality and Mental Health.wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\A Teenager's Struggle_ Navigating Sexuality and Mental Health.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1764369507.0,
+      "sims_by_channel": [
+        0.4660106599330902,
+        0.47604647278785706
+      ],
+      "error": ""
+    },
+    "I:\\Record\\abdominal aortic aneurysm counseling telephone.m4a": {
+      "channel_index": 1,
+      "similarity": 0.40168410539627075,
+      "second_similarity": 0.38865190744400024,
+      "margin": 0.013032197952270508,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\abdominal aortic aneurysm counseling telephone.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\abdominal aortic aneurysm counseling telephone.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\abdominal aortic aneurysm counseling telephone.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\abdominal aortic aneurysm counseling telephone.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\abdominal aortic aneurysm counseling telephone.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1757790335.0,
+      "sims_by_channel": [
+        0.38865190744400024,
+        0.40168410539627075
+      ],
+      "error": ""
+    },
+    "I:\\Record\\Abnormal liver function tests Gilbert syndrome..m4a": {
+      "channel_index": 1,
+      "similarity": 0.464704692363739,
+      "second_similarity": 0.4635992646217346,
+      "margin": 0.0011054277420043945,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\Abnormal liver function tests Gilbert syndrome..wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\Abnormal liver function tests Gilbert syndrome..wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\Abnormal liver function tests Gilbert syndrome..wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\Abnormal liver function tests Gilbert syndrome..wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\Abnormal liver function tests Gilbert syndrome..wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\Abnormal liver function tests Gilbert syndrome..wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1760032322.0,
+      "sims_by_channel": [
+        0.4635992646217346,
+        0.464704692363739
+      ],
+      "error": ""
+    },
+    "I:\\Record\\acne patient requesting isotretinoin topical..m4a": {
+      "channel_index": 1,
+      "similarity": 0.4509449303150177,
+      "second_similarity": 0.4482537508010864,
+      "margin": 0.0026911795139312744,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\acne patient requesting isotretinoin topical..wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\acne patient requesting isotretinoin topical..wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\acne patient requesting isotretinoin topical..wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\acne patient requesting isotretinoin topical..wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\acne patient requesting isotretinoin topical..wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\acne patient requesting isotretinoin topical..wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1760034488.0,
+      "sims_by_channel": [
+        0.4482537508010864,
+        0.4509449303150177
+      ],
+      "error": ""
+    },
+    "I:\\Record\\Acute appendicitis.m4a": {
+      "channel_index": 1,
+      "similarity": 0.3273225426673889,
+      "second_similarity": 0.28533029556274414,
+      "margin": 0.041992247104644775,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\Acute appendicitis.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\Acute appendicitis.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\Acute appendicitis.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\Acute appendicitis.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\Acute appendicitis.wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\Acute appendicitis.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1756145424.0,
+      "sims_by_channel": [
+        0.28533029556274414,
+        0.3273225426673889
+      ],
+      "error": ""
+    },
+    "I:\\Record\\acute bacterial tonsillitis.m4a": {
+      "channel_index": 1,
+      "similarity": 0.3792101740837097,
+      "second_similarity": 0.37337422370910645,
+      "margin": 0.0058359503746032715,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\acute bacterial tonsillitis.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\acute bacterial tonsillitis.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\acute bacterial tonsillitis.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\acute bacterial tonsillitis.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\acute bacterial tonsillitis.wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\acute bacterial tonsillitis.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1763574540.0,
+      "sims_by_channel": [
+        0.37337422370910645,
+        0.3792101740837097
+      ],
+      "error": ""
+    },
+    "I:\\Record\\Acute gastroenteritis..m4a": {
+      "channel_index": 0,
+      "similarity": 0.5053433179855347,
+      "second_similarity": 0.46961989998817444,
+      "margin": 0.03572341799736023,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\Acute gastroenteritis..wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\Acute gastroenteritis..wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\Acute gastroenteritis..wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\Acute gastroenteritis..wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\Acute gastroenteritis..wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1763660042.0,
+      "sims_by_channel": [
+        0.5053433179855347,
+        0.46961989998817444
+      ],
+      "error": ""
+    },
+    "I:\\Record\\Addressing Patient Concerns About Post-Surgery Infection.m4a": {
+      "channel_index": 1,
+      "similarity": 0.4100353717803955,
+      "second_similarity": 0.40426895022392273,
+      "margin": 0.005766421556472778,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\Addressing Patient Concerns About Post-Surgery Infection.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\Addressing Patient Concerns About Post-Surgery Infection.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\Addressing Patient Concerns About Post-Surgery Infection.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\Addressing Patient Concerns About Post-Surgery Infection.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\Addressing Patient Concerns About Post-Surgery Infection.wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\Addressing Patient Concerns About Post-Surgery Infection.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1764608140.0,
+      "sims_by_channel": [
+        0.40426895022392273,
+        0.4100353717803955
+      ],
+      "error": ""
+    },
+    "I:\\Record\\Addressing Weight Loss and Depression Concerns.m4a": {
+      "channel_index": 0,
+      "similarity": 0.5295625925064087,
+      "second_similarity": 0.5191896557807922,
+      "margin": 0.010372936725616455,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\Addressing Weight Loss and Depression Concerns.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\Addressing Weight Loss and Depression Concerns.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\Addressing Weight Loss and Depression Concerns.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\Addressing Weight Loss and Depression Concerns.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\Addressing Weight Loss and Depression Concerns.wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\Addressing Weight Loss and Depression Concerns.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1764254919.0,
+      "sims_by_channel": [
+        0.5295625925064087,
+        0.5191896557807922
+      ],
+      "error": ""
+    },
+    "I:\\Record\\Age-related macular degeneration.m4a": {
+      "channel_index": 1,
+      "similarity": 0.4601854681968689,
+      "second_similarity": 0.3922201991081238,
+      "margin": 0.06796526908874512,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\Age-related macular degeneration.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\Age-related macular degeneration.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\Age-related macular degeneration.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\Age-related macular degeneration.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\Age-related macular degeneration.wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\Age-related macular degeneration.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1759931791.0,
+      "sims_by_channel": [
+        0.3922201991081238,
+        0.4601854681968689
+      ],
+      "error": ""
+    },
+    "I:\\Record\\alcohol colleague FY2.m4a": {
+      "channel_index": 0,
+      "similarity": 0.48022955656051636,
+      "second_similarity": 0.4508128762245178,
+      "margin": 0.029416680335998535,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\alcohol colleague FY2.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\alcohol colleague FY2.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\alcohol colleague FY2.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\alcohol colleague FY2.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\alcohol colleague FY2.wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\alcohol colleague FY2.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1758982084.0,
+      "sims_by_channel": [
+        0.48022955656051636,
+        0.4508128762245178
+      ],
+      "error": ""
+    },
+    "I:\\Record\\Alcohol colleague.m4a": {
+      "channel_index": 0,
+      "similarity": 0.43740302324295044,
+      "second_similarity": 0.40919721126556396,
+      "margin": 0.028205811977386475,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\Alcohol colleague.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\Alcohol colleague.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\Alcohol colleague.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\Alcohol colleague.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\Alcohol colleague.wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\Alcohol colleague.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1757614490.0,
+      "sims_by_channel": [
+        0.43740302324295044,
+        0.40919721126556396
+      ],
+      "error": ""
+    },
+    "I:\\Record\\angry son because mother was misdiagnosed with pneumonia instead of cancer.m4a": {
+      "channel_index": 1,
+      "similarity": 0.43173375725746155,
+      "second_similarity": 0.3822386860847473,
+      "margin": 0.04949507117271423,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\angry son because mother was misdiagnosed with pneumonia instead of cancer.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\angry son because mother was misdiagnosed with pneumonia instead of cancer.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\angry son because mother was misdiagnosed with pneumonia instead of cancer.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\angry son because mother was misdiagnosed with pneumonia instead of cancer.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\angry son because mother was misdiagnosed with pneumonia instead of cancer.wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\angry son because mother was misdiagnosed with pneumonia instead of cancer.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1761928466.0,
+      "sims_by_channel": [
+        0.3822386860847473,
+        0.43173375725746155
+      ],
+      "error": ""
+    },
+    "I:\\Record\\ankylosing spondylitis.m4a": {
+      "channel_index": 1,
+      "similarity": 0.5854441523551941,
+      "second_similarity": 0.5644007325172424,
+      "margin": 0.02104341983795166,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\ankylosing spondylitis.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\ankylosing spondylitis.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\ankylosing spondylitis.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\ankylosing spondylitis.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\ankylosing spondylitis.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1763588482.0,
+      "sims_by_channel": [
+        0.5644007325172424,
+        0.5854441523551941
+      ],
+      "error": ""
+    },
+    "I:\\Record\\anorexia nervosa.m4a": {
+      "channel_index": 1,
+      "similarity": 0.4717940092086792,
+      "second_similarity": 0.41070014238357544,
+      "margin": 0.06109386682510376,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\anorexia nervosa.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\anorexia nervosa.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\anorexia nervosa.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\anorexia nervosa.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\anorexia nervosa.wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\anorexia nervosa.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1763391566.0,
+      "sims_by_channel": [
+        0.41070014238357544,
+        0.4717940092086792
+      ],
+      "error": ""
+    },
+    "I:\\Record\\Antibiotic request traveling to Thailand.m4a": {
+      "channel_index": 1,
+      "similarity": 0.6026912927627563,
+      "second_similarity": 0.5875512361526489,
+      "margin": 0.015140056610107422,
+      "accepted": false,
+      "output_paths": {
+        "raw_channels_dir": "I:\\Record_Channel_selected\\__raw_channels",
+        "selected": "I:\\Record_Channel_selected\\00_selected\\Antibiotic request traveling to Thailand.wav",
+        "ctc_fixedH": "I:\\Record_Channel_selected\\10_ctc_fixedH\\Antibiotic request traveling to Thailand.wav",
+        "ctc_fixedH_aggressive": "I:\\Record_Channel_selected\\15_ctc_fixedH_aggressive\\Antibiotic request traveling to Thailand.wav",
+        "ctc_plus_specsub": "I:\\Record_Channel_selected\\18_ctc_fixedH_plus_specsub\\Antibiotic request traveling to Thailand.wav",
+        "ctc_aggr_plus_specsub": "I:\\Record_Channel_selected\\19_ctc_fixedH_aggr_plus_specsub\\Antibiotic request traveling to Thailand.wav",
+        "deepfilter": "I:\\Record_Channel_selected\\20_df_deepfilter\\Antibiotic request traveling to Thailand.wav"
+      },
+      "num_channels": 2,
+      "input_mtime": 1759430235.0,
+      "sims_by_channel": [
+        0.5875512361526489,
+        0.6026912927627563
+      ],
+      "error": ""
+    }
+  }
+}

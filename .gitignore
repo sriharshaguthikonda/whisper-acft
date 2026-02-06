@@ -1,0 +1,26 @@
+# Large model files (>100MB GitHub limit)
+*.pt
+*.bin
+*.safetensors
+*.zip
+
+# Model directories
+ggml_output/
+gguf_output/
+model_train-tiny3_extracted/
+Futo_original_model/
+
+# Subrepositories
+whisper.cpp/
+whisper/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+
+# Virtual environments
+venv/
+.venv/
+env/
+.env

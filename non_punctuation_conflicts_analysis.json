@@ -1,0 +1,105 @@
+{
+  "priority_files_analyzed": [
+    "vascular dementia sister.json",
+    "New recording 223.json",
+    "New recording 193.json",
+    "New recording 265.json",
+    "New recording 126.json"
+  ],
+  "total_non_punctuation_conflicts": 393,
+  "category_breakdown": {
+    "removed_words": 15,
+    "word_changes": 372,
+    "added_words": 6
+  },
+  "problematic_files": {
+    "vascular dementia sister.json": 7,
+    "New recording 223.json": 103,
+    "New recording 193.json": 97,
+    "New recording 265.json": 94,
+    "New recording 126.json": 92
+  },
+  "examples": [
+    {
+      "file": "vascular dementia sister.json",
+      "segment": -1,
+      "category": "removed_words",
+      "reason": "file_word_tokens_changed",
+      "old_text": "40 year old woman named Julie Coleman has a concern after her sister has been re...",
+      "new_text": "40 year old woman named Julie Coleman has a concern after her sister has been re..."
+    },
+    {
+      "file": "vascular dementia sister.json",
+      "segment": 3,
+      "category": "removed_words",
+      "reason": "word_count_changed;word_tokens_changed",
+      "old_text": "every 15 minutes for the first time.",
+      "new_text": "minutes for the first time."
+    },
+    {
+      "file": "vascular dementia sister.json",
+      "segment": 96,
+      "category": "removed_words",
+      "reason": "word_count_changed;word_tokens_changed",
+      "old_text": "living I just work as an office assistant doctor okay how's everything at home I...",
+      "new_text": "I just work as an office assistant, doctor. Okay, how's everything at home? I li..."
+    },
+    {
+      "file": "vascular dementia sister.json",
+      "segment": 115,
+      "category": "word_changes",
+      "reason": "word_tokens_changed",
+      "old_text": "Yeah so you are saying I don have it I am saying it I am saying that it is highl...",
+      "new_text": "Yeah, so you are saying I don't have it. I am saying it, I am saying that it is ..."
+    },
+    {
+      "file": "vascular dementia sister.json",
+      "segment": 124,
+      "category": "removed_words",
+      "reason": "word_count_changed;word_tokens_changed",
+      "old_text": "it? I'm afraid I cannot do it right now. I'll discuss it with the neurologist an...",
+      "new_text": "I'm afraid I cannot do it right now. I'll discuss it with the neurologist and"
+    },
+    {
+      "file": "vascular dementia sister.json",
+      "segment": 129,
+      "category": "removed_words",
+      "reason": "word_count_changed;word_tokens_changed",
+      "old_text": "shit you need to know about vascular dementia at least a little bit yeah",
+      "new_text": "you need to know about vascular dementia at least a little bit."
+    },
+    {
+      "file": "vascular dementia sister.json",
+      "segment": 140,
+      "category": "removed_words",
+      "reason": "word_count_changed;word_tokens_changed",
+      "old_text": "tell me",
+      "new_text": "me,"
+    },
+    {
+      "file": "New recording 223.json",
+      "segment": -1,
+      "category": "added_words",
+      "reason": "file_word_tokens_changed",
+      "old_text": "You are in FI2. Miss Maria Peterson, age 26, has come to the clinic. She is havi...",
+      "new_text": "You are in FI2. Miss Maria Peterson, age 26, has come to the clinic. She is havi..."
+    },
+    {
+      "file": "New recording 223.json",
+      "segment": 31,
+      "category": "word_changes",
+      "reason": "word_tokens_changed",
+      "old_text": "I tried lot of cleansers",
+      "new_text": "I tried a lot of"
+    },
+    {
+      "file": "New recording 223.json",
+      "segment": 32,
+      "category": "word_changes",
+      "reason": "word_tokens_changed",
+      "old_text": "and I tried lot of",
+      "new_text": "cleansers and I tried a"
+    }
+  ],
+  "analysis_date": "2026-02-06T03:20:39.647735"
+}
