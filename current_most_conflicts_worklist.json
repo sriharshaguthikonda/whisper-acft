@@ -1,0 +1,56 @@
+{
+  "top_20_conflicts": {
+    "New recording 370.json": 124,
+    "New recording 150.json": 112,
+    "vascular dementia sister.json": 105,
+    "New recording 223.json": 105,
+    "New recording 193.json": 97,
+    "New recording 265.json": 94,
+    "New recording 126.json": 92,
+    "alcohol colleague FY2.json": 76,
+    "New recording 438.json": 76,
+    "New recording 387.json": 72,
+    "New recording 290.json": 71,
+    "New recording 477.json": 69,
+    "New recording 379.json": 69,
+    "New recording 18.json": 68,
+    "New recording 313.json": 67,
+    "New recording 426.json": 65,
+    "New recording 194.json": 65,
+    "New recording 428.json": 63,
+    "Teenage pregnancy vomiting..json": 61,
+    "New recording 451.json": 61
+  },
+  "top_5_priority": [
+    "New recording 370.json",
+    "New recording 150.json",
+    "vascular dementia sister.json",
+    "New recording 223.json",
+    "New recording 193.json"
+  ],
+  "analysis_date": "2026-02-06T03:18:57.808061",
+  "total_conflict_files": 97,
+  "total_conflict_segments": 12635,
+  "previous_comparison": {
+    "New recording 386.json": {
+      "previous": 186,
+      "current": 0
+    },
+    "New recording 218.json": {
+      "previous": 146,
+      "current": 0
+    },
+    "New recording 324.json": {
+      "previous": 136,
+      "current": 0
+    },
+    "New recording 370.json": {
+      "previous": 124,
+      "current": 0
+    },
+    "New recording 150.json": {
+      "previous": 114,
+      "current": 0
+    }
+  }
+}
