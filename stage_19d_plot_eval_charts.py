@@ -23,7 +23,8 @@ I:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\stage_19d_plot_eval_c
 Notes
 -----
 - No seaborn.
-- No explicit colour choices.
+- Dark theme plots (explicit styling applied).
+- Heatmaps use VIBGYOR; red = worse, violet = better.
 - One plot per figure (no subplots).
 """
 
@@ -37,6 +38,7 @@ import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 
+HEATMAP_CMAP = "rainbow_r"  # VIBGYOR with red = low/bad, violet = high/good
 
 def _beep() -> None:
     try:
@@ -55,6 +57,33 @@ def short_model_name(s: str) -> str:
     for char in ['<', '>', ':', '"', '|', '?', '*']:
         name = name.replace(char, '_')
     return name
+
+
+def display_model_name(s: str, max_len: int = 24) -> str:
+    """Short, human-friendly label for plots."""
+    import re
+
+    base = short_model_name(s)
+    match = re.search(r"model_epoch_(\d+)", base)
+    if match:
+        return f"ep{int(match.group(1)):06d}"
+    if len(base) <= max_len:
+        return base
+    keep = max(4, (max_len - 3) // 2)
+    return f"{base[:keep]}...{base[-keep:]}"
+
+
+def make_unique_labels(labels: list[str]) -> list[str]:
+    seen: dict[str, int] = {}
+    out: list[str] = []
+    for lab in labels:
+        if lab not in seen:
+            seen[lab] = 1
+            out.append(lab)
+        else:
+            seen[lab] += 1
+            out.append(f"{lab}-{seen[lab]}")
+    return out
 
 
 def get_epoch_number(model_name: str) -> int:
@@ -78,7 +107,7 @@ def zscore(series: pd.Series) -> pd.Series:
 def save_fig(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
-    plt.savefig(path, dpi=200)
+    plt.savefig(path, dpi=200, facecolor=plt.rcParams.get("figure.facecolor", "black"))
     plt.close()
 
 
@@ -113,8 +142,9 @@ def ranked_barh(
     out_path: Path,
     higher_is_better: bool = True,
     top_k: int | None = None,
+    label_col: str = "model_short",
 ) -> None:
-    s = df[["model_short", metric]].copy()
+    s = df[[label_col, metric]].copy()
     s[metric] = pd.to_numeric(s[metric], errors="coerce")
     s = s.dropna()
     if s.empty:
@@ -123,7 +153,7 @@ def ranked_barh(
     if top_k:
         s = s.head(top_k)
     plt.figure(figsize=(9, max(4, 0.35 * len(s))))
-    plt.barh(s["model_short"], s[metric])
+    plt.barh(s[label_col], s[metric])
     plt.xlabel(xlabel)
     plt.title(title)
     plt.gca().invert_yaxis()
@@ -134,6 +164,7 @@ def boxplot_by_model(
     df_long: pd.DataFrame,
     metric: str,
     model_order: list[str],
+    label_map: dict[str, str],
     title: str,
     xlabel: str,
     out_path: Path,
@@ -149,7 +180,7 @@ def boxplot_by_model(
         if len(vals) == 0:
             continue
         data.append(vals.to_numpy())
-        labels.append(m)
+        labels.append(label_map.get(m, m))
     if not data:
         return
     plt.figure(figsize=(9, max(4, 0.3 * len(labels))))
@@ -167,6 +198,7 @@ def bump_rank_chart(
     out_path: Path,
     higher_is_better: bool = True,
     top_models: list[str] | None = None,
+    label_map: dict[str, str] | None = None,
 ) -> None:
     if df_long.empty:
         return
@@ -193,7 +225,8 @@ def bump_rank_chart(
     x = np.arange(len(cond_ids))
     plt.figure(figsize=(10, 6))
     for model in ranks.index:
-        plt.plot(x, ranks.loc[model].values, marker="o", label=model)
+        label = label_map.get(model, model) if label_map else model
+        plt.plot(x, ranks.loc[model].values, marker="o", label=label)
     plt.gca().invert_yaxis()
     plt.xticks(x, cond_labels, rotation=30, ha="right")
     plt.ylabel("Rank (1 = best)")
@@ -207,6 +240,7 @@ def parallel_scorecard(
     metrics: list[tuple[str, str, bool]],
     top_models: list[str],
     out_path: Path,
+    label_map: dict[str, str] | None = None,
 ) -> None:
     if df.empty:
         return
@@ -222,7 +256,8 @@ def parallel_scorecard(
     x = np.arange(len(labels))
     plt.figure(figsize=(10, 6))
     for model in norm_df.index:
-        plt.plot(x, norm_df.loc[model].values, marker="o", label=model)
+        label = label_map.get(model, model) if label_map else model
+        plt.plot(x, norm_df.loc[model].values, marker="o", label=label)
     plt.xticks(x, labels, rotation=30, ha="right")
     plt.ylim(0, 1)
     plt.ylabel("Normalized score (1 = best)")
@@ -271,6 +306,7 @@ def build_summary_df(models: list[dict]) -> pd.DataFrame:
 
     # Add epoch number for sorting
     df["epoch_number"] = df["model"].apply(get_epoch_number)
+    df["model_label"] = make_unique_labels(df["model"].apply(display_model_name).tolist())
     
     # Composite ranking: separation + robustness, penalise target WER
     df["separation_score"] = (
@@ -324,6 +360,7 @@ def heatmap_for_model(
     metric_key: str,
     title_suffix: str,
     cbar_label: str,
+    display_label: str | None = None,
 ) -> None:
     conds = data.get("conditions") or []
     snr_vals = sorted({float(c["snr_db"]) for c in conds})
@@ -346,14 +383,15 @@ def heatmap_for_model(
         return
 
     ms = short_model_name(model_entry.get("model", "unknown"))
+    label = display_label or ms
     plt.figure(figsize=(8, 6))
-    plt.imshow(grid, aspect="auto", interpolation="nearest")
+    plt.imshow(grid, aspect="auto", interpolation="nearest", cmap=HEATMAP_CMAP)
     plt.colorbar(label=cbar_label)
     plt.yticks(range(len(snr_vals)), [f"{v:+g} dB" for v in snr_vals])
     plt.xticks(range(len(ov_vals)), [f"{v:.2f}" for v in ov_vals])
     plt.xlabel("Overlap placement ratio (0=start, 1=end)")
     plt.ylabel("SNR (TARGET over OTHER)")
-    plt.title(f"{ms}: {title_suffix}")
+    plt.title(f"{label}: {title_suffix}")
     save_fig(out_dir / f"heatmap_{metric_key}__{ms}.png")
 
 
@@ -367,13 +405,35 @@ def main() -> None:
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
+    # Dark theme for all plots
+    plt.style.use("dark_background")
+    plt.rcParams.update(
+        {
+            "figure.facecolor": "#111316",
+            "axes.facecolor": "#111316",
+            "savefig.facecolor": "#111316",
+            "savefig.edgecolor": "#111316",
+            "axes.edgecolor": "#cccccc",
+            "axes.labelcolor": "#e6e6e6",
+            "xtick.color": "#e6e6e6",
+            "ytick.color": "#e6e6e6",
+            "text.color": "#e6e6e6",
+            "grid.color": "#444444",
+            "grid.alpha": 0.3,
+            "legend.facecolor": "#111316",
+            "legend.edgecolor": "#444444",
+        }
+    )
+
     data = json.loads(in_path.read_text(encoding="utf-8"))
 
     df = build_summary_df(data.get("models") or [])
+    label_map = dict(zip(df["model_short"], df["model_label"]))
     summary_csv = out_dir / "model_summary.csv"
     df[
         [
             "model",
+            "model_label",
             "samples",
             "win_rate_target_closer",
             "avg_margin_other_minus_target",
@@ -389,7 +449,7 @@ def main() -> None:
 
     # Bar charts
     plt.figure(figsize=(10, 5))
-    plt.bar(df["model_short"], df["win_rate_target_closer"])
+    plt.bar(df["model_label"], df["win_rate_target_closer"])
     plt.ylabel("Win rate: P(WER_target < WER_other)")
     plt.xlabel("Model")
     plt.xticks(rotation=30, ha="right")
@@ -397,7 +457,7 @@ def main() -> None:
     save_fig(out_dir / "01_overall_win_rate.png")
 
     plt.figure(figsize=(10, 5))
-    plt.bar(df["model_short"], df["avg_margin_other_minus_target"])
+    plt.bar(df["model_label"], df["avg_margin_other_minus_target"])
     plt.ylabel("Avg margin (WER_other - WER_target)")
     plt.xlabel("Model")
     plt.xticks(rotation=30, ha="right")
@@ -405,7 +465,7 @@ def main() -> None:
     save_fig(out_dir / "02_overall_margin.png")
 
     plt.figure(figsize=(10, 5))
-    plt.bar(df["model_short"], df["wer_micro_target"])
+    plt.bar(df["model_label"], df["wer_micro_target"])
     plt.ylabel("WER vs TARGET transcript (micro)")
     plt.xlabel("Model")
     plt.xticks(rotation=30, ha="right")
@@ -420,7 +480,7 @@ def main() -> None:
     plt.title("Pareto view: accuracy vs separation")
     for _, r in df.iterrows():
         plt.annotate(
-            r["model_short"],
+            r["model_label"],
             (float(r["wer_micro_target"]), float(r["avg_margin_other_minus_target"])),
             fontsize=8,
         )
@@ -434,6 +494,7 @@ def main() -> None:
         xlabel="Separation score",
         out_path=out_dir / "07_leaderboard_separation_score.png",
         higher_is_better=True,
+        label_col="model_label",
     )
     ranked_barh(
         df,
@@ -442,6 +503,7 @@ def main() -> None:
         xlabel="Worst-case win rate",
         out_path=out_dir / "08_worst_case_win_rate.png",
         higher_is_better=True,
+        label_col="model_label",
     )
     ranked_barh(
         df,
@@ -450,6 +512,7 @@ def main() -> None:
         xlabel="Worst-case margin (WER_other - WER_target)",
         out_path=out_dir / "09_worst_case_margin.png",
         higher_is_better=True,
+        label_col="model_label",
     )
 
     # SNR curves
@@ -464,7 +527,7 @@ def main() -> None:
         plt.figure(figsize=(8, 6))
         for ms in df_snr["model_short"].unique():
             s = df_snr[df_snr["model_short"] == ms]
-            plt.plot(s["snr_db"], s["win_rate"], marker="o", label=ms)
+            plt.plot(s["snr_db"], s["win_rate"], marker="o", label=label_map.get(ms, ms))
         plt.xlabel("SNR (TARGET over OTHER), dB")
         plt.ylabel("Mean win rate (over overlaps)")
         plt.title("Win rate vs SNR (mean across overlaps)")
@@ -474,7 +537,7 @@ def main() -> None:
         plt.figure(figsize=(8, 6))
         for ms in df_snr["model_short"].unique():
             s = df_snr[df_snr["model_short"] == ms]
-            plt.plot(s["snr_db"], s["margin"], marker="o", label=ms)
+            plt.plot(s["snr_db"], s["margin"], marker="o", label=label_map.get(ms, ms))
         plt.xlabel("SNR (TARGET over OTHER), dB")
         plt.ylabel("Mean margin (WER_other - WER_target)")
         plt.title("Separation margin vs SNR (mean across overlaps)")
@@ -490,7 +553,7 @@ def main() -> None:
         plt.figure(figsize=(8, 6))
         for ms in df_ov["model_short"].unique():
             s = df_ov[df_ov["model_short"] == ms]
-            plt.plot(s["overlap"], s["win_rate"], marker="o", label=ms)
+            plt.plot(s["overlap"], s["win_rate"], marker="o", label=label_map.get(ms, ms))
         plt.xlabel("Overlap placement ratio (0=start, 1=end)")
         plt.ylabel("Mean win rate (over SNRs)")
         plt.title("Win rate vs overlap (mean across SNRs)")
@@ -500,7 +563,7 @@ def main() -> None:
         plt.figure(figsize=(8, 6))
         for ms in df_ov["model_short"].unique():
             s = df_ov[df_ov["model_short"] == ms]
-            plt.plot(s["overlap"], s["margin"], marker="o", label=ms)
+            plt.plot(s["overlap"], s["margin"], marker="o", label=label_map.get(ms, ms))
         plt.xlabel("Overlap placement ratio (0=start, 1=end)")
         plt.ylabel("Mean margin (WER_other - WER_target)")
         plt.title("Separation margin vs overlap (mean across SNRs)")
@@ -511,6 +574,7 @@ def main() -> None:
             df_long,
             metric="win_rate",
             model_order=df["model_short"].tolist(),
+            label_map=label_map,
             title="Win-rate distribution across conditions",
             xlabel="Win rate (higher is better)",
             out_path=out_dir / "12_boxplot_winrate_by_condition.png",
@@ -519,6 +583,7 @@ def main() -> None:
             df_long,
             metric="margin",
             model_order=df["model_short"].tolist(),
+            label_map=label_map,
             title="Margin distribution across conditions",
             xlabel="Margin (WER_other - WER_target)",
             out_path=out_dir / "13_boxplot_margin_by_condition.png",
@@ -531,6 +596,7 @@ def main() -> None:
             out_path=out_dir / "14_bump_rank_by_condition.png",
             higher_is_better=True,
             top_models=top_models,
+            label_map=label_map,
         )
         parallel_scorecard(
             df,
@@ -544,6 +610,7 @@ def main() -> None:
             ],
             top_models=top_models,
             out_path=out_dir / "15_scorecard_parallel_coords.png",
+            label_map=label_map,
         )
 
     # Per-model heatmaps
@@ -551,6 +618,8 @@ def main() -> None:
     # Sort models by epoch number for consistent ordering
     models = sorted(models, key=lambda m: get_epoch_number(m.get("model", "")))
     for m in models:
+        ms = short_model_name(m.get("model", "unknown"))
+        label = label_map.get(ms, ms)
         heatmap_for_model(
             data,
             m,
@@ -558,6 +627,7 @@ def main() -> None:
             metric_key="win_rate_target_closer",
             title_suffix="win rate by SNR × overlap",
             cbar_label="Win rate",
+            display_label=label,
         )
         heatmap_for_model(
             data,
@@ -566,6 +636,7 @@ def main() -> None:
             metric_key="avg_margin_other_minus_target",
             title_suffix="margin by SNR × overlap",
             cbar_label="Avg margin (WER_other - WER_target)",
+            display_label=label,
         )
 
     print("Wrote:", out_dir)
