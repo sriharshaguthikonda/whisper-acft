@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 # %% [markdown]
 # # Colab: run stages 1 -> 17 (full script)
 # Paste into Colab: lines starting with `# %%` are cell separators.
@@ -22,31 +21,6 @@ USE_LOCAL_DATA = True                       # copy data locally and run from the
 
 DATA_ROOT = LOCAL_DATA_ROOT if USE_LOCAL_DATA else DATA_ROOT_DRIVE
 
-=======
-# %% [markdown]
-# # Colab: run stages 1 -> 17 (full script)
-# Paste into Colab: lines starting with `# %%` are cell separators.
-
-# %%
-from google.colab import drive
-drive.mount('/content/drive')
-
-# %%
-# ---------- CONFIG (EDIT THESE) ----------
-REPO_URL = "https://github.com/sriharshaguthikonda/whisper-acft.git"
-REPO_DIR_DRIVE = "/content/drive/MyDrive/whisper-acft"
-REPO_DIR_LOCAL = "/content/whisper-acft"
-USE_LOCAL_REPO = True  # keep repo on local disk (avoid Drive writes)
-
-REPO_DIR = REPO_DIR_LOCAL if USE_LOCAL_REPO else REPO_DIR_DRIVE
-
-DATA_ROOT_DRIVE = "/content/drive/MyDrive"  # <-- change to your data root on Drive
-LOCAL_DATA_ROOT = "/content/whisper-data"   # local (faster) copy
-USE_LOCAL_DATA = True                       # copy data locally and run from there
-
-DATA_ROOT = LOCAL_DATA_ROOT if USE_LOCAL_DATA else DATA_ROOT_DRIVE
-
->>>>>>> save-bin
 # Save key manifests back to Drive to survive crashes/disconnects.
 SYNC_IMPORTANT_TO_DRIVE = True
 DRIVE_SYNC_ROOT = f"{DATA_ROOT_DRIVE}/pipeline_checkpoints"
@@ -78,6 +52,10 @@ USE_RCLONE = False
 RCLONE_REMOTE = ""  # e.g. "gdrive:MyDrive"
 RCLONE_TRANSFERS = 8
 
+# Optional: pre-stage1 audio copy using existing tasks_pending.jsonl from Drive
+PRESTAGE1_AUDIO_COPY = False
+PRESTAGE1_TASKS_PENDING = f"{DATA_ROOT_DRIVE}/Record_chunks/tasks_pending.jsonl"
+
 TRANSCRIPT_DIR = f"{DATA_ROOT}/Transcriptions_corrected"
 AUDIO_SOURCE_DIR = f"{DATA_ROOT}/Record_harsha"
 
@@ -93,7 +71,6 @@ else:
     TRANSCRIPT_DIR_STAGE1 = TRANSCRIPT_DIR
     AUDIO_SOURCE_DIR_STAGE1 = AUDIO_SOURCE_DIR
 CHUNKS_DIR = f"{DATA_ROOT}/Record_chunks"
-<<<<<<< HEAD
 
 TARGET_REF_DIR = f"{DATA_ROOT}/Record_only_by_harsha"
 OTHER_REF_DIR = f"{DATA_ROOT}/Record_others_compacted"  # set "" to disable
@@ -129,43 +106,6 @@ SPEAKER_THRESHOLD = 0.10
 SPEAKER_WORKERS = 4
 SPEAKER_BATCH = 16
 
-=======
-
-TARGET_REF_DIR = f"{DATA_ROOT}/Record_only_by_harsha"
-OTHER_REF_DIR = f"{DATA_ROOT}/Record_others_compacted"  # set "" to disable
-OTHER_VOICES_DIR = f"{DATA_ROOT}/Record_others_compacted"
-
-NOISE_DIR = f"{DATA_ROOT}/noise/RIRS_NOISES/pointsource_noises"
-RIR_DIR = f"{DATA_ROOT}/noise/RIRS_NOISES/real_rirs_isotropic_noises"
-
-TEST_CHUNKS_DIR = f"{DATA_ROOT}/Record_test_chunks"
-
-CHECKPOINT_DIR = f"{DATA_ROOT}/stage17_checkpoints"
-STAGE17_SCRIPT = "stage_17_WER_acft_Whisper_Futo_finetuned_model_training_only_local_en_version_only_qat_dora.py"
-START_FRESH = 0  # 1 = refuse to resume if checkpoints exist
-
-HF_TOKEN = ""  # optional; set in env or enter when prompted
-DEVICE = "cuda"  # "cpu" if no GPU
-SPEAKER_SORT_DRY_RUN = True  # True = only produce CSV, no moves/copies
-USE_ADVANCED_RANDOMIZE = True  # True -> stage_15_b
-
-RANDOM_SEED = 1337
-
-# Augmentation ratios / copies
-NOISE_RATIO, NOISE_COPIES = 0.5, 1
-VOICE_RATIO, VOICE_COPIES = 0.8, 1
-GAIN_RATIO,  GAIN_COPIES  = 0.1, 1
-REVERB_RATIO, REVERB_COPIES = 0.3, 1
-TEMPO_RATIO, TEMPO_COPIES = 0.3, 1
-
-BOTTOM_PERCENT = 30.0
-TEST_RATIO = 0.1
-
-SPEAKER_THRESHOLD = 0.10
-SPEAKER_WORKERS = 4
-SPEAKER_BATCH = 16
-
->>>>>>> save-bin
 AUTO_WORKERS = True  # set False to keep the fixed values above
 
 # Stage toggles (set True to skip)
@@ -185,7 +125,6 @@ SKIP_STAGE_14 = False
 SKIP_STAGE_15 = False
 SKIP_STAGE_16 = False
 SKIP_STAGE_17 = False
-<<<<<<< HEAD
 
 # %%
 # ---------- DERIVED PATHS ----------
@@ -230,52 +169,6 @@ COMMON_SEGMENTS_STATE = f"{REPO_DIR}/most_commonly_spoken_segments_state.json"
 import os, sys, subprocess, shlex, re, shutil, json, time, threading, hashlib
 from pathlib import Path
 
-=======
-
-# %%
-# ---------- DERIVED PATHS ----------
-TASKS_PENDING = f"{CHUNKS_DIR}/tasks_pending.jsonl"
-PAIRS_PENDING = f"{CHUNKS_DIR}/pairs_pending.jsonl"
-
-STAGE2_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stereo.jsonl"
-STAGE3B_MANIFEST = f"{CHUNKS_DIR}/pairs_manifest_stereo_english_only.jsonl"
-STAGE4_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stereo_english_only_filtered.jsonl"
-
-STAGE6_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stage6_noise.jsonl"
-STAGE7_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stage7_voice.jsonl"
-STAGE8_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stage8_gain.jsonl"
-STAGE9_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stage9_reverb.jsonl"
-STAGE10B_MANIFEST = f"{CHUNKS_DIR}/pairs_manifest_stage10b_tempo_pause.jsonl"
-
-STAGE12_MANIFEST = f"{CHUNKS_DIR}/pairs_manifest_stage12_bottom_filtered.jsonl"
-STAGE13_TRAIN    = f"{CHUNKS_DIR}/pairs_manifest_stage13_train.jsonl"
-STAGE13_TEST     = f"{CHUNKS_DIR}/pairs_manifest_stage13_test.jsonl"
-STAGE14_TRAIN    = f"{CHUNKS_DIR}/pairs_manifest_stage14_train_no_targets.jsonl"
-STAGE15_TRAIN    = f"{CHUNKS_DIR}/pairs_manifest_stage15_train_no_targets_randomized.jsonl"
-
-NOISE_OUT_DIR  = f"{CHUNKS_DIR}/noise_augmented"
-VOICE_OUT_DIR  = f"{CHUNKS_DIR}/voice_augmented"
-GAIN_OUT_DIR   = f"{CHUNKS_DIR}/gain_augmented"
-REVERB_OUT_DIR = f"{CHUNKS_DIR}/reverb_augmented"
-TEMPO_OUT_DIR  = f"{CHUNKS_DIR}/tempo_pause_augmented"
-SEEN_DIR       = f"{CHUNKS_DIR}/_seen"
-
-TARGET_OUT_DIR = f"{CHUNKS_DIR}/speaker_sorted/target"
-OTHER_OUT_DIR  = f"{CHUNKS_DIR}/speaker_sorted/other"
-
-SCORES_CSV = f"{REPO_DIR}/speaker_sort_scores.csv"
-STATE_FILE = f"{CHUNKS_DIR}/speaker_sort_state.json"
-
-# If you have a common-segments state file, point here.
-# If it doesn't exist, stage 4 will just skip filtering.
-COMMON_SEGMENTS_STATE = f"{REPO_DIR}/most_commonly_spoken_segments_state.json"
-
-# %%
-# ---------- SETUP ----------
-import os, sys, subprocess, shlex, re, shutil, json, time, threading, hashlib
-from pathlib import Path
-
->>>>>>> save-bin
 os.environ["DEBIAN_FRONTEND"] = "noninteractive"
 os.environ["HF_HOME"] = HF_HOME
 os.environ["TRANSFORMERS_CACHE"] = TRANSFORMERS_CACHE
@@ -337,7 +230,6 @@ def run(cmd):
     else:
         log("$ " + " ".join(shlex.quote(str(c)) for c in cmd))
         subprocess.run([str(c) for c in cmd], check=True)
-<<<<<<< HEAD
 
 def seed_manifest(src, dst):
     src_p, dst_p = Path(src), Path(dst)
@@ -387,57 +279,6 @@ def patch_winsound_stage17(path):
     )
     if needle in txt:
         p.write_text(txt.replace(needle, repl), encoding="utf-8")
-=======
-
-def seed_manifest(src, dst):
-    src_p, dst_p = Path(src), Path(dst)
-    if not dst_p.exists():
-        dst_p.parent.mkdir(parents=True, exist_ok=True)
-        dst_p.write_text(src_p.read_text(encoding="utf-8"), encoding="utf-8")
-
-def replace_line(path, key, value):
-    p = Path(path)
-    txt = p.read_text(encoding="utf-8")
-    new, n = re.subn(rf"^{re.escape(key)}\s*=.*$", f"{key} = {value!r}", txt, flags=re.M)
-    if n == 0:
-        raise RuntimeError(f"Could not find '{key} =' in {path}")
-    p.write_text(new, encoding="utf-8")
-
-def patch_winsound_stage14(path):
-    p = Path(path)
-    txt = p.read_text(encoding="utf-8")
-    if "_WinSoundShim" in txt:
-        return
-    new = txt.replace(
-        "import winsound  # For beep notification",
-        "try:\n    import winsound  # type: ignore\n"
-        "except Exception:\n"
-        "    class _WinSoundShim:\n"
-        "        def Beep(self, *a, **k):\n            pass\n"
-        "    winsound = _WinSoundShim()"
-    )
-    if new != txt:
-        p.write_text(new, encoding="utf-8")
-    else:
-        print(f"warn: winsound import not found in {path}")
-
-def patch_winsound_stage17(path):
-    p = Path(path)
-    txt = p.read_text(encoding="utf-8")
-    if "_WinSoundShim" in txt:
-        return
-    needle = "import os, json, time, shutil, hashlib, gc, math, winsound, sys, atexit, tempfile"
-    repl = (
-        "import os, json, time, shutil, hashlib, gc, math, sys, atexit, tempfile\n\n"
-        "try:\n    import winsound  # type: ignore\n"
-        "except Exception:\n"
-        "    class _WinSoundShim:\n"
-        "        def Beep(self, *a, **k):\n            pass\n"
-        "    winsound = _WinSoundShim()"
-    )
-    if needle in txt:
-        p.write_text(txt.replace(needle, repl), encoding="utf-8")
->>>>>>> save-bin
     else:
         print(f"warn: winsound import line not found in {path}")
 
@@ -454,17 +295,10 @@ def file_hash(path: Path, chunk_size: int = 1024 * 1024) -> str:
 def sync_files_to_drive(paths, label=""):
     if not (SYNC_IMPORTANT_TO_DRIVE and USE_LOCAL_DATA):
         return
-<<<<<<< HEAD
     dst_root = Path(DRIVE_SYNC_ROOT)
     dst_root.mkdir(parents=True, exist_ok=True)
     src_root = Path(DATA_ROOT)
     copied = 0
-=======
-    dst_root = Path(DRIVE_SYNC_ROOT)
-    dst_root.mkdir(parents=True, exist_ok=True)
-    src_root = Path(DATA_ROOT)
-    copied = 0
->>>>>>> save-bin
     for p in paths:
         src = Path(p)
         if not src.exists():
@@ -514,8 +348,6 @@ def restore_files_from_drive(paths, label=""):
     if restored:
         log(f"[restore] {label} <- {src_root} ({restored} file(s))")
 
-<<<<<<< HEAD
-=======
 def restore_cache_from_drive():
     if not SYNC_CACHE_TO_DRIVE:
         return
@@ -537,16 +369,18 @@ def sync_cache_to_drive():
     run(["rsync", "-a", "--info=progress2", f"{src}/", f"{dst}/"])
     log(f"[cache] synced to {dst}")
 
->>>>>>> save-bin
 COPY_EVENTS = {}
 BACKGROUND_COPY_THREAD = None
 
 def _drive_path_for_local(local_path: str) -> Path | None:
-    try:
-        rel = Path(local_path).relative_to(Path(DATA_ROOT))
-    except Exception:
-        return None
-    return Path(DATA_ROOT_DRIVE) / rel
+    p = Path(local_path)
+    for root in (Path(DATA_ROOT), Path(LOCAL_DATA_ROOT), Path(DATA_ROOT_DRIVE)):
+        try:
+            rel = p.relative_to(root)
+            return Path(DATA_ROOT_DRIVE) / rel
+        except Exception:
+            continue
+    return None
 
 def copy_path_from_drive(local_path: str, label=""):
     src = _drive_path_for_local(local_path)
@@ -577,6 +411,16 @@ def copy_path_from_drive(local_path: str, label=""):
     else:
         shutil.copy2(src, dst)
     log(f"[copy] {label} {src} -> {dst}")
+
+def normalize_to_drive_path(path_str: str) -> Path | None:
+    p = Path(path_str)
+    for root in (Path(DATA_ROOT_DRIVE), Path(DATA_ROOT), Path(LOCAL_DATA_ROOT)):
+        try:
+            rel = p.relative_to(root)
+            return Path(DATA_ROOT_DRIVE) / rel
+        except Exception:
+            continue
+    return None
 
 def start_background_copy(paths, label="bg"):
     global BACKGROUND_COPY_THREAD
@@ -634,18 +478,14 @@ def collect_jsonl_paths(jsonl_path: str, key: str) -> list[str]:
 def rel_paths_to_drive(paths: list[str]) -> list[str]:
     rels = []
     for p in paths:
-        try:
-            rel = Path(p).relative_to(Path(DATA_ROOT_DRIVE))
-            rels.append(rel.as_posix())
+        drive_p = normalize_to_drive_path(p)
+        if drive_p is None:
             continue
-        except Exception:
-            pass
         try:
-            rel = Path(p).relative_to(Path(DATA_ROOT))
+            rel = drive_p.relative_to(Path(DATA_ROOT_DRIVE))
             rels.append(rel.as_posix())
-            continue
         except Exception:
-            pass
+            continue
     return rels
 
 def rsync_files_from(rel_paths: list[str], src_root: str, dst_root: str, label=""):
@@ -655,6 +495,12 @@ def rsync_files_from(rel_paths: list[str], src_root: str, dst_root: str, label="
     tmp.write_text("\n".join(rel_paths) + "\n", encoding="utf-8")
     run(["rsync", "-a", "--info=progress2", f"--files-from={tmp}", f"{src_root}/", f"{dst_root}/"])
     log(f"[copy] files-from {label}: {len(rel_paths)} files")
+
+def _remap_path(val: str, new_root: str) -> str:
+    for root in (DATA_ROOT_DRIVE, DATA_ROOT, LOCAL_DATA_ROOT):
+        if val.startswith(root):
+            return new_root + val[len(root):]
+    return val
 
 def rewrite_paths_in_jsonl(jsonl_path: str, old_root: str, new_root: str, keys: list[str]) -> None:
     p = Path(jsonl_path)
@@ -673,9 +519,11 @@ def rewrite_paths_in_jsonl(jsonl_path: str, old_root: str, new_root: str, keys: 
                 continue
             for k in keys:
                 v = obj.get(k)
-                if isinstance(v, str) and v.startswith(old_root):
-                    obj[k] = new_root + v[len(old_root):]
-                    changed += 1
+                if isinstance(v, str):
+                    nv = _remap_path(v, new_root)
+                    if nv != v:
+                        obj[k] = nv
+                        changed += 1
             f_out.write(json.dumps(obj, ensure_ascii=False) + "\n")
     if changed:
         os.replace(tmp, p)
@@ -829,27 +677,25 @@ def check_required_paths():
 
     if missing:
         raise RuntimeError("Missing required paths:\n" + "\n".join(missing))
-<<<<<<< HEAD
 
 # %%
 # ---------- WORKER AUTOTUNE ----------
 CPU_COUNT = os.cpu_count() or 2
 MAX_WORKERS = max(1, CPU_COUNT)
 
-=======
-
-# %%
-# ---------- WORKER AUTOTUNE ----------
-CPU_COUNT = os.cpu_count() or 2
-MAX_WORKERS = max(1, CPU_COUNT)
-
->>>>>>> save-bin
 # Use max CPU cores without oversubscription (safer on Colab)
 FFMPEG_WORKERS = MAX_WORKERS
 TASK_WORKERS = MAX_WORKERS
 AUG_WORKERS = MAX_WORKERS
-FFMPEG_THREADS = max(1, min(4, max(1, MAX_WORKERS // max(1, FFMPEG_WORKERS))))
-<<<<<<< HEAD
+# Heuristic: increase threads as worker count grows, but cap total load
+if FFMPEG_WORKERS >= 32:
+    FFMPEG_THREADS = 4
+elif FFMPEG_WORKERS >= 16:
+    FFMPEG_THREADS = 3
+elif FFMPEG_WORKERS >= 8:
+    FFMPEG_THREADS = 2
+else:
+    FFMPEG_THREADS = 1
 
 if AUTO_WORKERS:
     SPEAKER_WORKERS = MAX_WORKERS
@@ -862,20 +708,6 @@ else:
     run(["git", "-C", REPO_DIR, "pull"])
 os.chdir(REPO_DIR)
 
-=======
-
-if AUTO_WORKERS:
-    SPEAKER_WORKERS = MAX_WORKERS
-
-# %%
-# ---------- CLONE / UPDATE ----------
-if not Path(REPO_DIR).exists():
-    run(["git", "clone", REPO_URL, REPO_DIR])
-else:
-    run(["git", "-C", REPO_DIR, "pull"])
-os.chdir(REPO_DIR)
-
->>>>>>> save-bin
 # %%
 # ---------- SYSTEM DEPS ----------
 run(["apt-get", "update", "-y"])
@@ -885,13 +717,10 @@ if USE_RCLONE:
 run(["apt-get", "install", "-y"] + pkgs)
 
 # %%
-<<<<<<< HEAD
-=======
 # ---------- RESTORE CACHE ----------
 restore_cache_from_drive()
 
 # %%
->>>>>>> save-bin
 # ---------- COPY DATA TO LOCAL ----------
 if USE_LOCAL_DATA:
     Path(LOCAL_DATA_ROOT).mkdir(parents=True, exist_ok=True)
@@ -920,22 +749,14 @@ if USE_LOCAL_DATA:
 # ---------- RESTORE SYNCED FILES ----------
 restore_files_from_drive([TASKS_PENDING, PAIRS_PENDING, STAGE2_MANIFEST], label="stage1/2")
 
-<<<<<<< HEAD
 # %%
 # ---------- PYTHON DEPS ----------
 PY = sys.executable
 run([PY, "-m", "pip", "install", "-q", "-U", "pip"])
-=======
-# %%
-# ---------- PYTHON DEPS ----------
-PY = sys.executable
-run([PY, "-m", "pip", "install", "-q", "-U", "pip"])
->>>>>>> save-bin
 run([PY, "-m", "pip", "install", "-q",
      "transformers", "datasets", "accelerate",
      "soundfile", "librosa", "numpy", "pandas", "scipy", "tqdm", "orjson",
      "jiwer", "edlib", "pyannote.audio", "huggingface_hub"])
-<<<<<<< HEAD
 
 # %%
 # ---------- PATCH WINDOWS-SPECIFIC PATHS ----------
@@ -949,21 +770,6 @@ replace_line("Stage_16_move_test_chunks_update_test_manifest.py", "target_dir", 
 replace_line(STAGE17_SCRIPT, "MANIFEST_PATH", STAGE15_TRAIN)
 replace_line(STAGE17_SCRIPT, "CHECKPOINT_DIR", CHECKPOINT_DIR)
 
-=======
-
-# %%
-# ---------- PATCH WINDOWS-SPECIFIC PATHS ----------
-replace_line("stage_1_Manifest_creation_local_only.py", "TRANSCRIPT_DIR", TRANSCRIPT_DIR_STAGE1)
-replace_line("stage_1_Manifest_creation_local_only.py", "CHUNKS_DIR", CHUNKS_DIR)
-replace_line("stage_1_Manifest_creation_local_only.py", "AUDIO_SOURCE_DIR", AUDIO_SOURCE_DIR_STAGE1)
-
-replace_line("Stage_16_move_test_chunks_update_test_manifest.py", "manifest_path", STAGE13_TEST)
-replace_line("Stage_16_move_test_chunks_update_test_manifest.py", "target_dir", TEST_CHUNKS_DIR)
-
-replace_line(STAGE17_SCRIPT, "MANIFEST_PATH", STAGE15_TRAIN)
-replace_line(STAGE17_SCRIPT, "CHECKPOINT_DIR", CHECKPOINT_DIR)
-
->>>>>>> save-bin
 patch_winsound_stage14("stage_14_remove_target_files_from_manifest.py")
 patch_winsound_stage17(STAGE17_SCRIPT)
 
@@ -972,15 +778,9 @@ patch_winsound_stage17(STAGE17_SCRIPT)
 check_required_paths()
 
 
-<<<<<<< HEAD
 
 
 
-=======
-
-
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 1 ----------
 if should_run("stage_1", [TASKS_PENDING, PAIRS_PENDING]):
@@ -996,17 +796,10 @@ if should_run("stage_1", [TASKS_PENDING, PAIRS_PENDING]):
             rewrite_paths_in_jsonl(PAIRS_PENDING, DATA_ROOT_DRIVE, DATA_ROOT, ["transcript_json"])
     sync_files_to_drive([TASKS_PENDING, PAIRS_PENDING], label="stage1")
     update_stage_state("stage_1", "done")
-<<<<<<< HEAD
 
 
 
 
-=======
-
-
-
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 2 ----------
 if should_run("stage_2", [STAGE2_MANIFEST]):
@@ -1032,11 +825,6 @@ if should_run("stage_2", [STAGE2_MANIFEST]):
     assert_outputs([STAGE2_MANIFEST], "stage_2")
     sync_files_to_drive([STAGE2_MANIFEST], label="stage2")
     update_stage_state("stage_2", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 3 ----------
 if should_run("stage_3", [SCORES_CSV]):
@@ -1063,11 +851,6 @@ if should_run("stage_3", [SCORES_CSV]):
     run(cmd)
     assert_outputs([SCORES_CSV], "stage_3")
     update_stage_state("stage_3", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 3b ----------
 if should_run("stage_3b", [STAGE3B_MANIFEST]):
@@ -1078,11 +861,6 @@ if should_run("stage_3b", [STAGE3B_MANIFEST]):
          "--min-english-ratio", "0.7"])
     assert_outputs([STAGE3B_MANIFEST], "stage_3b")
     update_stage_state("stage_3b", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 4 ----------
 if should_run("stage_4", [STAGE4_MANIFEST]):
@@ -1094,11 +872,6 @@ if should_run("stage_4", [STAGE4_MANIFEST]):
          "--min-frequency", "3"])
     assert_outputs([STAGE4_MANIFEST], "stage_4")
     update_stage_state("stage_4", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 6 ----------
 if should_run("stage_6", [STAGE6_MANIFEST]):
@@ -1123,11 +896,6 @@ if should_run("stage_6", [STAGE6_MANIFEST]):
          "--workers", str(AUG_WORKERS)])
     assert_outputs([STAGE6_MANIFEST], "stage_6")
     update_stage_state("stage_6", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 7 ----------
 if should_run("stage_7", [STAGE7_MANIFEST]):
@@ -1150,11 +918,6 @@ if should_run("stage_7", [STAGE7_MANIFEST]):
          "--seen_db", f"{SEEN_DIR}/stage7_voice_mix.sqlite"])
     assert_outputs([STAGE7_MANIFEST], "stage_7")
     update_stage_state("stage_7", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 8 ----------
 if should_run("stage_8", [STAGE8_MANIFEST]):
@@ -1173,11 +936,6 @@ if should_run("stage_8", [STAGE8_MANIFEST]):
          "--seen_db", f"{SEEN_DIR}/stage8_random_gain.sqlite"])
     assert_outputs([STAGE8_MANIFEST], "stage_8")
     update_stage_state("stage_8", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 9 ----------
 if should_run("stage_9", [STAGE9_MANIFEST]):
@@ -1196,11 +954,6 @@ if should_run("stage_9", [STAGE9_MANIFEST]):
          "--seen_db", f"{SEEN_DIR}/stage9_reverb.sqlite"])
     assert_outputs([STAGE9_MANIFEST], "stage_9")
     update_stage_state("stage_9", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 10b ----------
 if should_run("stage_10b", [STAGE10B_MANIFEST]):
@@ -1225,11 +978,6 @@ if should_run("stage_10b", [STAGE10B_MANIFEST]):
          "--silence_min_dur", "0.15"])
     assert_outputs([STAGE10B_MANIFEST], "stage_10b")
     update_stage_state("stage_10b", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 12 ----------
 if should_run("stage_12", [STAGE12_MANIFEST]):
@@ -1241,11 +989,6 @@ if should_run("stage_12", [STAGE12_MANIFEST]):
          "--bottom_percent", str(BOTTOM_PERCENT)])
     assert_outputs([STAGE12_MANIFEST], "stage_12")
     update_stage_state("stage_12", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 13 ----------
 if should_run("stage_13", [STAGE13_TRAIN, STAGE13_TEST]):
@@ -1258,11 +1001,6 @@ if should_run("stage_13", [STAGE13_TRAIN, STAGE13_TEST]):
          "--seed", str(RANDOM_SEED)])
     assert_outputs([STAGE13_TRAIN, STAGE13_TEST], "stage_13")
     update_stage_state("stage_13", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 14 ----------
 if should_run("stage_14", [STAGE14_TRAIN]):
@@ -1273,11 +1011,6 @@ if should_run("stage_14", [STAGE14_TRAIN]):
          "--speaker_scores_csv", SCORES_CSV])
     assert_outputs([STAGE14_TRAIN], "stage_14")
     update_stage_state("stage_14", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 15 ----------
 if should_run("stage_15", [STAGE15_TRAIN]):
@@ -1294,11 +1027,6 @@ if should_run("stage_15", [STAGE15_TRAIN]):
              "--seed", str(RANDOM_SEED)])
     assert_outputs([STAGE15_TRAIN], "stage_15")
     update_stage_state("stage_15", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 16 ----------
 if should_run("stage_16", [STAGE13_TEST]):
@@ -1306,11 +1034,6 @@ if should_run("stage_16", [STAGE13_TEST]):
     run([PY, "Stage_16_move_test_chunks_update_test_manifest.py"])
     assert_outputs([STAGE13_TEST], "stage_16")
     update_stage_state("stage_16", "done")
-<<<<<<< HEAD
-
-=======
-
->>>>>>> save-bin
 # %%
 # ---------- STAGE 17 ----------
 if should_run("stage_17", [CHECKPOINT_DIR]):
@@ -1320,11 +1043,8 @@ if should_run("stage_17", [CHECKPOINT_DIR]):
     assert_outputs([CHECKPOINT_DIR], "stage_17")
     update_stage_state("stage_17", "done")
 
-<<<<<<< HEAD
-=======
 # %%
 # ---------- SYNC CACHE ----------
 sync_cache_to_drive()
 
->>>>>>> save-bin
 print("✅ Pipeline complete.")
