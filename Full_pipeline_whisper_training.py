@@ -344,6 +344,27 @@ def restore_files_from_drive(paths, label=""):
     if restored:
         log(f"[restore] {label} <- {src_root} ({restored} file(s))")
 
+def restore_cache_from_drive():
+    if not SYNC_CACHE_TO_DRIVE:
+        return
+    src = Path(CACHE_DRIVE_ROOT)
+    if not src.exists():
+        return
+    Path(CACHE_ROOT).mkdir(parents=True, exist_ok=True)
+    run(["rsync", "-a", "--info=progress2", f"{src}/", f"{CACHE_ROOT}/"])
+    log(f"[cache] restored from {src}")
+
+def sync_cache_to_drive():
+    if not SYNC_CACHE_TO_DRIVE:
+        return
+    src = Path(CACHE_ROOT)
+    if not src.exists():
+        return
+    dst = Path(CACHE_DRIVE_ROOT)
+    dst.mkdir(parents=True, exist_ok=True)
+    run(["rsync", "-a", "--info=progress2", f"{src}/", f"{dst}/"])
+    log(f"[cache] synced to {dst}")
+
 COPY_EVENTS = {}
 BACKGROUND_COPY_THREAD = None
 
@@ -665,6 +686,10 @@ pkgs = ["ffmpeg", "sox", "rsync"]
 if USE_RCLONE:
     pkgs.append("rclone")
 run(["apt-get", "install", "-y"] + pkgs)
+
+# %%
+# ---------- RESTORE CACHE ----------
+restore_cache_from_drive()
 
 # %%
 # ---------- COPY DATA TO LOCAL ----------
@@ -1002,5 +1027,9 @@ if should_run("stage_17", [CHECKPOINT_DIR]):
     run([PY, STAGE17_SCRIPT])
     assert_outputs([CHECKPOINT_DIR], "stage_17")
     update_stage_state("stage_17", "done")
+
+# %%
+# ---------- SYNC CACHE ----------
+sync_cache_to_drive()
 
 print("✅ Pipeline complete.")
