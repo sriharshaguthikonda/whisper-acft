@@ -9,6 +9,17 @@ High-level flow (per file):
 4) Transcribe each segment with Groq Whisper
 5) Compare Groq text vs JSON segment text (WER/CER)
 6) Report whether patched timestamps improve alignment vs original
+
+
+
+
+
+usage
+---------------------------------------------------
+
+i:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\nfa_corrections_verification.py --patched_dir "I:\Transcriptions_corrected" --original_dir "I:\Transcriptions" --audio_dir "I:\Record_harsha" --file_glob "New recording 218.json" --limit_files 1 --out_dir "I:\Transcriptions_corrected\verification_results"
+--prompt "Transcribe with proper punctuation, capitalization, and sentence breaks."
+
 """
 
 from __future__ import annotations
@@ -654,11 +665,11 @@ def _parse_args() -> argparse.Namespace:
 
     ap.add_argument("--model", default=None, help="Groq Whisper model (default: from JSON or whisper-large-v3)")
     ap.add_argument("--language", default=None, help="Language code (default: from JSON or None)")
-    ap.add_argument("--prompt", default=None, help="Prompt (optional)")
+    ap.add_argument("--prompt", default="Output with proper punctuation", help="Prompt (optional)")
     ap.add_argument("--temperature", type=float, default=None, help="Temperature (default: from JSON or 0)")
     ap.add_argument("--response_format", default="json", choices=["json", "verbose_json", "text"])
     ap.add_argument("--timestamp_granularities", nargs="*", default=[], help="e.g. word segment")
-    ap.add_argument("--timeout_s", type=float, default=float(os.getenv("GROQ_TIMEOUT_S", "300.0")))
+    ap.add_argument("--timeout_s", type=float, default=float(os.getenv("GROQ_TIMEOUT_S", "30.0")))
 
     ap.add_argument("--api_key", default=None, help="Direct Groq API key (not recommended)")
     ap.add_argument("--key_env_names", nargs="*", default=["GROQ_API_KEY", "GROQ_API_KEYS"])
