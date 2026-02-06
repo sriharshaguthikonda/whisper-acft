@@ -1,20 +1,27 @@
 #!/usr/bin/env python3
-"""
-Script to move audio files from test manifest to I:\Record_test_chunks\ 
-and update the manifest with new paths.
-"""
+"""Move/copy audio files from a test manifest into a target directory and update the manifest paths."""
 
+import argparse
 import json
 import os
 import shutil
 from pathlib import Path
 from tqdm import tqdm
 
-def move_test_chunks():
-    # Paths - using the test manifest we just created
-    manifest_path = r"I:\Record_chunks\pairs_manifest_combined_all_datasets_randomized_test.jsonl"
-    target_dir = r"I:\Record_test_chunks"
-    backup_manifest = manifest_path + ".backup"
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Move/copy audio files referenced in a test manifest.")
+    p.add_argument("--manifest_path", required=True, help="Path to test manifest JSONL")
+    p.add_argument("--target_dir", required=True, help="Directory to move/copy audio files into")
+    p.add_argument("--mode", choices=["move", "copy"], default="move", help="Whether to move or copy files")
+    p.add_argument("--backup_suffix", default=".backup", help="Suffix for manifest backup")
+    p.add_argument("--dry_run", action="store_true", help="Do not move/copy; only rewrite manifest")
+    return p.parse_args()
+
+
+def move_test_chunks(args: argparse.Namespace) -> None:
+    manifest_path = args.manifest_path
+    target_dir = args.target_dir
+    backup_manifest = manifest_path + args.backup_suffix
     
     # Create target directory if it doesn't exist
     Path(target_dir).mkdir(parents=True, exist_ok=True)
@@ -52,7 +59,7 @@ def move_test_chunks():
             filename = os.path.basename(audio_path)
             new_audio_path = os.path.join(target_dir, filename)
             
-            # Move file if it's not already in target directory
+            # Move/copy file if it's not already in target directory
             if audio_path != new_audio_path:
                 # Check if target file already exists
                 if os.path.exists(new_audio_path):
@@ -64,8 +71,11 @@ def move_test_chunks():
                         counter += 1
                     new_audio_path = os.path.join(target_dir, f"{base}_{counter}{ext}")
                 
-                # Move the file
-                shutil.move(audio_path, new_audio_path)
+                if not args.dry_run:
+                    if args.mode == "copy":
+                        shutil.copy2(audio_path, new_audio_path)
+                    else:
+                        shutil.move(audio_path, new_audio_path)
                 moved_files += 1
                 
                 # Update the entry
@@ -89,12 +99,13 @@ def move_test_chunks():
             updated_lines.append(line)
     
     # Write updated manifest
-    with open(manifest_path, 'w', encoding='utf-8') as f:
-        f.writelines(updated_lines)
+    if not args.dry_run:
+        with open(manifest_path, 'w', encoding='utf-8') as f:
+            f.writelines(updated_lines)
     
     print(f"\nSummary:")
     print(f"- Total entries: {len(lines)}")
-    print(f"- Files moved: {moved_files}")
+    print(f"- Files {args.mode}d: {moved_files}")
     print(f"- Files skipped: {skipped_files}")
     print(f"- Updated manifest: {manifest_path}")
     print(f"- Backup created: {backup_manifest}")
@@ -103,4 +114,4 @@ def move_test_chunks():
     print('\a')
 
 if __name__ == "__main__":
-    move_test_chunks()
+    move_test_chunks(parse_args())
