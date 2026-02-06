@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-"""rename_and_correct_transcripts_multi_api.py
+"""rename_and_correct_transcripts_with_groq.py
 
 What this does
 - Reads transcript JSON files (same input format as your Groq script).
@@ -23,8 +23,8 @@ Supported providers (rotated automatically)
 You control providers via --providers and environment variables in .env.
 
 Example:
-  python rename_and_correct_transcripts_multi_api.py \
-    --transcripts-dir "I:\P2GPT_google_drive\My Drive\Transcriptions" \
+  python rename_and_correct_transcripts_with_groq.py \
+    --transcripts-dir "I:\Transcriptions" \
     --audio-dir "I:\Record_harsha" \
     --providers "groq,github,openrouter,cloudflare,gemini" \
     --report rename_and_corrected_transcript_report.json \
