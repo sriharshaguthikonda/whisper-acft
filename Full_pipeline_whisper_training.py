@@ -27,6 +27,7 @@ DRIVE_SYNC_ROOT = f"{DATA_ROOT_DRIVE}/pipeline_checkpoints"
 PIPELINE_STATE_FILE = f"{DRIVE_SYNC_ROOT}/pipeline_state.json"
 DRIVE_RECORD_CHUNKS = f"{DRIVE_SYNC_ROOT}/Record_chunks"
 SYNC_RECORD_CHUNKS_TO_DRIVE = True
+RESTORE_RECORD_CHUNKS = True  # pull Record_chunks back from Drive when local is missing/incomplete
 
 # Logging
 PIPELINE_LOG = f"{DATA_ROOT}/pipeline.log"
@@ -51,20 +52,24 @@ VERIFY_OUTPUTS = True
 VERIFY_JSONL_SAMPLE = 5
 ENABLE_OUTPUT_SIGNATURES = True  # manifest diff / hash skip
 # Capture hides live tqdm/progress bars; set False to stream output live.
-CAPTURE_STAGE_OUTPUT = False
+CAPTURE_STAGE_OUTPUT = True
 
 
 # Optional: rclone (faster on huge transfers; requires rclone config)
-USE_RCLONE = False
-RCLONE_REMOTE = ""  # e.g. "gdrive:MyDrive"
+
+
+USE_RCLONE = True
+RCLONE_REMOTE = "gdrive:MyDrive"
 RCLONE_TRANSFERS = 8
+
+
 
 # Torch/torchvision compatibility fix (for pyannote/lightning)
 FIX_TORCHVISION = True
 TORCH_INDEX_URL = "https://download.pytorch.org/whl/cu121"
 # optional override, e.g. "https://download.pytorch.org/whl/cu121"
-TORCH_FORCE_REINSTALL = False
-TORCH_FIX_ONCE = True
+TORCH_FORCE_REINSTALL = True
+TORCH_FIX_ONCE = False
 TORCH_FIX_MARKER = f"{CACHE_ROOT}/torch_fix_ok.txt"
 
 # Optional: pre-stage1 audio copy using existing tasks_pending.jsonl from Drive
@@ -124,6 +129,10 @@ SPEAKER_WORKERS = 4
 SPEAKER_BATCH = 16
 
 AUTO_WORKERS = True  # set False to keep the fixed values above
+FFMPEG_WORKERS_MULT = 2.0  # oversubscribe ffmpeg workers (e.g., 2.0 = 2x CPU cores)
+TASK_WORKERS_MULT = 1.0
+STAGE2_CHECK_CHUNKS = True  # verify Stage-2 manifest rows exist on disk after rsync
+STAGE2_RESET_ON_MISSING = True  # reset stage2 state if manifest rows are missing
 
 # Stage toggles (set True to skip)
 SKIP_STAGE_1 = False
@@ -221,6 +230,10 @@ os.environ["DEBIAN_FRONTEND"] = "noninteractive"
 os.environ["HF_HOME"] = HF_HOME
 os.environ["TRANSFORMERS_CACHE"] = TRANSFORMERS_CACHE
 os.environ["TORCH_HOME"] = TORCH_HOME
+# Avoid Triton/Dynamo import crashes on Colab GPUs.
+os.environ["TORCHDYNAMO_DISABLE"] = "1"
+os.environ["TORCHINDUCTOR_DISABLE"] = "1"
+os.environ["PYTHONFAULTHANDLER"] = "1"
 Path(CACHE_ROOT).mkdir(parents=True, exist_ok=True)
 if not HF_TOKEN:
     # Try Colab secrets first, then env var.
@@ -887,8 +900,31 @@ def sync_record_chunks_to_drive():
         return
     dst = Path(DRIVE_RECORD_CHUNKS)
     dst.mkdir(parents=True, exist_ok=True)
-    run(["rsync", "-a", "--info=progress2", f"{src}/", f"{dst}/"])
-    log(f"[sync] record chunks -> {dst}")
+    if USE_RCLONE and RCLONE_REMOTE:
+        rel = dst.relative_to(Path(DATA_ROOT_DRIVE))
+        remote_dst = f"{RCLONE_REMOTE}/{rel.as_posix()}"
+        run(["rclone", "copy", str(src), remote_dst, "--transfers", str(RCLONE_TRANSFERS)])
+        log(f"[sync] record chunks -> {remote_dst}")
+    else:
+        run(["rsync", "-a", "--info=progress2", f"{src}/", f"{dst}/"])
+        log(f"[sync] record chunks -> {dst}")
+
+def restore_record_chunks_from_drive():
+    if not (SYNC_RECORD_CHUNKS_TO_DRIVE and USE_LOCAL_DATA and RESTORE_RECORD_CHUNKS):
+        return
+    src = Path(DRIVE_RECORD_CHUNKS)
+    if not src.exists():
+        return
+    dst = Path(CHUNKS_DIR)
+    dst.mkdir(parents=True, exist_ok=True)
+    if USE_RCLONE and RCLONE_REMOTE:
+        rel = src.relative_to(Path(DATA_ROOT_DRIVE))
+        remote_src = f"{RCLONE_REMOTE}/{rel.as_posix()}"
+        run(["rclone", "copy", remote_src, str(dst), "--transfers", str(RCLONE_TRANSFERS)])
+        log(f"[restore] record chunks <- {remote_src}")
+    else:
+        run(["rsync", "-a", "--info=progress2", f"{src}/", f"{dst}/"])
+        log(f"[restore] record chunks <- {src}")
 
 COPY_EVENTS = {}
 BACKGROUND_COPY_THREAD = None
@@ -1232,11 +1268,13 @@ SKIP_FLAGS = {
     "stage_17": SKIP_STAGE_17,
 }
 
-def should_run(stage, outputs):
+def should_run(stage, outputs, force=False):
     if SKIP_FLAGS.get(stage, False):
         log(f"[skip] {stage} (flag set)")
         update_stage_state(stage, "skipped")
         return False
+    if force:
+        return True
     completed = set(PIPELINE_STATE.get("completed", []))
     if stage in completed and outputs_ok(outputs):
         log(f"[skip] {stage} already completed and outputs present")
@@ -1247,6 +1285,87 @@ def should_run(stage, outputs):
         update_stage_state(stage, "skipped_existing")
         return False
     return True
+
+def _count_jsonl_rows(path: Path) -> int:
+    try:
+        with path.open("rb") as f:
+            return sum(1 for line in f if line.strip())
+    except Exception:
+        return 0
+
+def _stage2_done_count(state_path: Path) -> int:
+    if not state_path.exists():
+        return 0
+    try:
+        obj = json_loads(state_path.read_text(encoding="utf-8", errors="ignore"))
+    except Exception:
+        return 0
+    done = obj.get("done")
+    if isinstance(done, list):
+        return len(done)
+    if isinstance(done, int):
+        return int(done)
+    return 0
+
+def stage2_needs_resume() -> bool:
+    tasks_path = Path(TASKS_PENDING)
+    if not tasks_path.exists():
+        return False
+    if STAGE2_CHECK_CHUNKS:
+        total, missing = stage2_manifest_missing_chunks(Path(STAGE2_MANIFEST))
+        if total > 0 and missing > 0:
+            log(f"[stage2] manifest missing chunks: {missing}/{total}")
+            if STAGE2_RESET_ON_MISSING:
+                reset_stage2_outputs()
+            return True
+    remaining_path = Path(CHUNKS_DIR) / "tasks_remaining.jsonl"
+    if remaining_path.exists() and _count_jsonl_rows(remaining_path) > 0:
+        return True
+    state_path = Path(CHUNKS_DIR) / "stage2_cut_state.json"
+    done_count = _stage2_done_count(state_path)
+    if done_count <= 0:
+        return False
+    total = _count_jsonl_rows(tasks_path)
+    return total > 0 and done_count < total
+
+def stage2_manifest_missing_chunks(manifest_path: Path) -> tuple[int, int]:
+    if not manifest_path.exists():
+        return 0, 0
+    total = 0
+    missing = 0
+    try:
+        with manifest_path.open("r", encoding="utf-8", errors="ignore") as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json_loads(line)
+                except Exception:
+                    continue
+                audio_path = obj.get("audio_path") or obj.get("out_wav")
+                if not isinstance(audio_path, str) or not audio_path:
+                    continue
+                total += 1
+                if not Path(audio_path).exists():
+                    missing += 1
+    except Exception:
+        return 0, 0
+    return total, missing
+
+def reset_stage2_outputs() -> None:
+    paths = [
+        Path(STAGE2_MANIFEST),
+        Path(CHUNKS_DIR) / "stage2_cut_state.json",
+        Path(CHUNKS_DIR) / "stage2_stereo_cache.json",
+        Path(CHUNKS_DIR) / "tasks_remaining.jsonl",
+    ]
+    for p in paths:
+        try:
+            if p.exists():
+                p.unlink()
+        except Exception:
+            pass
 
 def check_required_paths():
     missing = []
@@ -1266,9 +1385,9 @@ def check_required_paths():
 CPU_COUNT = os.cpu_count() or 2
 MAX_WORKERS = max(1, CPU_COUNT)
 
-# Use max CPU cores without oversubscription (safer on Colab)
-FFMPEG_WORKERS = MAX_WORKERS
-TASK_WORKERS = MAX_WORKERS
+# Tune workers (optionally oversubscribe ffmpeg)
+FFMPEG_WORKERS = max(1, min(int(MAX_WORKERS * float(FFMPEG_WORKERS_MULT)), 64))
+TASK_WORKERS = max(1, min(int(MAX_WORKERS * float(TASK_WORKERS_MULT)), 64))
 AUG_WORKERS = MAX_WORKERS
 # Heuristic: keep total threads <= CPU count (cap per-worker threads to 4)
 if FFMPEG_WORKERS <= 0:
@@ -1314,6 +1433,9 @@ if USE_LOCAL_DATA:
         stage1_paths.append(AUDIO_SOURCE_DIR_LOCAL)
     for p in stage1_paths:
         copy_path_from_drive(p, label="stage1")
+
+    if RESTORE_RECORD_CHUNKS:
+        restore_record_chunks_from_drive()
 
     # Optional background copy (disabled by default)
     if BACKGROUND_COPY_LATER:
@@ -1438,9 +1560,12 @@ if should_run("stage_1", [TASKS_PENDING, PAIRS_PENDING]):
 
 # %%
 # ---------- STAGE 2 ----------
-if should_run("stage_2", [STAGE2_MANIFEST]):
+force_stage2 = stage2_needs_resume()
+if should_run("stage_2", [STAGE2_MANIFEST], force=force_stage2):
     stage_banner("STAGE 2")
     update_stage_state("stage_2", "running")
+    if force_stage2:
+        log("[resume] stage_2 has remaining tasks; resuming chunking")
     # Copy only audio referenced by tasks_pending.jsonl (and transcripts from pairs_pending.jsonl)
     if USE_LOCAL_DATA:
         audio_paths = collect_jsonl_paths(TASKS_PENDING, "audio_path")

@@ -380,11 +380,11 @@ N_SAMPLES_PER_EPOCH = 5016
 MAX_EPOCHS = 999999
 
 # --- Training knobs ---
-BATCH_SIZE = 1  # T4-safe baseline
-GRAD_ACCUM_STEPS = 16  # keep effective batch size reasonable
-MIN_BATCH_SIZE = 1  # allow very large files to still fit
-MAX_BATCH_SIZE = 8  # cap to avoid spikes on short clips
-MAX_AUDIO_SECONDS = 30.0  # lower to reduce VRAM/mem pressure
+BATCH_SIZE = 4  # Reduced from 24 to prevent CUDA OOM
+GRAD_ACCUM_STEPS = 8  # Increased from 2 to maintain effective batch size
+MIN_BATCH_SIZE = 4  # Minimum batch size for very large files
+MAX_BATCH_SIZE = 40  # Maximum batch size for small files
+MAX_AUDIO_SECONDS = 30.0  # we pad features to 30s; this filters absurdly long chunks
 
 # --- Gradient clipping to prevent exploding gradients ---
 MAX_GRAD_NORM = 0.3  # Tighter clipping is often enough to prevent the epoch-1 spiral

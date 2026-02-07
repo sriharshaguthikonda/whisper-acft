@@ -900,6 +900,10 @@ def load_done_state(path: Path) -> set:
 
 
 def save_done_state(path: Path, done_set: set, extra: Dict[str, Any]) -> None:
+    extra = dict(extra or {})
+    # Avoid clobbering the done list with numeric counters.
+    if "done" in extra and not isinstance(extra.get("done"), list):
+        extra["done_count"] = extra.pop("done")
     obj = {"done": sorted(done_set), **extra, "updated_at": time.time()}
     write_json(path, obj)
 
