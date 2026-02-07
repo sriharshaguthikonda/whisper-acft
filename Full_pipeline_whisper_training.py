@@ -588,15 +588,17 @@ def patch_stage14_scores_robust(path: str) -> None:
             txt = txt.replace("import winsound  # For beep notification\n", "import winsound  # For beep notification\n" + insert + "\n")
         else:
             txt = txt.replace("from tqdm import tqdm\n", "from tqdm import tqdm\n" + insert + "\n")
-    txt = txt.replace(
-        "    df = pd.read_csv(csv_path)\n",
-        "    try:\n"
-        "        df = pd.read_csv(csv_path)\n"
-        "    except pd.errors.ParserError as e:\n"
-        "        print(f\"CSV parsing error: {e}\")\n"
-        "        print(\"Attempting to read with more robust settings...\")\n"
-        "        df = pd.read_csv(csv_path, on_bad_lines='skip', quoting=3)\n",
-    )
+    if "try:" not in txt or "on_bad_lines='skip'" not in txt:
+        txt = re.sub(
+            r"(?m)^(\\s*)df = pd\\.read_csv\\(csv_path\\)\\s*$",
+            r"\\1try:\n"
+            r"\\1    df = pd.read_csv(csv_path)\n"
+            r"\\1except pd.errors.ParserError as e:\n"
+            r"\\1    print(f\"CSV parsing error: {e}\")\n"
+            r"\\1    print(\"Attempting to read with more robust settings...\")\n"
+            r"\\1    df = pd.read_csv(csv_path, on_bad_lines='skip', quoting=3)",
+            txt,
+        )
     txt = txt.replace(
         "            target_files.add(file_path.lower())\n",
         "            ck = canonical_key(file_path)\n"
@@ -631,10 +633,6 @@ def patch_stage14_scores_robust(path: str) -> None:
         "                # We don't have info about this file from the CSV\n"
         "                pass  # This is normal, many files won't be in the scores CSV\n",
         "",
-    )
-    txt = txt.replace(
-        "    try:\n    df = pd.read_csv(csv_path)\n",
-        "    try:\n        df = pd.read_csv(csv_path)\n",
     )
     p.write_text(txt, encoding="utf-8")
 
