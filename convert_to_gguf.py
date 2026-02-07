@@ -80,7 +80,7 @@ def export_merged_seq2seq(
     gen.save_pretrained(export_dir)
 
     # Save tokenizer + feature extractor + processor
-    # IMPORTANT: processor_id must match your model family (use whisper-tiny.en for English-only)
+    # IMPORTANT: processor_id must match your model family (use whisper-small.en for English-only)
     proc = WhisperProcessor.from_pretrained(processor_id, token=hf_token)
     proc.save_pretrained(export_dir)
 
@@ -215,8 +215,8 @@ def main():
     ap.add_argument("--whisper_cpp", required=True, help="Path to whisper.cpp root")
     ap.add_argument("--whisper_repo", required=True, help="Path to OpenAI whisper repo root (must contain whisper/assets/mel_filters.npz)")
 
-    ap.add_argument("--base_model", default="futo-org/acft-whisper-tiny.en", help="Base seq2seq model id for LM head")
-    ap.add_argument("--processor", default="openai/whisper-tiny.en", help="Processor id (tokenizer/feature extractor). Use .en if English-only")
+    ap.add_argument("--base_model", default="futo-org/acft-whisper-small.en", help="Base seq2seq model id for LM head")
+    ap.add_argument("--processor", default="openai/whisper-small.en", help="Processor id (tokenizer/feature extractor). Use .en if English-only")
 
     ap.add_argument("--qtype", default="", help="Quantize type (Q4_0,Q4_1,Q5_0,Q5_1,Q8_0). Empty = no quantize")
     ap.add_argument("--use_f32", action="store_true", help="Export F32 GGML instead of default FP16")

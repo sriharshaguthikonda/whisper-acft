@@ -337,27 +337,24 @@ VALIDATE_THREADS = 8  # lower if you hit "too many open files" on your OS
 VALIDATE_BLOCK = 256  # validate candidates in blocks
 
 # --- Model ---
-FUTO_MODEL_ID = "futo-org/acft-whisper-tiny.en"
-PROCESSOR_ID = "openai/whisper-tiny.en"  # must match the base family
+FUTO_MODEL_ID = "futo-org/acft-whisper-small.en"
+PROCESSOR_ID = "openai/whisper-small.en"  # must match the base family
 
 # --- LoRA/PEFT hardcoded config (no env vars) ---
 # Adjust these values here instead of setting WHISPER_* env vars.
 set_peft_overrides(
     WHISPER_USE_PEFT="1",
-    # DoRA is powerful, but your current setting is *very* high-capacity for this dataset.
-    # Bring it down to reduce immediate collapse/repetition.
+    # Your DoRA runs are collapsing early (repetition) -> this setup was too aggressive.
+    # Start small + regularised; expand only if WER truly plateaus.
     WHISPER_LORA_R=8,
     WHISPER_LORA_ALPHA=16,
     WHISPER_LORA_DROPOUT=0.15,
-    # Start with attention projections only. Adding fc1/fc2 often overfits fast.
+    # Keep it to attention projections first (most robust). Add k_proj back only if needed.
     WHISPER_LORA_TARGET_MODULES="q_proj,v_proj,out_proj",
 
     # If your stage17_main_utils_peft supports these, keep them explicit:
     WHISPER_LORA_USE_DORA="1",
     WHISPER_LORA_USE_RSLORA="1",
-
-    # Saves merged base+adapter (safetensors) each epoch for easy deployment
-    WHISPER_PEFT_SAVE_MERGED_EACH_EPOCH="1",
 )
 
 # ===== Combined WER + ACFT knobs =====
@@ -366,31 +363,31 @@ set_peft_overrides(
 ACFT_REFERENCE_MODEL_ID = FUTO_MODEL_ID  # Reference model for ACFT (default: same as training model)
 CE_LABEL_SMOOTH = 0.02  # 0.05 can blunt learning for ASR; 0.0-0.02 tends to behave better
 LAMBDA_CE = 1.0  # Weight for cross-entropy loss
-LAMBDA_ACFT = 0.08  # Weight for ACFT robustness loss
+LAMBDA_ACFT = 0.08  # Weight for ACFT robustness loss (helps stop repetition/collapse)
 # Optional: temporarily disable ACFT entirely while debugging instability.
 # LAMBDA_ACFT = 0.0
 # Optional ramp: start ACFT small then ramp up over first N optimizer steps
 ACFT_RAMP_STEPS = 1500  # 0 disables ramp; higher values ramp more slowly
 
 # Dynamic audio_ctx (partial context) to teach robustness
-FORCE_FULL_AUDIO_CTX = False  # keep dynamic audio context, but stabilise with ACFT
+FORCE_FULL_AUDIO_CTX = False  # You said you still want dynamic context
 AUDIO_CTX_SAFETY_SEC = 0.20  # Safety margin in seconds for dynamic context
 AUDIO_CTX_ROUND_TO = 16  # Round context to multiples of this value
-AUDIO_CTX_JITTER_MAX = 64  # Maximum upward jitter for dynamic context
+AUDIO_CTX_JITTER_MAX = 32  # Smaller jitter = fewer nasty distribution shifts early on
 
 TARGET_SR = 16000
 N_SAMPLES_PER_EPOCH = 5016
 MAX_EPOCHS = 999999
 
 # --- Training knobs ---
-BATCH_SIZE = 8  # Reduced from 24 to prevent CUDA OOM
-GRAD_ACCUM_STEPS = 4  # Increased from 2 to maintain effective batch size
+BATCH_SIZE = 4  # Reduced from 24 to prevent CUDA OOM
+GRAD_ACCUM_STEPS = 8  # Increased from 2 to maintain effective batch size
 MIN_BATCH_SIZE = 4  # Minimum batch size for very large files
 MAX_BATCH_SIZE = 40  # Maximum batch size for small files
 MAX_AUDIO_SECONDS = 30.0  # we pad features to 30s; this filters absurdly long chunks
 
 # --- Gradient clipping to prevent exploding gradients ---
-MAX_GRAD_NORM = 0.5  # Conservative clipping while debugging instability
+MAX_GRAD_NORM = 0.3  # Tighter clipping is often enough to prevent the epoch-1 spiral
 
 # ----------------------------
 # Learning rate + scheduler (NEW)
@@ -398,9 +395,9 @@ MAX_GRAD_NORM = 0.5  # Conservative clipping while debugging instability
 # Start here:
 # - If training is unstable or WER collapses after epoch_000001: reduce LR_START (e.g., 2e-6 -> 1e-6 -> 5e-7)
 # - If training is too slow / no learning: increase LR_START (e.g., 2e-6 -> 5e-6)
-LR_START = 1e-5          # PEFT usually needs a higher LR than full fine-tuning
-LR_FLOOR = 2e-7           # Higher floor to prevent LR from getting too small
-WARMUP_STEPS = 50         # Slightly longer warmup
+LR_START = 5e-6           # If you see repetition/collapse: the first knob is LR
+LR_FLOOR = 1e-7           # Keep a sensible floor
+WARMUP_STEPS = 200        # Longer warmup to prevent early overshoot
 DECAY_GAMMA = 0.8         # Gentler decay per epoch
 USE_SCHEDULER = True        # Enable scheduler for better stability
 RESUME_OVERRIDE_LR = True   # IMPORTANT: force LR_START even when resuming optimizer state
@@ -491,7 +488,10 @@ DISABLE_AMP = bool(int(os.environ.get("WHISPER_DISABLE_AMP", "1")))
 # Enable with:
 #   $env:WHISPER_QAT="1"; $env:WHISPER_QAT_BITS="8"; $env:WHISPER_QAT_START_STEP="50"
 # ============================================
-QAT_ENABLE = bool(int(os.environ.get("WHISPER_QAT", "0")))
+# You asked to drop QAT. Hard-disable it so it can't accidentally come back via env vars.
+if os.environ.get("WHISPER_QAT", "0") not in ("", "0"):
+    print("[qat] WHISPER_QAT was set, but QAT is hard-disabled in this script.")
+QAT_ENABLE = False
 QAT_BITS = int(os.environ.get("WHISPER_QAT_BITS", "6"))       # 8, 6, 5, 4
 QAT_START_STEP = int(os.environ.get("WHISPER_QAT_START_STEP", "600"))
 QAT_EXCLUDE_SUFFIXES = {
@@ -1204,6 +1204,23 @@ print(f"Auto epoch start: {epoch_num_start} (trained_based={trained_based_epoch}
 
 model_train = load_student_from_checkpoint_or_base(latest_model_dir)
 model_train = maybe_wrap_with_lora_peft(model_train)
+
+# ---- PEFT sanity checks (so you can tell in 2 seconds if DoRA/LoRA actually attached) ----
+try:
+    if hasattr(model_train, "peft_config") and isinstance(getattr(model_train, "peft_config"), dict) and model_train.peft_config:
+        _cfg = next(iter(model_train.peft_config.values()))
+        print(f"[peft] attached: {type(_cfg).__name__}")
+        for _k in ("r", "lora_alpha", "lora_dropout", "target_modules", "use_dora", "use_rslora", "init_lora_weights"):
+            if hasattr(_cfg, _k):
+                print(f"[peft] {_k}={getattr(_cfg, _k)}")
+        # DoRA specific: these show up in state_dict keys
+        _dora_keys = [k for k in model_train.state_dict().keys() if "lora_magnitude_vector" in k]
+        print(f"[peft] dora_magnitude_vectors={len(_dora_keys)}")
+    else:
+        print("[peft] WARNING: model has no peft_config; you're training full weights (or adapter failed to attach).")
+except Exception as _e:
+    print("[peft] WARNING: sanity-check failed:", repr(_e))
+
 model_train.to(device)
 model_train.train()
 
@@ -1270,15 +1287,8 @@ if RESUME_CLAMP_LR:
         scheduler.base_lrs = [min(float(b), float(LR_START)) for b in scheduler.base_lrs]
     print(f"[lr] Clamped LR to LR_START on resume: {LR_START} (global_step={global_step})")
 
-# ---- QAT inject (student model only; ref model stays FP) ----
+# ---- QAT inject (DISABLED) ----
 qat_state = None
-if QAT_ENABLE:
-    if QAT_BITS not in (4, 5, 6, 8, 16):
-        raise SystemExit(f"Invalid WHISPER_QAT_BITS={QAT_BITS}. Use 8,6,5,4 (or 16 to disable).")
-    qat_state = QATState(start_step=int(QAT_START_STEP))
-    inject_qat_linears(model_train, bits=int(QAT_BITS), state=qat_state)
-    if QAT_VERBOSE:
-        print(f"[qat] enabled: bits={QAT_BITS} | start_step={QAT_START_STEP} | excluded={sorted(QAT_EXCLUDE_SUFFIXES)}")
 
 cleanup_memory("after model load")
 

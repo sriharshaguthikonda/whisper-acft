@@ -12,7 +12,7 @@ Usage (PowerShell):
   i:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\stage17_merge_peft_checkpoint_to_full_model.py `
     --peft_dir "I:\...\checkpoints\model_epoch_000010" `
     --out_dir  "I:\...\checkpoints\model_epoch_000010_merged" `
-    --base_model_id "futo-org/acft-whisper-tiny.en"
+    --base_model_id "futo-org/acft-whisper-small.en"
 """
 
 import argparse
@@ -32,7 +32,7 @@ def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("--peft_dir", required=True, help="Adapter checkpoint dir (contains adapter_config.json)")
     ap.add_argument("--out_dir", required=True, help="Output dir for merged full model")
-    ap.add_argument("--base_model_id", default="openai/whisper-tiny.en", help="Base Whisper model id")
+    ap.add_argument("--base_model_id", default="openai/whisper-small.en", help="Base Whisper model id")
     args = ap.parse_args()
 
     from transformers import WhisperForConditionalGeneration, GenerationConfig

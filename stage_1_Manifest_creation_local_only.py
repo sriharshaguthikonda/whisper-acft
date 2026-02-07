@@ -14,8 +14,8 @@ except ImportError:
 # ----------------------------
 # USER SETTINGS
 # ----------------------------
-ACFT_MODEL_ID = "futo-org/acft-whisper-tiny.en"     # weights
-BASE_PROCESSOR_ID = "openai/whisper-tiny.en"        # processor (feature extractor + tokenizer)
+ACFT_MODEL_ID = "futo-org/acft-whisper-small.en"     # weights
+BASE_PROCESSOR_ID = "openai/whisper-small.en"        # processor (feature extractor + tokenizer)
 LOAD_MODEL_FOR_DEBUG = False  # Stage 1 normally shouldn't load model weights.
 
 TRANSCRIPT_DIR = r"I:\Transcriptions_patched_corrected"

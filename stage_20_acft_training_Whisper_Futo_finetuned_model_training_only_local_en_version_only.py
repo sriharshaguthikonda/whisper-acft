@@ -90,8 +90,8 @@ LOCAL_EPOCH_CACHE_ROOT = "i:/epoch_cache"  # only used when USE_LOCAL_CACHE=True
 # IMPORTANT:
 # - FUTO repos often do NOT include preprocessor_config.json.
 # - So load processor from the matching OpenAI whisper base.
-FUTO_MODEL_ID = "futo-org/acft-whisper-tiny.en"
-PROCESSOR_ID = "openai/whisper-tiny.en"  # must match the base family
+FUTO_MODEL_ID = "futo-org/acft-whisper-small.en"
+PROCESSOR_ID = "openai/whisper-small.en"  # must match the base family
 
 TARGET_SR = 16000
 N_SAMPLES_PER_EPOCH = 5000

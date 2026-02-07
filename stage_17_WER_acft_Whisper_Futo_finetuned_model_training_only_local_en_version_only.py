@@ -312,8 +312,8 @@ VALIDATE_THREADS = 8  # lower if you hit "too many open files" on your OS
 VALIDATE_BLOCK = 256  # validate candidates in blocks
 
 # --- Model ---
-FUTO_MODEL_ID = "futo-org/acft-whisper-tiny.en"
-PROCESSOR_ID = "openai/whisper-tiny.en"  # must match the base family
+FUTO_MODEL_ID = "futo-org/acft-whisper-small.en"
+PROCESSOR_ID = "openai/whisper-small.en"  # must match the base family
 
 # ===== Combined WER + ACFT knobs =====
 # Goal: keep WER going down, while ACFT prevents repetition / collapse when audio_ctx is dynamic.

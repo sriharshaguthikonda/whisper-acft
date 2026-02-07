@@ -25,6 +25,8 @@ DATA_ROOT = LOCAL_DATA_ROOT if USE_LOCAL_DATA else DATA_ROOT_DRIVE
 SYNC_IMPORTANT_TO_DRIVE = True
 DRIVE_SYNC_ROOT = f"{DATA_ROOT_DRIVE}/pipeline_checkpoints"
 PIPELINE_STATE_FILE = f"{DRIVE_SYNC_ROOT}/pipeline_state.json"
+DRIVE_RECORD_CHUNKS = f"{DRIVE_SYNC_ROOT}/Record_chunks"
+SYNC_RECORD_CHUNKS_TO_DRIVE = True
 
 # Logging
 PIPELINE_LOG = f"{DATA_ROOT}/pipeline.log"
@@ -571,6 +573,17 @@ def sync_cache_to_drive():
     run(["rsync", "-a", "--info=progress2", f"{src}/", f"{dst}/"])
     log(f"[cache] synced to {dst}")
 
+def sync_record_chunks_to_drive():
+    if not SYNC_RECORD_CHUNKS_TO_DRIVE:
+        return
+    src = Path(CHUNKS_DIR)
+    if not src.exists():
+        return
+    dst = Path(DRIVE_RECORD_CHUNKS)
+    dst.mkdir(parents=True, exist_ok=True)
+    run(["rsync", "-a", "--info=progress2", f"{src}/", f"{dst}/"])
+    log(f"[sync] record chunks -> {dst}")
+
 COPY_EVENTS = {}
 BACKGROUND_COPY_THREAD = None
 
@@ -1036,6 +1049,7 @@ if should_run("stage_2", [STAGE2_MANIFEST]):
          "--stereo_policy", "split_drop_dupes"])
     assert_outputs([STAGE2_MANIFEST], "stage_2")
     sync_files_to_drive([STAGE2_MANIFEST], label="stage2")
+    sync_record_chunks_to_drive()
     update_stage_state("stage_2", "done")
 # %%
 # ---------- STAGE 3 ----------
@@ -1264,6 +1278,7 @@ if should_run("stage_16", [STAGE13_TEST]):
         "--backup_suffix", ".backup",
     ])
     assert_outputs([STAGE13_TEST], "stage_16")
+    sync_record_chunks_to_drive()
     update_stage_state("stage_16", "done")
 # %%
 # ---------- STAGE 17 ----------
@@ -1354,5 +1369,6 @@ if RUN_GGUF_CONVERSION:
 # %%
 # ---------- SYNC CACHE ----------
 sync_cache_to_drive()
+sync_record_chunks_to_drive()
 
 print("✅ Pipeline complete.")

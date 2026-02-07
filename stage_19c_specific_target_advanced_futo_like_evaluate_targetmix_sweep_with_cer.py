@@ -50,7 +50,7 @@ i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\stage_19c_specific_t
   --percentage 10 `
   --vad_filter 0 `
   --lora_merge `
-  --lora_base_model "futo-org/acft-whisper-tiny.en" `
+  --lora_base_model "futo-org/acft-whisper-small.en" `
   --groq_verify `
 
   --recalc_metrics
@@ -2171,9 +2171,9 @@ def main() -> None:
     ap.add_argument("--target_percentage", type=float, default=100.0, help="Subsample TARGET rows before pairing (percentage of TARGET samples).")
     ap.add_argument("--target_max", type=int, default=0, help="Optional cap on number of TARGET rows after target subsampling. 0=disabled")
 
-    ap.add_argument("--base_model", default="futo-org/acft-whisper-tiny.en")
+    ap.add_argument("--base_model", default="futo-org/acft-whisper-small.en")
     ap.add_argument("--compare_openai_tiny", action="store_true")
-    ap.add_argument("--base_processor_id", default="openai/whisper-tiny.en")
+    ap.add_argument("--base_processor_id", default="openai/whisper-small.en")
     ap.add_argument("--lora_merge", action="store_true",
                     help="If set, merge PEFT/LoRA adapter checkpoints into the base model before evaluation.")
     ap.add_argument("--lora_base_model", default=None,
@@ -2369,7 +2369,7 @@ def main() -> None:
 
     models: List[str] = []
     if args.compare_openai_tiny:
-        models.append("openai/whisper-tiny.en")
+        models.append("openai/whisper-small.en")
     models.append(str(args.base_model))
     models.extend([str(p) for p in checkpoints])
 
