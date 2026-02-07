@@ -51,7 +51,8 @@ VERIFY_OUTPUTS = True
 VERIFY_JSONL_SAMPLE = 5
 ENABLE_OUTPUT_SIGNATURES = True  # manifest diff / hash skip
 # Capture hides live tqdm/progress bars; set False to stream output live.
-CAPTURE_STAGE_OUTPUT = True
+CAPTURE_STAGE_OUTPUT = False
+
 
 # Optional: rclone (faster on huge transfers; requires rclone config)
 USE_RCLONE = False
