@@ -135,12 +135,13 @@ SKIP_STAGE_7 = False
 SKIP_STAGE_8 = False
 SKIP_STAGE_9 = False
 SKIP_STAGE_10B = False
-SKIP_STAGE_12 = False
+SKIP_STAGE_12 = True
 SKIP_STAGE_13 = False
 SKIP_STAGE_14 = False
 SKIP_STAGE_15 = False
 SKIP_STAGE_16 = False
 SKIP_STAGE_17 = False
+
 
 # Post-train: evaluation + charts + export
 RUN_EVAL_19C = False
@@ -187,7 +188,7 @@ STAGE8_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stage8_gain.jsonl"
 STAGE9_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stage9_reverb.jsonl"
 STAGE10B_MANIFEST = f"{CHUNKS_DIR}/pairs_manifest_stage10b_tempo_pause.jsonl"
 
-STAGE12_MANIFEST = f"{CHUNKS_DIR}/pairs_manifest_stage12_bottom_filtered.jsonl"
+STAGE12_MANIFEST = STAGE10B_MANIFEST if SKIP_STAGE_12 else f"{CHUNKS_DIR}/pairs_manifest_stage12_bottom_filtered.jsonl"
 STAGE13_TRAIN    = f"{CHUNKS_DIR}/pairs_manifest_stage13_train.jsonl"
 STAGE13_TEST     = f"{CHUNKS_DIR}/pairs_manifest_stage13_test.jsonl"
 STAGE14_TRAIN    = f"{CHUNKS_DIR}/pairs_manifest_stage14_train_no_targets.jsonl"
@@ -433,44 +434,44 @@ def patch_stage12_scores_fallback(path: str) -> None:
     if not p.exists():
         return
     txt = p.read_text(encoding="utf-8")
-    if "def candidate_keys" not in txt and "def canonical_key" in txt:
-        insert = (
-            "def candidate_keys(entry: dict) -> list[str]:\n"
-            "    \"\"\"Return possible canonical keys to match scores (audio_path first).\"\"\"\n"
-            "    keys = []\n"
-            "    for k in (\n"
-            "        \"audio_path\",\n"
-            "        \"source_audio\",\n"
-            "        \"source_audio_path\",\n"
-            "        \"original_audio\",\n"
-            "        \"orig_audio\",\n"
-            "        \"base_audio\",\n"
-            "    ):\n"
-            "        v = entry.get(k)\n"
-            "        if isinstance(v, str) and v:\n"
-            "            keys.append(canonical_key(v))\n"
-            "    seen = set()\n"
-            "    out = []\n"
-            "    for k in keys:\n"
-            "        if k and k not in seen:\n"
-            "            out.append(k)\n"
-            "            seen.add(k)\n"
-            "    return out\n\n\n"
-        )
-    txt = txt.replace(
-        "    p = re.sub(r\"/+\", \"/\", p)\n    return p.casefold()\n\n\n",
-        "    p = re.sub(r\"/+\", \"/\", p)\n    return p.casefold()\n\n\n"
-        "def canonical_rel_key(p: str) -> str:\n"
-        "    \"\"\"Canonical key using relative tail for common roots.\"\"\"\n"
-        "    if not p:\n"
-        "        return \"\"\n"
-        "    p = canonical_key(p)\n"
-        "    for marker in (\"/record_chunks/\", \"/record_harsha/\"):\n"
-        "        idx = p.find(marker)\n"
-        "        if idx != -1:\n"
-        "            return p[idx:]\n"
-        "    return p\n\n\n" + insert,
+    insert = (
+        "def candidate_keys(entry: dict) -> list[str]:\n"
+        "    \"\"\"Return possible canonical keys to match scores (audio_path first).\"\"\"\n"
+        "    keys = []\n"
+        "    for k in (\n"
+        "        \"audio_path\",\n"
+        "        \"source_audio\",\n"
+        "        \"source_audio_path\",\n"
+        "        \"original_audio\",\n"
+        "        \"orig_audio\",\n"
+        "        \"base_audio\",\n"
+        "    ):\n"
+        "        v = entry.get(k)\n"
+        "        if isinstance(v, str) and v:\n"
+        "            keys.append(canonical_key(v))\n"
+        "    seen = set()\n"
+        "    out = []\n"
+        "    for k in keys:\n"
+        "        if k and k not in seen:\n"
+        "            out.append(k)\n"
+        "            seen.add(k)\n"
+        "    return out\n\n\n"
     )
+    if "def candidate_keys" not in txt and "def canonical_key" in txt:
+        txt = txt.replace(
+            "    p = re.sub(r\"/+\", \"/\", p)\n    return p.casefold()\n\n\n",
+            "    p = re.sub(r\"/+\", \"/\", p)\n    return p.casefold()\n\n\n"
+            "def canonical_rel_key(p: str) -> str:\n"
+            "    \"\"\"Canonical key using relative tail for common roots.\"\"\"\n"
+            "    if not p:\n"
+            "        return \"\"\n"
+            "    p = canonical_key(p)\n"
+            "    for marker in (\"/record_chunks/\", \"/record_harsha/\"):\n"
+            "        idx = p.find(marker)\n"
+            "        if idx != -1:\n"
+            "            return p[idx:]\n"
+            "    return p\n\n\n" + insert,
+        )
     txt = txt.replace(
         "        'kept_with_score': 0,\n        'kept_no_score': 0\n    }\n",
         "        'kept_with_score': 0,\n        'kept_no_score': 0,\n        'matched_audio_path': 0,\n        'matched_fallback': 0\n    }\n",
@@ -554,6 +555,75 @@ def patch_stage12_scores_fallback(path: str) -> None:
         "    print(f\"  - No scores found: {stats['kept_no_score']:,}\")\n"
         "    print(f\"Matched by audio_path: {stats['matched_audio_path']:,}\")\n"
         "    print(f\"Matched by fallback keys: {stats['matched_fallback']:,}\")\n",
+    )
+    p.write_text(txt, encoding="utf-8")
+
+def patch_stage14_scores_robust(path: str) -> None:
+    p = Path(path)
+    if not p.exists():
+        return
+    txt = p.read_text(encoding="utf-8")
+    if "def canonical_rel_key" not in txt:
+        if "import re" not in txt:
+            txt = txt.replace("import pandas as pd\n", "import pandas as pd\nimport re\n")
+        insert = (
+            "\n\ndef canonical_key(p: str) -> str:\n"
+            "    if not p:\n"
+            "        return \"\"\n"
+            "    p = str(p).strip().strip('\"').strip(\"'\")\n"
+            "    p = p.replace('\\\\', '/')\n"
+            "    p = re.sub(r\"/+\", \"/\", p)\n"
+            "    return p.casefold()\n\n"
+            "def canonical_rel_key(p: str) -> str:\n"
+            "    if not p:\n"
+            "        return \"\"\n"
+            "    p = canonical_key(p)\n"
+            "    for marker in (\"/record_chunks/\", \"/record_harsha/\"):\n"
+            "        idx = p.find(marker)\n"
+            "        if idx != -1:\n"
+            "            return p[idx:]\n"
+            "    return p\n"
+        )
+        if "import winsound" in txt:
+            txt = txt.replace("import winsound  # For beep notification\n", "import winsound  # For beep notification\n" + insert + "\n")
+        else:
+            txt = txt.replace("from tqdm import tqdm\n", "from tqdm import tqdm\n" + insert + "\n")
+    txt = txt.replace(
+        "    df = pd.read_csv(csv_path)\n",
+        "    try:\n"
+        "        df = pd.read_csv(csv_path)\n"
+        "    except pd.errors.ParserError as e:\n"
+        "        print(f\"CSV parsing error: {e}\")\n"
+        "        print(\"Attempting to read with more robust settings...\")\n"
+        "        df = pd.read_csv(csv_path, on_bad_lines='skip', quoting=3)\n",
+    )
+    txt = txt.replace(
+        "            target_files.add(file_path.lower())\n",
+        "            ck = canonical_key(file_path)\n"
+        "            target_files.add(ck)\n"
+        "            rk = canonical_rel_key(file_path)\n"
+        "            if rk:\n"
+        "                target_files.add(rk)\n",
+    )
+    txt = txt.replace(
+        "    # Normalize target files set to lowercase for case-insensitive matching\n"
+        "    normalized_target_files = {f.lower() for f in target_files}\n"
+        "    \n",
+        "",
+    )
+    txt = txt.replace(
+        "        audio_path = entry.get('audio_path', '').lower()\n"
+        "        \n"
+        "        if audio_path in normalized_target_files:\n",
+        "        audio_path = entry.get('audio_path', '')\n"
+        "        source_audio = entry.get('source_audio', '')\n"
+        "        keys = []\n"
+        "        if audio_path:\n"
+        "            keys.extend([canonical_key(audio_path), canonical_rel_key(audio_path)])\n"
+        "        if source_audio:\n"
+        "            keys.extend([canonical_key(source_audio), canonical_rel_key(source_audio)])\n"
+        "        \n"
+        "        if any(k in target_files for k in keys if k):\n",
     )
     p.write_text(txt, encoding="utf-8")
 
@@ -1326,6 +1396,7 @@ patch_stage1_tokenizer("stage_1_Manifest_creation_local_only.py")
 patch_winsound_simple("stage17_merge_peft_checkpoint_to_full_model.py")
 patch_stage9_reverb_mono("stage_9_add_reverb_idempotent.py")
 patch_stage12_scores_fallback("stage_12_remove_bottom_percent_by_speaker_scores.py")
+patch_stage14_scores_robust("stage_14_remove_target_files_from_manifest.py")
 
 # %%
 # ---------- CONFIG SANITY CHECKS ----------

@@ -37,16 +37,42 @@ from __future__ import annotations
 import argparse
 import json
 import pandas as pd
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Set, Tuple
 from tqdm import tqdm
 import winsound  # For beep notification
 
 
+def canonical_key(p: str) -> str:
+    if not p:
+        return ""
+    p = str(p).strip().strip('"').strip("'")
+    p = p.replace("\\", "/")
+    p = re.sub(r"/+", "/", p)
+    return p.casefold()
+
+
+def canonical_rel_key(p: str) -> str:
+    if not p:
+        return ""
+    p = canonical_key(p)
+    for marker in ("/record_chunks/", "/record_harsha/"):
+        idx = p.find(marker)
+        if idx != -1:
+            return p[idx:]
+    return p
+
+
 def load_target_files(csv_path: Path) -> Set[str]:
     """Load target files from CSV based on decision column."""
     print(f"Loading target files from {csv_path}...")
-    df = pd.read_csv(csv_path)
+    try:
+        df = pd.read_csv(csv_path)
+    except pd.errors.ParserError as e:
+        print(f"CSV parsing error: {e}")
+        print("Attempting to read with more robust settings...")
+        df = pd.read_csv(csv_path, on_bad_lines='skip', quoting=3)
     
     # Filter for TARGET decisions and normalize file paths to lowercase
     target_files = set()
@@ -60,7 +86,11 @@ def load_target_files(csv_path: Path) -> Set[str]:
             
         # Add to target set if decision is TARGET
         if pd.notna(decision) and str(decision).upper() == 'TARGET':
-            target_files.add(file_path.lower())
+            ck = canonical_key(file_path)
+            target_files.add(ck)
+            rk = canonical_rel_key(file_path)
+            if rk:
+                target_files.add(rk)
     
     print(f"Found {len(target_files)} target files")
     return target_files
@@ -88,9 +118,6 @@ def filter_manifest_by_target_files(
 ) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
     """Filter manifest entries to remove target files."""
     
-    # Normalize target files set to lowercase for case-insensitive matching
-    normalized_target_files = {f.lower() for f in target_files}
-    
     # Filter entries
     kept_entries = []
     removed_entries = []
@@ -105,9 +132,15 @@ def filter_manifest_by_target_files(
     }
     
     for entry in tqdm(manifest_rows, desc="Filtering entries"):
-        audio_path = entry.get('audio_path', '').lower()
-        
-        if audio_path in normalized_target_files:
+        audio_path = entry.get('audio_path', '')
+        source_audio = entry.get('source_audio', '')
+        keys = []
+        if audio_path:
+            keys.extend([canonical_key(audio_path), canonical_rel_key(audio_path)])
+        if source_audio:
+            keys.extend([canonical_key(source_audio), canonical_rel_key(source_audio)])
+
+        if any(k in target_files for k in keys if k):
             # This is a target file - remove it
             removed_entries.append(entry)
             stats['removed'] += 1
