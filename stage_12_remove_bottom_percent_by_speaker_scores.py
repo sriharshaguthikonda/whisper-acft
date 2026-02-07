@@ -61,6 +61,29 @@ def canonical_key(p: str) -> str:
     p = re.sub(r"/+", "/", p)
     return p.casefold()
 
+def candidate_keys(entry: Dict[str, Any]) -> List[str]:
+    """Return possible canonical keys to match scores (audio_path first)."""
+    keys: List[str] = []
+    for k in (
+        "audio_path",
+        "source_audio",
+        "source_audio_path",
+        "original_audio",
+        "orig_audio",
+        "base_audio",
+    ):
+        v = entry.get(k)
+        if isinstance(v, str) and v:
+            keys.append(canonical_key(v))
+    # Preserve order, remove duplicates/empties.
+    seen = set()
+    out: List[str] = []
+    for k in keys:
+        if k and k not in seen:
+            out.append(k)
+            seen.add(k)
+    return out
+
 
 def load_speaker_scores(csv_path: Path) -> Dict[str, float]:
     """Load speaker scores from CSV file into a dictionary."""
@@ -163,14 +186,26 @@ def filter_manifest_by_scores(
         'removed_no_score': 0,
         'removed_nan_score': 0,
         'kept_with_score': 0,
-        'kept_no_score': 0
+        'kept_no_score': 0,
+        'matched_audio_path': 0,
+        'matched_fallback': 0,
     }
     
     for entry in tqdm(manifest_rows, desc="Filtering entries"):
-        audio_path_key = canonical_key(entry.get('audio_path',''))
+        keys = candidate_keys(entry)
+        score = None
+        if keys:
+            if keys[0] in normalized_score_dict:
+                score = normalized_score_dict[keys[0]]
+                stats['matched_audio_path'] += 1
+            else:
+                for k in keys[1:]:
+                    if k in normalized_score_dict:
+                        score = normalized_score_dict[k]
+                        stats['matched_fallback'] += 1
+                        break
         
-        if audio_path_key in normalized_score_dict:
-            score = normalized_score_dict[audio_path_key]
+        if score is not None:
             
             if pd.isna(score):
                 # NaN scores - remove these
@@ -237,6 +272,8 @@ def print_statistics(stats: Dict[str, Any], bottom_percent: float) -> None:
     print("\nKeep breakdown:")
     print(f"  - With valid scores: {stats['kept_with_score']:,}")
     print(f"  - No scores found: {stats['kept_no_score']:,}")
+    print(f"Matched by audio_path: {stats['matched_audio_path']:,}")
+    print(f"Matched by fallback keys: {stats['matched_fallback']:,}")
     print(f"Target bottom {bottom_percent}% removal: {stats['total'] * (bottom_percent/100):.0f} entries")
     print(f"Actual removal: {stats['removed']:,} entries")
     print("=" * 60)

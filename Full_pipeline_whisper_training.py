@@ -428,6 +428,68 @@ def patch_stage9_reverb_mono(path: str) -> None:
         )
     p.write_text(txt, encoding="utf-8")
 
+def patch_stage12_scores_fallback(path: str) -> None:
+    p = Path(path)
+    if not p.exists():
+        return
+    txt = p.read_text(encoding="utf-8")
+    if "def candidate_keys" not in txt and "def canonical_key" in txt:
+        insert = (
+            "def candidate_keys(entry: dict) -> list[str]:\n"
+            "    \"\"\"Return possible canonical keys to match scores (audio_path first).\"\"\"\n"
+            "    keys = []\n"
+            "    for k in (\n"
+            "        \"audio_path\",\n"
+            "        \"source_audio\",\n"
+            "        \"source_audio_path\",\n"
+            "        \"original_audio\",\n"
+            "        \"orig_audio\",\n"
+            "        \"base_audio\",\n"
+            "    ):\n"
+            "        v = entry.get(k)\n"
+            "        if isinstance(v, str) and v:\n"
+            "            keys.append(canonical_key(v))\n"
+            "    seen = set()\n"
+            "    out = []\n"
+            "    for k in keys:\n"
+            "        if k and k not in seen:\n"
+            "            out.append(k)\n"
+            "            seen.add(k)\n"
+            "    return out\n\n\n"
+        )
+        txt = txt.replace(
+            "    p = re.sub(r\"/+\", \"/\", p)\n    return p.casefold()\n\n\n",
+            "    p = re.sub(r\"/+\", \"/\", p)\n    return p.casefold()\n\n\n" + insert,
+        )
+    txt = txt.replace(
+        "        'kept_with_score': 0,\n        'kept_no_score': 0\n    }\n",
+        "        'kept_with_score': 0,\n        'kept_no_score': 0,\n        'matched_audio_path': 0,\n        'matched_fallback': 0\n    }\n",
+    )
+    txt = txt.replace(
+        "        audio_path_key = canonical_key(entry.get('audio_path',''))\n        \n        if audio_path_key in normalized_score_dict:\n            score = normalized_score_dict[audio_path_key]\n",
+        "        keys = candidate_keys(entry)\n"
+        "        score = None\n"
+        "        if keys:\n"
+        "            if keys[0] in normalized_score_dict:\n"
+        "                score = normalized_score_dict[keys[0]]\n"
+        "                stats['matched_audio_path'] += 1\n"
+        "            else:\n"
+        "                for k in keys[1:]:\n"
+        "                    if k in normalized_score_dict:\n"
+        "                        score = normalized_score_dict[k]\n"
+        "                        stats['matched_fallback'] += 1\n"
+        "                        break\n"
+        "\n"
+        "        if score is not None:\n",
+    )
+    txt = txt.replace(
+        "    print(f\"  - No scores found: {stats['kept_no_score']:,}\")\n",
+        "    print(f\"  - No scores found: {stats['kept_no_score']:,}\")\n"
+        "    print(f\"Matched by audio_path: {stats['matched_audio_path']:,}\")\n"
+        "    print(f\"Matched by fallback keys: {stats['matched_fallback']:,}\")\n",
+    )
+    p.write_text(txt, encoding="utf-8")
+
 def stage_banner(name: str) -> None:
     log("\n\n" + "=" * 20 + f" {name} " + "=" * 20)
 
@@ -533,38 +595,49 @@ def _torch_index_url() -> str:
         return "https://download.pytorch.org/whl/cu118"
     return "https://download.pytorch.org/whl/cpu"
 
+def _torch_smoke_check() -> tuple[bool, str]:
+    code = (
+        "import torch, torchvision\n"
+        "import sys\n"
+        "ok = True\n"
+        "if " + ("True" if DEVICE == "cuda" else "False") + " and not torch.cuda.is_available():\n"
+        "    ok = False\n"
+        "ver = f\"torch={torch.__version__} torchvision={torchvision.__version__} cuda={torch.version.cuda or 'cpu'}\"\n"
+        "print(ver)\n"
+        "sys.exit(0 if ok else 2)\n"
+    )
+    r = subprocess.run([PY, "-c", code], capture_output=True, text=True)
+    msg = (r.stdout or r.stderr or "").strip()
+    return (r.returncode == 0, msg)
+
 def ensure_torchvision_compat():
     if not FIX_TORCHVISION:
         return
     if TORCH_FIX_ONCE and Path(TORCH_FIX_MARKER).exists():
         return
-    try:
-        import torch  # noqa: F401
-        import torchvision  # noqa: F401
-        if DEVICE == "cuda" and not torch.cuda.is_available():
-            raise RuntimeError("CUDA requested but torch.cuda.is_available() is False")
+    ok, msg = _torch_smoke_check()
+    if ok:
+        log(f"[fix] torch/torchvision OK: {msg}")
         if TORCH_FIX_ONCE:
             Path(TORCH_FIX_MARKER).parent.mkdir(parents=True, exist_ok=True)
             Path(TORCH_FIX_MARKER).write_text("ok\n", encoding="utf-8")
         return
-    except Exception as e:
-        log(f"[fix] torchvision import failed: {e}")
+    log(f"[fix] torch/torchvision check failed: {msg}")
     url = _torch_index_url()
     log(f"[fix] reinstall torch/torchvision/torchaudio from {url}")
     pip_args = [PY, "-m", "pip", "install", "-q", "--upgrade", "--index-url", url]
     if TORCH_FORCE_REINSTALL:
         pip_args.append("--force-reinstall")
     run(pip_args + ["torch", "torchvision", "torchaudio"])
-    try:
-        import torch  # noqa: F401
-        import torchvision  # noqa: F401
-        if DEVICE == "cuda" and not torch.cuda.is_available():
-            log("[fix] torch installed but CUDA still unavailable; restart runtime")
+    ok, msg = _torch_smoke_check()
+    if ok:
+        log(f"[fix] torch/torchvision OK after install: {msg}")
         if TORCH_FIX_ONCE:
             Path(TORCH_FIX_MARKER).parent.mkdir(parents=True, exist_ok=True)
             Path(TORCH_FIX_MARKER).write_text("ok\n", encoding="utf-8")
-    except Exception as e:
-        log(f"[fix] torch/torchvision still failing after install: {e}")
+    else:
+        log(f"[fix] torch/torchvision still failing after install: {msg}")
+        log("[fix] if this persists, restart the runtime to clear cached imports")
 
 def file_hash(path: Path, chunk_size: int = 1024 * 1024) -> str:
     h = hashlib.sha256()
@@ -1185,6 +1258,7 @@ patch_winsound_stage17(STAGE17_SCRIPT)
 patch_stage1_tokenizer("stage_1_Manifest_creation_local_only.py")
 patch_winsound_simple("stage17_merge_peft_checkpoint_to_full_model.py")
 patch_stage9_reverb_mono("stage_9_add_reverb_idempotent.py")
+patch_stage12_scores_fallback("stage_12_remove_bottom_percent_by_speaker_scores.py")
 
 # %%
 # ---------- CONFIG SANITY CHECKS ----------
