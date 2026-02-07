@@ -61,6 +61,17 @@ def canonical_key(p: str) -> str:
     p = re.sub(r"/+", "/", p)
     return p.casefold()
 
+def canonical_rel_key(p: str) -> str:
+    """Canonical key using relative tail for common roots."""
+    if not p:
+        return ""
+    p = canonical_key(p)
+    for marker in ("/record_chunks/", "/record_harsha/"):
+        idx = p.find(marker)
+        if idx != -1:
+            return p[idx:]
+    return p
+
 def candidate_keys(entry: Dict[str, Any]) -> List[str]:
     """Return possible canonical keys to match scores (audio_path first)."""
     keys: List[str] = []
@@ -82,6 +93,14 @@ def candidate_keys(entry: Dict[str, Any]) -> List[str]:
         if k and k not in seen:
             out.append(k)
             seen.add(k)
+    # Also add relative keys for matching different roots.
+    rels: List[str] = []
+    for k in out:
+        rk = canonical_rel_key(k)
+        if rk and rk not in seen:
+            rels.append(rk)
+            seen.add(rk)
+    out.extend(rels)
     return out
 
 
@@ -158,7 +177,13 @@ def filter_manifest_by_scores(
     """Filter manifest entries by speaker scores."""
     
     # Normalize score dictionary keys using canonical_key for robust matching
-    normalized_score_dict = {canonical_key(k): v for k, v in score_dict.items()}
+    normalized_score_dict = {}
+    for k, v in score_dict.items():
+        ck = canonical_key(k)
+        normalized_score_dict[ck] = v
+        rk = canonical_rel_key(k)
+        if rk:
+            normalized_score_dict[rk] = v
     
     # Collect scores for threshold calculation
     valid_scores = []

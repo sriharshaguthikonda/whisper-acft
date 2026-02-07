@@ -457,13 +457,80 @@ def patch_stage12_scores_fallback(path: str) -> None:
             "            seen.add(k)\n"
             "    return out\n\n\n"
         )
-        txt = txt.replace(
-            "    p = re.sub(r\"/+\", \"/\", p)\n    return p.casefold()\n\n\n",
-            "    p = re.sub(r\"/+\", \"/\", p)\n    return p.casefold()\n\n\n" + insert,
-        )
+    txt = txt.replace(
+        "    p = re.sub(r\"/+\", \"/\", p)\n    return p.casefold()\n\n\n",
+        "    p = re.sub(r\"/+\", \"/\", p)\n    return p.casefold()\n\n\n"
+        "def canonical_rel_key(p: str) -> str:\n"
+        "    \"\"\"Canonical key using relative tail for common roots.\"\"\"\n"
+        "    if not p:\n"
+        "        return \"\"\n"
+        "    p = canonical_key(p)\n"
+        "    for marker in (\"/record_chunks/\", \"/record_harsha/\"):\n"
+        "        idx = p.find(marker)\n"
+        "        if idx != -1:\n"
+        "            return p[idx:]\n"
+        "    return p\n\n\n" + insert,
+    )
     txt = txt.replace(
         "        'kept_with_score': 0,\n        'kept_no_score': 0\n    }\n",
         "        'kept_with_score': 0,\n        'kept_no_score': 0,\n        'matched_audio_path': 0,\n        'matched_fallback': 0\n    }\n",
+    )
+    txt = txt.replace(
+        "    keys = []\n"
+        "    for k in (\n"
+        "        \"audio_path\",\n"
+        "        \"source_audio\",\n"
+        "        \"source_audio_path\",\n"
+        "        \"original_audio\",\n"
+        "        \"orig_audio\",\n"
+        "        \"base_audio\",\n"
+        "    ):\n"
+        "        v = entry.get(k)\n"
+        "        if isinstance(v, str) and v:\n"
+        "            keys.append(canonical_key(v))\n"
+        "    seen = set()\n"
+        "    out = []\n"
+        "    for k in keys:\n"
+        "        if k and k not in seen:\n"
+        "            out.append(k)\n"
+        "            seen.add(k)\n"
+        "    return out\n\n\n",
+        "    keys = []\n"
+        "    for k in (\n"
+        "        \"audio_path\",\n"
+        "        \"source_audio\",\n"
+        "        \"source_audio_path\",\n"
+        "        \"original_audio\",\n"
+        "        \"orig_audio\",\n"
+        "        \"base_audio\",\n"
+        "    ):\n"
+        "        v = entry.get(k)\n"
+        "        if isinstance(v, str) and v:\n"
+        "            keys.append(canonical_key(v))\n"
+        "    seen = set()\n"
+        "    out = []\n"
+        "    for k in keys:\n"
+        "        if k and k not in seen:\n"
+        "            out.append(k)\n"
+        "            seen.add(k)\n"
+        "    rels = []\n"
+        "    for k in out:\n"
+        "        rk = canonical_rel_key(k)\n"
+        "        if rk and rk not in seen:\n"
+        "            rels.append(rk)\n"
+        "            seen.add(rk)\n"
+        "    out.extend(rels)\n"
+        "    return out\n\n\n",
+    )
+    txt = txt.replace(
+        "    normalized_score_dict = {canonical_key(k): v for k, v in score_dict.items()}\n",
+        "    normalized_score_dict = {}\n"
+        "    for k, v in score_dict.items():\n"
+        "        ck = canonical_key(k)\n"
+        "        normalized_score_dict[ck] = v\n"
+        "        rk = canonical_rel_key(k)\n"
+        "        if rk:\n"
+        "            normalized_score_dict[rk] = v\n",
     )
     txt = txt.replace(
         "        audio_path_key = canonical_key(entry.get('audio_path',''))\n        \n        if audio_path_key in normalized_score_dict:\n            score = normalized_score_dict[audio_path_key]\n",
