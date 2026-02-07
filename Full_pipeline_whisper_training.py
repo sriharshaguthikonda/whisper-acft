@@ -144,8 +144,8 @@ SKIP_STAGE_17 = False
 
 
 # Post-train: evaluation + charts + export
-RUN_EVAL_19C = False
-RUN_EVAL_19D = False
+RUN_EVAL_19C = True
+RUN_EVAL_19D = True
 EVAL_19C_SCRIPT = "evaluation_19c.py"
 EVAL_19D_SCRIPT = "evaluation_19d.py"
 EVAL_19C_ARGS = []  # e.g. ["--model", "path", "--data", "path"]
@@ -624,6 +624,17 @@ def patch_stage14_scores_robust(path: str) -> None:
         "            keys.extend([canonical_key(source_audio), canonical_rel_key(source_audio)])\n"
         "        \n"
         "        if any(k in target_files for k in keys if k):\n",
+    )
+    txt = txt.replace(
+        "            # Check if this file was in the CSV at all\n"
+        "            if audio_path and not any(audio_path == target_file for target_file in normalized_target_files):\n"
+        "                # We don't have info about this file from the CSV\n"
+        "                pass  # This is normal, many files won't be in the scores CSV\n",
+        "",
+    )
+    txt = txt.replace(
+        "    try:\n    df = pd.read_csv(csv_path)\n",
+        "    try:\n        df = pd.read_csv(csv_path)\n",
     )
     p.write_text(txt, encoding="utf-8")
 

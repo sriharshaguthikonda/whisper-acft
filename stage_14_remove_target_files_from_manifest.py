@@ -151,11 +151,6 @@ def filter_manifest_by_target_files(
             stats['kept'] += 1
             stats['kept_non_target'] += 1
             
-            # Check if this file was in the CSV at all
-            if audio_path and not any(audio_path == target_file for target_file in normalized_target_files):
-                # We don't have info about this file from the CSV
-                pass  # This is normal, many files won't be in the scores CSV
-    
     return kept_entries, stats
 
 
