@@ -39,15 +39,19 @@ TRANSFORMERS_CACHE = f"{CACHE_ROOT}/transformers"
 TORCH_HOME = f"{CACHE_ROOT}/torch"
 SYNC_CACHE_TO_DRIVE = True
 CACHE_DRIVE_ROOT = f"{DATA_ROOT_DRIVE}/cache"
+CACHE_RSYNC_SIZE_ONLY = True
 
 # Copy strategy
 COPY_TRANSCRIPTS_FOR_STAGE1 = True
 COPY_AUDIO_FOR_STAGE1 = False  # set True if stage 1 should use local audio
-BACKGROUND_COPY_LATER = False  # set True to copy non-stage1 deps in background
+BACKGROUND_COPY_LATER = True  # copy stage3/6/7/9 deps in background during stage1/2
 
 # Output verification
 VERIFY_OUTPUTS = True
 VERIFY_JSONL_SAMPLE = 5
+ENABLE_OUTPUT_SIGNATURES = True  # manifest diff / hash skip
+# Capture hides live tqdm/progress bars; set False to stream output live.
+CAPTURE_STAGE_OUTPUT = True
 
 # Optional: rclone (faster on huge transfers; requires rclone config)
 USE_RCLONE = False
@@ -56,7 +60,11 @@ RCLONE_TRANSFERS = 8
 
 # Torch/torchvision compatibility fix (for pyannote/lightning)
 FIX_TORCHVISION = True
-TORCH_INDEX_URL = ""  # optional override, e.g. "https://download.pytorch.org/whl/cu121"
+TORCH_INDEX_URL = "https://download.pytorch.org/whl/cu121"
+# optional override, e.g. "https://download.pytorch.org/whl/cu121"
+TORCH_FORCE_REINSTALL = False
+TORCH_FIX_ONCE = True
+TORCH_FIX_MARKER = f"{CACHE_ROOT}/torch_fix_ok.txt"
 
 # Optional: pre-stage1 audio copy using existing tasks_pending.jsonl from Drive
 PRESTAGE1_AUDIO_COPY = False
@@ -82,8 +90,8 @@ TARGET_REF_DIR = f"{DATA_ROOT}/Record_only_by_harsha"
 OTHER_REF_DIR = f"{DATA_ROOT}/Record_others_compacted"  # set "" to disable
 OTHER_VOICES_DIR = f"{DATA_ROOT}/Record_others_compacted"
 
-NOISE_DIR = f"{DATA_ROOT}/noise/RIRS_NOISES/pointsource_noises"
-RIR_DIR = f"{DATA_ROOT}/noise/RIRS_NOISES/real_rirs_isotropic_noises"
+NOISE_DIR = f"{DATA_ROOT}/RIRS_NOISES/pointsource_noises"
+RIR_DIR = f"{DATA_ROOT}/RIRS_NOISES/real_rirs_isotropic_noises"
 
 TEST_CHUNKS_DIR = f"{DATA_ROOT}/Record_test_chunks"
 
@@ -141,6 +149,9 @@ EVAL_19C_SCRIPT = "evaluation_19c.py"
 EVAL_19D_SCRIPT = "evaluation_19d.py"
 EVAL_19C_ARGS = []  # e.g. ["--model", "path", "--data", "path"]
 EVAL_19D_ARGS = []
+EVAL_ADD_BATCH_ARGS = False  # set True if eval scripts accept --batch_size/--max_samples
+EVAL_BATCH_SIZE = 4
+EVAL_MAX_SAMPLES = 0  # 0 = no limit
 EVAL_19C_OUT_JSON = f"{DATA_ROOT}/eval_19c.json"
 EVAL_19D_OUT_JSON = f"{DATA_ROOT}/eval_19d.json"
 
@@ -210,6 +221,13 @@ os.environ["TRANSFORMERS_CACHE"] = TRANSFORMERS_CACHE
 os.environ["TORCH_HOME"] = TORCH_HOME
 Path(CACHE_ROOT).mkdir(parents=True, exist_ok=True)
 if not HF_TOKEN:
+    # Try Colab secrets first, then env var.
+    try:
+        from google.colab import userdata  # type: ignore
+        HF_TOKEN = (userdata.get("HF_TOKEN") or "").strip()
+    except Exception:
+        HF_TOKEN = ""
+if not HF_TOKEN:
     HF_TOKEN = os.environ.get("HF_TOKEN", "")
 if not HF_TOKEN and not SKIP_STAGE_3:
     try:
@@ -271,16 +289,23 @@ def run(cmd):
 def run_stage(cmd):
     if isinstance(cmd, str):
         log(f"$ {cmd}")
-        p = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        if CAPTURE_STAGE_OUTPUT:
+            p = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+        else:
+            p = subprocess.run(cmd, shell=True)
     else:
         log("$ " + " ".join(shlex.quote(str(c)) for c in cmd))
-        p = subprocess.run([str(c) for c in cmd], capture_output=True, text=True)
-    if p.stdout:
-        print("STDOUT:\n", p.stdout)
-    if p.stderr:
-        print("STDERR:\n", p.stderr)
+        if CAPTURE_STAGE_OUTPUT:
+            p = subprocess.run([str(c) for c in cmd], capture_output=True, text=True)
+        else:
+            p = subprocess.run([str(c) for c in cmd])
+    if CAPTURE_STAGE_OUTPUT:
+        if p.stdout:
+            print("STDOUT:\n", p.stdout)
+        if p.stderr:
+            print("STDERR:\n", p.stderr)
     if p.returncode != 0:
-        raise subprocess.CalledProcessError(p.returncode, p.args, output=p.stdout, stderr=p.stderr)
+        raise subprocess.CalledProcessError(p.returncode, p.args, output=getattr(p, "stdout", None), stderr=getattr(p, "stderr", None))
 
 def seed_manifest(src, dst):
     src_p, dst_p = Path(src), Path(dst)
@@ -376,6 +401,33 @@ def patch_stage1_tokenizer(path):
     txt = txt.replace("processor.tokenizer(", "tokenizer(")
     p.write_text(txt, encoding="utf-8")
 
+def patch_stage9_reverb_mono(path: str) -> None:
+    p = Path(path)
+    if not p.exists():
+        return
+    txt = p.read_text(encoding="utf-8")
+    if "_ensure_mono" not in txt:
+        return
+    # Add mono guards in convolution and after RIR load.
+    if "def _fft_convolve_same" in txt and "x = _ensure_mono(x)" not in txt:
+        txt = txt.replace(
+            "def _fft_convolve_same(x: np.ndarray, h: np.ndarray) -> np.ndarray:\n"
+            "    \"\"\"Fast-ish convolution returning same length as x.\"\"\"\n",
+            "def _fft_convolve_same(x: np.ndarray, h: np.ndarray) -> np.ndarray:\n"
+            "    \"\"\"Fast-ish convolution returning same length as x.\"\"\"\n"
+            "    if x.ndim > 1:\n"
+            "        x = _ensure_mono(x)\n"
+            "    if h.ndim > 1:\n"
+            "        h = _ensure_mono(h)\n",
+        )
+    if "rir, sr_r = sf.read" in txt and "rir = _ensure_mono(rir)" not in txt:
+        txt = txt.replace(
+            "    rir, sr_r = sf.read(rir_path, dtype=\"float32\", always_2d=False)\n",
+            "    rir, sr_r = sf.read(rir_path, dtype=\"float32\", always_2d=False)\n"
+            "    rir = _ensure_mono(rir).astype(np.float32)\n",
+        )
+    p.write_text(txt, encoding="utf-8")
+
 def stage_banner(name: str) -> None:
     log("\n\n" + "=" * 20 + f" {name} " + "=" * 20)
 
@@ -465,6 +517,14 @@ def _torch_index_url() -> str:
         cuda = (torch.version.cuda or "").strip()
     except Exception:
         return "https://download.pytorch.org/whl/cpu"
+    if not cuda:
+        try:
+            # If GPU exists but torch is CPU-only, prefer CUDA wheels.
+            r = subprocess.run(["nvidia-smi"], capture_output=True, text=True)
+            if r.returncode == 0:
+                return "https://download.pytorch.org/whl/cu121"
+        except Exception:
+            pass
     if cuda.startswith("12.4"):
         return "https://download.pytorch.org/whl/cu124"
     if cuda.startswith("12.1"):
@@ -476,15 +536,35 @@ def _torch_index_url() -> str:
 def ensure_torchvision_compat():
     if not FIX_TORCHVISION:
         return
+    if TORCH_FIX_ONCE and Path(TORCH_FIX_MARKER).exists():
+        return
     try:
+        import torch  # noqa: F401
         import torchvision  # noqa: F401
+        if DEVICE == "cuda" and not torch.cuda.is_available():
+            raise RuntimeError("CUDA requested but torch.cuda.is_available() is False")
+        if TORCH_FIX_ONCE:
+            Path(TORCH_FIX_MARKER).parent.mkdir(parents=True, exist_ok=True)
+            Path(TORCH_FIX_MARKER).write_text("ok\n", encoding="utf-8")
         return
     except Exception as e:
         log(f"[fix] torchvision import failed: {e}")
     url = _torch_index_url()
     log(f"[fix] reinstall torch/torchvision/torchaudio from {url}")
-    run([PY, "-m", "pip", "install", "-q", "--upgrade", "--force-reinstall",
-         "torch", "torchvision", "torchaudio", "--index-url", url])
+    pip_args = [PY, "-m", "pip", "install", "-q", "--upgrade", "--index-url", url]
+    if TORCH_FORCE_REINSTALL:
+        pip_args.append("--force-reinstall")
+    run(pip_args + ["torch", "torchvision", "torchaudio"])
+    try:
+        import torch  # noqa: F401
+        import torchvision  # noqa: F401
+        if DEVICE == "cuda" and not torch.cuda.is_available():
+            log("[fix] torch installed but CUDA still unavailable; restart runtime")
+        if TORCH_FIX_ONCE:
+            Path(TORCH_FIX_MARKER).parent.mkdir(parents=True, exist_ok=True)
+            Path(TORCH_FIX_MARKER).write_text("ok\n", encoding="utf-8")
+    except Exception as e:
+        log(f"[fix] torch/torchvision still failing after install: {e}")
 
 def file_hash(path: Path, chunk_size: int = 1024 * 1024) -> str:
     h = hashlib.sha256()
@@ -559,7 +639,10 @@ def restore_cache_from_drive():
     if not src.exists():
         return
     Path(CACHE_ROOT).mkdir(parents=True, exist_ok=True)
-    run(["rsync", "-a", "--info=progress2", f"{src}/", f"{CACHE_ROOT}/"])
+    rsync_args = ["rsync", "-a", "--info=progress2"]
+    if CACHE_RSYNC_SIZE_ONLY:
+        rsync_args.append("--size-only")
+    run(rsync_args + [f"{src}/", f"{CACHE_ROOT}/"])
     log(f"[cache] restored from {src}")
 
 def sync_cache_to_drive():
@@ -570,7 +653,10 @@ def sync_cache_to_drive():
         return
     dst = Path(CACHE_DRIVE_ROOT)
     dst.mkdir(parents=True, exist_ok=True)
-    run(["rsync", "-a", "--info=progress2", f"{src}/", f"{dst}/"])
+    rsync_args = ["rsync", "-a", "--info=progress2"]
+    if CACHE_RSYNC_SIZE_ONLY:
+        rsync_args.append("--size-only")
+    run(rsync_args + [f"{src}/", f"{dst}/"])
     log(f"[cache] synced to {dst}")
 
 def sync_record_chunks_to_drive():
@@ -826,6 +912,63 @@ def verify_jsonl(path: Path) -> bool:
     except Exception:
         return False
 
+def _file_signature(path: Path) -> dict:
+    if path.is_dir():
+        total = 0
+        count = 0
+        for p in path.rglob("*"):
+            if p.is_file():
+                count += 1
+                try:
+                    total += p.stat().st_size
+                except Exception:
+                    pass
+        return {"type": "dir", "files": count, "bytes": total}
+    try:
+        size = path.stat().st_size
+    except Exception:
+        size = -1
+    sig = {"type": "file", "bytes": size}
+    if path.suffix.lower() == ".jsonl":
+        try:
+            with path.open("r", encoding="utf-8", errors="ignore") as f:
+                rows = sum(1 for _ in f)
+            sig["rows"] = rows
+        except Exception:
+            pass
+    try:
+        sig["sha256"] = file_hash(path)
+    except Exception:
+        pass
+    return sig
+
+def outputs_signature(paths) -> dict:
+    if not ENABLE_OUTPUT_SIGNATURES:
+        return {}
+    out = {}
+    for p in paths:
+        path = Path(p)
+        if path.exists():
+            out[str(path)] = _file_signature(path)
+    return out
+
+def record_outputs_signature(stage: str, paths) -> None:
+    if not ENABLE_OUTPUT_SIGNATURES:
+        return
+    state = PIPELINE_STATE
+    sigs = state.get("output_sigs", {})
+    sigs[stage] = outputs_signature(paths)
+    state["output_sigs"] = sigs
+    save_pipeline_state(state)
+
+def outputs_signature_matches(stage: str, paths) -> bool:
+    if not ENABLE_OUTPUT_SIGNATURES:
+        return False
+    sigs = PIPELINE_STATE.get("output_sigs", {})
+    if stage not in sigs:
+        return False
+    return sigs.get(stage) == outputs_signature(paths)
+
 def outputs_ok(paths) -> bool:
     for p in paths:
         path = Path(p)
@@ -845,6 +988,7 @@ def outputs_ok(paths) -> bool:
 
 def assert_outputs(paths, stage):
     if outputs_ok(paths):
+        record_outputs_signature(stage, paths)
         return
     missing = [str(p) for p in paths if not Path(p).exists()]
     raise RuntimeError(f"[{stage}] expected outputs missing/empty: {missing}")
@@ -878,6 +1022,10 @@ def should_run(stage, outputs):
         log(f"[skip] {stage} already completed and outputs present")
         update_stage_state(stage, "skipped_existing")
         return False
+    if outputs_ok(outputs) and outputs_signature_matches(stage, outputs):
+        log(f"[skip] {stage} outputs match previous signature")
+        update_stage_state(stage, "skipped_existing")
+        return False
     return True
 
 def check_required_paths():
@@ -902,15 +1050,11 @@ MAX_WORKERS = max(1, CPU_COUNT)
 FFMPEG_WORKERS = MAX_WORKERS
 TASK_WORKERS = MAX_WORKERS
 AUG_WORKERS = MAX_WORKERS
-# Heuristic: increase threads as worker count grows, but cap total load
-if FFMPEG_WORKERS >= 32:
-    FFMPEG_THREADS = 4
-elif FFMPEG_WORKERS >= 16:
-    FFMPEG_THREADS = 3
-elif FFMPEG_WORKERS >= 8:
-    FFMPEG_THREADS = 2
-else:
+# Heuristic: keep total threads <= CPU count (cap per-worker threads to 4)
+if FFMPEG_WORKERS <= 0:
     FFMPEG_THREADS = 1
+else:
+    FFMPEG_THREADS = max(1, min(4, (CPU_COUNT // FFMPEG_WORKERS) or 1))
 
 if AUTO_WORKERS:
     SPEAKER_WORKERS = MAX_WORKERS
@@ -970,10 +1114,55 @@ restore_files_from_drive([TASKS_PENDING, PAIRS_PENDING, STAGE2_MANIFEST], label=
 # ---------- PYTHON DEPS ----------
 PY = sys.executable
 run([PY, "-m", "pip", "install", "-q", "-U", "pip"])
-run([PY, "-m", "pip", "install", "-q",
-     "transformers", "datasets", "accelerate",
-     "soundfile", "librosa", "numpy", "pandas", "scipy", "tqdm", "orjson", "matplotlib",
-     "jiwer", "edlib", "pyannote.audio", "huggingface_hub"])
+
+def get_installed_version(pkg: str) -> str | None:
+    try:
+        from importlib.metadata import version
+        return version(pkg)
+    except Exception:
+        return None
+
+def install_if_needed(pkgs: list[str]) -> None:
+    missing = []
+    for p in pkgs:
+        name = p.split("==", 1)[0]
+        have = get_installed_version(name)
+        want = p.split("==", 1)[1] if "==" in p else None
+        if have is None:
+            missing.append(p)
+        elif want and have != want:
+            missing.append(p)
+    if missing:
+        run([PY, "-m", "pip", "install", "-q"] + missing)
+    else:
+        log("[deps] all required packages already installed")
+
+def log_installed_versions(pkgs: list[str]) -> None:
+    for p in pkgs:
+        name = p.split("==", 1)[0]
+        ver = get_installed_version(name)
+        log(f"[deps] {name}=={ver if ver else 'not-installed'}")
+
+deps = [
+    "transformers",
+    "datasets",
+    "accelerate",
+    "soundfile",
+    "librosa",
+    "numpy",
+    "pandas",
+    "scipy",
+    "tqdm",
+    "orjson",
+    "matplotlib",
+    "jiwer",
+    "edlib",
+    "pyannote.audio",
+    "huggingface_hub",
+]
+
+install_if_needed(deps)
+log_installed_versions(deps)
 
 # Fix torchvision mismatch if needed (pyannote/lightning uses torchmetrics->torchvision)
 ensure_torchvision_compat()
@@ -995,6 +1184,7 @@ patch_winsound_stage14("stage_14_remove_target_files_from_manifest.py")
 patch_winsound_stage17(STAGE17_SCRIPT)
 patch_stage1_tokenizer("stage_1_Manifest_creation_local_only.py")
 patch_winsound_simple("stage17_merge_peft_checkpoint_to_full_model.py")
+patch_stage9_reverb_mono("stage_9_add_reverb_idempotent.py")
 
 # %%
 # ---------- CONFIG SANITY CHECKS ----------
@@ -1057,6 +1247,15 @@ if should_run("stage_3", [SCORES_CSV]):
     stage_banner("STAGE 3")
     ensure_local_paths([TARGET_REF_DIR] + ([OTHER_REF_DIR] if OTHER_REF_DIR else []), label="stage_3")
     update_stage_state("stage_3", "running")
+    if DEVICE == "cuda":
+        try:
+            import torch
+            if not torch.cuda.is_available():
+                log("[warn] CUDA not available; switching Stage 3 to CPU")
+                DEVICE = "cpu"
+                SPEAKER_WORKERS = max(1, min(SPEAKER_WORKERS, 2))
+        except Exception:
+            DEVICE = "cpu"
     cmd = [
         PY, "stage_3_sort_audio_files_by_speaker_target_other.py",
         "--in", CHUNKS_DIR,
@@ -1075,7 +1274,36 @@ if should_run("stage_3", [SCORES_CSV]):
         cmd += ["--dry_run", "--copy"]
     else:
         cmd += ["--copy"]
-    run_stage(cmd)
+    try:
+        run_stage(cmd)
+    except subprocess.CalledProcessError as e:
+        err = (e.stderr or "").lower()
+        if "out of memory" in err or "cuda out of memory" in err:
+            log("[oom] stage_3 hit OOM; retrying with lower batch/workers and CPU")
+            SPEAKER_BATCH = max(1, SPEAKER_BATCH // 2)
+            SPEAKER_WORKERS = max(1, min(SPEAKER_WORKERS, 2))
+            DEVICE = "cpu"
+            cmd = [
+                PY, "stage_3_sort_audio_files_by_speaker_target_other.py",
+                "--in", CHUNKS_DIR,
+                "--target_ref_dir", TARGET_REF_DIR,
+                "--target_out", TARGET_OUT_DIR,
+                "--other_out", OTHER_OUT_DIR,
+                "--threshold", str(SPEAKER_THRESHOLD),
+                "--device", DEVICE,
+                "--batch_size", str(SPEAKER_BATCH),
+                "--workers", str(SPEAKER_WORKERS),
+                "--state_file", STATE_FILE,
+            ]
+            if OTHER_REF_DIR:
+                cmd += ["--other_ref_dir", OTHER_REF_DIR]
+            if SPEAKER_SORT_DRY_RUN:
+                cmd += ["--dry_run", "--copy"]
+            else:
+                cmd += ["--copy"]
+            run_stage(cmd)
+        else:
+            raise
     assert_outputs([SCORES_CSV], "stage_3")
     update_stage_state("stage_3", "done")
 # %%
@@ -1211,6 +1439,7 @@ if should_run("stage_10b", [STAGE10B_MANIFEST]):
          "--silence_noise_db", "-35",
          "--silence_min_dur", "0.15"])
     assert_outputs([STAGE10B_MANIFEST], "stage_10b")
+    sync_record_chunks_to_drive()
     update_stage_state("stage_10b", "done")
 # %%
 # ---------- STAGE 12 ----------
@@ -1264,6 +1493,7 @@ if should_run("stage_15", [STAGE15_TRAIN]):
              "--output_manifest", STAGE15_TRAIN,
              "--seed", str(RANDOM_SEED)])
     assert_outputs([STAGE15_TRAIN], "stage_15")
+    sync_record_chunks_to_drive()
     update_stage_state("stage_15", "done")
 # %%
 # ---------- STAGE 16 ----------
@@ -1315,7 +1545,12 @@ if RUN_EVAL_19C:
         raise RuntimeError(f"Eval script not found: {EVAL_19C_SCRIPT}")
     if not EVAL_19C_ARGS:
         log("[warn] EVAL_19C_ARGS is empty; set args if your script requires them.")
-    run_stage([PY, EVAL_19C_SCRIPT] + [str(x) for x in EVAL_19C_ARGS])
+    eval_args = [str(x) for x in EVAL_19C_ARGS]
+    if EVAL_ADD_BATCH_ARGS:
+        eval_args += ["--batch_size", str(EVAL_BATCH_SIZE)]
+        if EVAL_MAX_SAMPLES:
+            eval_args += ["--max_samples", str(EVAL_MAX_SAMPLES)]
+    run_stage([PY, EVAL_19C_SCRIPT] + eval_args)
     if EVAL_19C_OUT_JSON:
         assert_outputs([EVAL_19C_OUT_JSON], "stage_19c_eval")
 
@@ -1327,7 +1562,12 @@ if RUN_EVAL_19D:
         raise RuntimeError(f"Eval script not found: {EVAL_19D_SCRIPT}")
     if not EVAL_19D_ARGS:
         log("[warn] EVAL_19D_ARGS is empty; set args if your script requires them.")
-    run_stage([PY, EVAL_19D_SCRIPT] + [str(x) for x in EVAL_19D_ARGS])
+    eval_args = [str(x) for x in EVAL_19D_ARGS]
+    if EVAL_ADD_BATCH_ARGS:
+        eval_args += ["--batch_size", str(EVAL_BATCH_SIZE)]
+        if EVAL_MAX_SAMPLES:
+            eval_args += ["--max_samples", str(EVAL_MAX_SAMPLES)]
+    run_stage([PY, EVAL_19D_SCRIPT] + eval_args)
     if EVAL_19D_OUT_JSON:
         assert_outputs([EVAL_19D_OUT_JSON], "stage_19d_eval")
 

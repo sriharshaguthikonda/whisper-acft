@@ -63,6 +63,10 @@ def _safe_write_wav(path: Path, audio: np.ndarray, sr: int) -> None:
 
 def _fft_convolve_same(x: np.ndarray, h: np.ndarray) -> np.ndarray:
     """Fast-ish convolution returning same length as x."""
+    if x.ndim > 1:
+        x = _ensure_mono(x)
+    if h.ndim > 1:
+        h = _ensure_mono(h)
     try:
         import scipy.signal
 
@@ -145,6 +149,7 @@ def process_one(
 
     rir_path = rng.choice(rir_files)
     rir, sr_r = sf.read(rir_path, dtype="float32", always_2d=False)
+    rir = _ensure_mono(rir).astype(np.float32)
     if sr_r != sr:
         # RIR corpora often mix sampling rates; resample instead of dropping the file.
         rir = _resample_poly(rir.astype(np.float32), sr_r, sr).astype(np.float32)
