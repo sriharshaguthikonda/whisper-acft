@@ -35,19 +35,19 @@ usage
 i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py" `
   --test_manifest "I:\Record_chunks\pairs_manifest_combined_all_datasets_randomized_test_with_tempo.jsonl" `
   --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores.csv" `
-  --checkpoint_dir "I:\Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_tiny_en_21" `
+  --checkpoint_dir "I:\Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_22" `
   --mix_per_target 5 `
   --other_peak_ratio 1.0 `
   --sweep_snr_db "15,5,0" `
   --sweep_overlap "0.25,0.75,1" `
   --dynamic_audio_ctx 1 `
-  --batch_size 4 `
+  --batch_size 1 `
   --auto_batch 0 `
   --resume `
   --others_dir "I:\Record_others_chunks" `
   --others_manifest "I:\Record_others_chunks\pairs_pending_stereo.jsonl" `
   --ffmpeg_path "ffmpeg" `
-  --percentage 10 `
+  --percentage 4 `
   --vad_filter 0 `
   --lora_merge `
   --lora_base_model "futo-org/acft-whisper-small.en" `
@@ -1473,6 +1473,9 @@ def eval_one_model(
     *,
     lora_merge: bool,
     lora_base_model: Optional[str],
+    results: Optional[dict] = None,
+    run_args: Optional[dict] = None,
+    save_every: int = 0,
 ) -> Tuple[Dict, Dict[str, Dict]]:
 
     model = _load_model_for_eval(
@@ -1518,6 +1521,17 @@ def eval_one_model(
         vad_trimmer = SileroVADTrimmer()
 
     model_name = _model_pred_key(model_id_or_path, bool(lora_merge))
+
+    save_every_n = int(save_every) if save_every else 0
+    eval_count = 0
+
+    def _maybe_autosave() -> None:
+        if save_every_n <= 0 or results is None:
+            return
+        if eval_count <= 0 or (eval_count % save_every_n) != 0:
+            return
+        save_incremental_results(results, all_predictions, out_json, run_args=run_args)
+        print(f"✓ Auto-saved after {eval_count} evaluated samples for {model_name}")
 
     audio_cache = AudioCacheLRU(cfg.audio_cache_bytes)
 
@@ -1657,6 +1671,8 @@ def eval_one_model(
                                 "vad": vad_info,
                                 "mix": mix_meta,
                             }
+                            eval_count += 1
+                            _maybe_autosave()
                             continue
 
                         audio_eval = mixed
@@ -1805,6 +1821,8 @@ def eval_one_model(
                             "vad": c.get("vad", {"vad_applied": False}),
                             "mix": c.get("mix", {}),
                         }
+                        eval_count += 1
+                        _maybe_autosave()
 
                     pending = pending[cur_bs:]
 
@@ -1931,15 +1949,19 @@ def eval_one_model(
                         "vad": c.get("vad", {"vad_applied": False}),
                         "mix": c.get("mix", {}),
                     }
+                    eval_count += 1
+                    _maybe_autosave()
 
                 pending = pending[cur_bs:]
 
-    # Overall metrics and per-condition metrics
-    overall = compute_metrics_from_items(per_item, cfg.normalize_mode)
-    by_cond_items = group_items_by_condition(per_item)
-    by_cond: Dict[str, Dict] = {}
-    for cid, items in by_cond_items.items():
-        by_cond[cid] = compute_metrics_from_items(items, cfg.normalize_mode)
+    # Overall metrics and per-condition metrics (from saved predictions, supports resume)
+    active_keys = {pr["mix_key"] for pr in pair_rows}
+    overall, by_cond = recompute_metrics_from_saved_predictions(
+        all_predictions,
+        model_name,
+        cfg.normalize_mode,
+        active_keys=active_keys,
+    )
 
     overall["skipped"] = len(skipped)
     return overall, by_cond
@@ -2157,6 +2179,35 @@ def _run_groq_verify(base_pairs: List[dict], checkpoint_dir: Path) -> None:
     print(f"✓ Groq verify applied refs: target={t_updated} other={o_updated}")
 
 
+def _apply_verified_refs_to_pairs(base_pairs: List[dict], pair_rows: List[dict], all_predictions: dict) -> None:
+    if not base_pairs or not pair_rows:
+        return
+
+    base_ref: Dict[str, Tuple[str, str]] = {}
+    for bp in base_pairs:
+        bk = bp.get("base_key")
+        if not bk:
+            continue
+        base_ref[str(bk)] = (bp.get("target_ref", ""), bp.get("other_ref", ""))
+
+    updated = 0
+    for pr in pair_rows:
+        bk = pr.get("base_key")
+        if bk not in base_ref:
+            continue
+        t_ref, o_ref = base_ref[bk]
+        pr["target_ref"] = t_ref
+        pr["other_ref"] = o_ref
+        updated += 1
+
+        key = pr.get("mix_key")
+        if key in all_predictions:
+            all_predictions[key]["target_reference"] = t_ref
+            all_predictions[key]["other_reference"] = o_ref
+
+    print(f"✓ Updated refs for {updated} eval pairs after Groq verify")
+
+
 # ----------------------------
 # Main
 # ----------------------------
@@ -2246,6 +2297,8 @@ def main() -> None:
     ap.add_argument("--force_resume", action="store_true")
     ap.add_argument("--recalc_metrics", action="store_true",
                     help="Recompute metrics from saved predictions for already-evaluated models without new inference.")
+    ap.add_argument("--save_every", type=int, default=100,
+                    help="Auto-save predictions/results every N evaluated samples (0 disables).")
 
     args = ap.parse_args()
 
@@ -2261,6 +2314,8 @@ def main() -> None:
         raise ValueError("--target_percentage must be 0..100")
     if args.target_max < 0:
         raise ValueError("--target_max must be >= 0")
+    if args.save_every < 0:
+        raise ValueError("--save_every must be >= 0")
 
     rows = load_jsonl(args.test_manifest)
 
@@ -2330,9 +2385,6 @@ def main() -> None:
             percentage=float(args.percentage),
             seed=int(args.seed),
         )
-
-    if args.groq_verify:
-        _run_groq_verify(base_pairs, args.checkpoint_dir)
 
     snr_list = parse_float_list(args.sweep_snr_db) or [10.0]
     if args.disable_overlap_sweep:
@@ -2515,16 +2567,33 @@ def main() -> None:
                 "predictions": {},
             }
 
+    groq_pending = bool(args.groq_verify)
+    groq_done = False
+
+    def maybe_run_groq_verify() -> None:
+        nonlocal groq_done
+        if groq_done or not groq_pending:
+            return
+        print("▶ Groq verify requested; running after base model evaluation...")
+        _run_groq_verify(base_pairs, args.checkpoint_dir)
+        _apply_verified_refs_to_pairs(base_pairs, pair_rows, all_predictions)
+        groq_done = True
+
     vad_trimmer = SileroVADTrimmer() if cfg.vad.enabled else None
+
+    base_model_name = str(args.base_model)
 
     for m in models:
         model_results_key = _model_results_key(m, bool(args.lora_merge))
         model_already_done = model_results_key in evaluated_models
         model_name = _model_pred_key(m, bool(args.lora_merge))
         wants_recalc = args.recalc_metrics or args.force_resume
+        is_base_model = (str(m) == base_model_name)
 
         if model_already_done and not wants_recalc:
             print(f"\n⏭ Skipping already evaluated model: {model_results_key}")
+            if is_base_model:
+                maybe_run_groq_verify()
             continue
 
         print("\n" + "=" * 80)
@@ -2545,6 +2614,8 @@ def main() -> None:
                 results["models"] = [mm for mm in results.get("models", []) if mm.get("model") != model_results_key]
                 results["models"].append({"model": model_results_key, "metrics_overall": overall, "metrics_by_condition": by_cond})
                 save_incremental_results(results, all_predictions, out_json, run_args=current_run_args)
+                if is_base_model:
+                    maybe_run_groq_verify()
                 continue
             else:
                 print("⚠ Recalc requested but no saved predictions found; running full evaluation.")
@@ -2559,10 +2630,15 @@ def main() -> None:
             out_json=out_json,
             lora_merge=bool(args.lora_merge),
             lora_base_model=args.lora_base_model,
+            results=results,
+            run_args=current_run_args,
+            save_every=int(args.save_every),
         )
 
         results["models"].append({"model": model_results_key, "metrics_overall": overall, "metrics_by_condition": by_cond})
         save_incremental_results(results, all_predictions, out_json, run_args=current_run_args)
+        if is_base_model:
+            maybe_run_groq_verify()
 
         print(f"samples={overall.get('samples')} skipped={overall.get('skipped')}")
         print(f"WER target micro={overall.get('wer_micro_target')} | WER other micro={overall.get('wer_micro_other')}")

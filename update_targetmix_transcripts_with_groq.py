@@ -382,8 +382,23 @@ def apply_updates(
     return updated_t, updated_o
 
 
+def _unique_env_paths(paths: Sequence[Path]) -> List[Path]:
+    seen = set()
+    out: List[Path] = []
+    for p in paths:
+        try:
+            rp = p.resolve()
+        except Exception:
+            rp = p
+        key = str(rp).lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        out.append(p)
+    return out
+
+
 def main() -> None:
-    load_dotenv()
 
     ap = argparse.ArgumentParser()
     ap.add_argument("--input_json", type=Path, required=True)
@@ -416,6 +431,8 @@ def main() -> None:
     ap.add_argument("--api_key", default=None)
     ap.add_argument("--key_env_names", nargs="*", default=["GROQ_API_KEY", "GROQ_API_KEYS"])
     ap.add_argument("--keys_file", type=Path, default=None)
+    ap.add_argument("--env_file", type=Path, default=None,
+                    help="Optional .env file to load Groq keys from (in addition to CWD/script .env).")
 
     args = ap.parse_args()
 
@@ -431,6 +448,17 @@ def main() -> None:
     if args.cache_jsonl is None:
         args.cache_jsonl = args.input_json.with_name(args.input_json.stem + "_groq_cache.jsonl")
 
+    # Load .envs (explicit, CWD, script dir) without overriding existing env vars
+    env_candidates: List[Path] = []
+    if args.env_file:
+        env_candidates.append(args.env_file)
+    env_candidates.append(Path(".env"))
+    env_candidates.append(Path(__file__).with_name(".env"))
+    env_files = _unique_env_paths(env_candidates)
+    for p in env_files:
+        if p.exists():
+            load_dotenv(dotenv_path=p, override=False)
+
     # Keys
     keys: List[Key] = []
     if args.api_key:
@@ -438,7 +466,8 @@ def main() -> None:
     if args.keys_file:
         keys.extend(_load_keys_from_file(args.keys_file))
     keys.extend(_load_keys_from_env_names(args.key_env_names))
-    keys.extend(_load_keys_from_env_file(Path(".env"), args.key_env_names))
+    for env_path in env_files:
+        keys.extend(_load_keys_from_env_file(env_path, args.key_env_names))
 
     # De-dup by value
     seen = set()

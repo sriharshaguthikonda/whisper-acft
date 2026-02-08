@@ -17,8 +17,8 @@ Outputs
 Usage (Windows PowerShell)
 -------------------------
 I:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\stage_19d_plot_eval_charts.py `
-  --in_json "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx6\evaluation_results_futo_like_targetmix_sweep.json" `
-  --out_dir "I:\Stage_2_shuffle_Dynamic_n_ctx_checkpoints_partialctx6"
+  --in_json "I:\Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_22\evaluation_results_futo_like_targetmix_sweep.json" `
+  --out_dir "I:\Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_22"
 
 Notes
 -----

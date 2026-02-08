@@ -380,8 +380,8 @@ N_SAMPLES_PER_EPOCH = 5016
 MAX_EPOCHS = 999999
 
 # --- Training knobs ---
-BATCH_SIZE = 4  # Reduced from 24 to prevent CUDA OOM
-GRAD_ACCUM_STEPS = 8  # Increased from 2 to maintain effective batch size
+BATCH_SIZE = 1  # Reduced from 24 to prevent CUDA OOM
+GRAD_ACCUM_STEPS = 16  # Increased from 2 to maintain effective batch size
 MIN_BATCH_SIZE = 4  # Minimum batch size for very large files
 MAX_BATCH_SIZE = 40  # Maximum batch size for small files
 MAX_AUDIO_SECONDS = 30.0  # we pad features to 30s; this filters absurdly long chunks

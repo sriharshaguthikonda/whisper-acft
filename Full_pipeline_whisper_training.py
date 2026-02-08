@@ -58,7 +58,7 @@ CAPTURE_STAGE_OUTPUT = True
 # Optional: rclone (faster on huge transfers; requires rclone config)
 
 
-USE_RCLONE = True
+USE_RCLONE = False
 RCLONE_REMOTE = "gdrive:MyDrive"
 RCLONE_TRANSFERS = 8
 
