@@ -25,7 +25,7 @@
 
 #!pip -q install -U "transformers>=4.38" datasets accelerate soundfile tqdm
 
-import os, json, time, shutil, hashlib, gc, math, winsound, sys, atexit, tempfile
+import os, json, time, shutil, hashlib, gc, math, winsound, sys, atexit, tempfile, argparse
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from typing import Optional, Dict
@@ -48,6 +48,88 @@ from transformers import (
 
 
 epoch_num_start = 0  # default; will be overridden if checkpoints exist
+
+
+def _parse_cli_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="Stage 17 Whisper training (ACFT/WER)")
+    ap.add_argument("--manifest-path", help="Training manifest JSONL path")
+    ap.add_argument("--checkpoint-dir", help="Checkpoint directory")
+    ap.add_argument("--futo-model-id", help="Base model id")
+    ap.add_argument("--processor-id", help="Processor id")
+    ap.add_argument("--start-fresh", type=int, choices=[0, 1], help="Refuse to resume if checkpoints exist")
+    ap.add_argument("--config", help="JSON file with config overrides (keys match variable names)")
+    ap.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        help="Override config KEY=JSON_VALUE (repeatable), e.g. --set BATCH_SIZE=4",
+    )
+    ap.add_argument("--print-config", action="store_true", help="Print resolved config and exit")
+    return ap.parse_args()
+
+
+def _parse_override_value(raw: str):
+    try:
+        return json.loads(raw)
+    except Exception:
+        return raw
+
+
+def _parse_overrides_from_set(items: list[str]) -> dict:
+    overrides: dict = {}
+    for item in items or []:
+        if "=" not in item:
+            print(f"[warn] ignoring invalid --set (expected KEY=VALUE): {item}")
+            continue
+        key, raw = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        overrides[key] = _parse_override_value(raw.strip())
+    return overrides
+
+
+def _load_overrides(args: argparse.Namespace) -> dict:
+    overrides: dict = {}
+    if args.config:
+        try:
+            with open(args.config, "r", encoding="utf-8") as f:
+                cfg = json.load(f) or {}
+            if isinstance(cfg, dict):
+                overrides.update(cfg)
+            else:
+                print("[warn] config file did not contain a JSON object; ignoring")
+        except Exception as e:
+            raise SystemExit(f"Failed to read config: {args.config} ({e})")
+    overrides.update(_parse_overrides_from_set(args.set))
+    if args.manifest_path:
+        overrides["MANIFEST_PATH"] = args.manifest_path
+    if args.checkpoint_dir:
+        overrides["CHECKPOINT_DIR"] = args.checkpoint_dir
+    if args.futo_model_id:
+        overrides["FUTO_MODEL_ID"] = args.futo_model_id
+    if args.processor_id:
+        overrides["PROCESSOR_ID"] = args.processor_id
+    if args.start_fresh is not None:
+        overrides["START_FRESH"] = bool(int(args.start_fresh))
+    return overrides
+
+
+def _apply_overrides(overrides: dict, *, label: str) -> None:
+    if not overrides:
+        return
+    for key, value in overrides.items():
+        if not key.isupper():
+            print(f"[warn] {label}: ignoring non-uppercase key '{key}'")
+            continue
+        if key not in globals():
+            print(f"[warn] {label}: unknown key '{key}' ignored")
+            continue
+        globals()[key] = value
+
+
+_CLI_ARGS = _parse_cli_args()
+_CLI_OVERRIDES = _load_overrides(_CLI_ARGS)
 
 # =============================
 # PATCH 1) Durable IO + keys
@@ -135,6 +217,22 @@ PENDING_PLAN_PATH = os.path.join(CHECKPOINT_DIR, "pending_epoch_plan.json")
 
 # --- Add a 'start fresh' option ---
 START_FRESH = bool(int(os.environ.get('WHISPER_START_FRESH', '0')))
+
+
+def _rebuild_checkpoint_paths() -> None:
+    global TRAINED_JSONL_PATH, RUN_STATE_PATH, PENDING_PLAN_PATH, LOG_PATH
+    global NONFINITE_CE_LOG_JSONL, NONFINITE_CE_TENSOR_DIR
+    TRAINED_JSONL_PATH = os.path.join(CHECKPOINT_DIR, "trained_stage1.jsonl")
+    RUN_STATE_PATH = os.path.join(CHECKPOINT_DIR, "run_state.json")
+    PENDING_PLAN_PATH = os.path.join(CHECKPOINT_DIR, "pending_epoch_plan.json")
+    LOG_PATH = os.path.join(CHECKPOINT_DIR, "console.log")
+    NONFINITE_CE_LOG_JSONL = os.path.join(CHECKPOINT_DIR, "debug_nonfinite_ce.jsonl")
+    NONFINITE_CE_TENSOR_DIR = os.path.join(CHECKPOINT_DIR, "debug_tensors")
+
+
+_PRE_OVERRIDE_KEYS = {"MANIFEST_PATH", "CHECKPOINT_DIR", "START_FRESH"}
+_apply_overrides({k: v for k, v in _CLI_OVERRIDES.items() if k in _PRE_OVERRIDE_KEYS}, label="pre")
+_rebuild_checkpoint_paths()
 
 
 def manifest_signature(path: str) -> str:
@@ -464,6 +562,22 @@ QAT_EXCLUDE_SUFFIXES = {
     "embed_positions", "embed_tokens" # embeddings (keep FP)
 }
 QAT_VERBOSE = bool(int(os.environ.get("WHISPER_QAT_VERBOSE", "1")))
+
+_POST_OVERRIDES = {k: v for k, v in _CLI_OVERRIDES.items() if k not in _PRE_OVERRIDE_KEYS}
+_apply_overrides(_POST_OVERRIDES, label="post")
+
+if "FUTO_MODEL_ID" in _POST_OVERRIDES and "ACFT_REFERENCE_MODEL_ID" not in _POST_OVERRIDES:
+    ACFT_REFERENCE_MODEL_ID = FUTO_MODEL_ID
+if "LR_START" in _POST_OVERRIDES and "LR" not in _POST_OVERRIDES:
+    LR = LR_START
+
+if "OPT_STEPS_PER_EPOCH" not in _POST_OVERRIDES:
+    OPT_STEPS_PER_EPOCH = estimate_opt_steps_per_epoch(N_SAMPLES_PER_EPOCH, BATCH_SIZE, GRAD_ACCUM_STEPS)
+
+if _CLI_ARGS.print_config:
+    _cfg = {k: globals()[k] for k in sorted(globals()) if k.isupper()}
+    print(json.dumps(_cfg, indent=2, default=str))
+    raise SystemExit(0)
 
 
 class QATState:
