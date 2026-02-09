@@ -1,4 +1,5 @@
 import os, json, pathlib, subprocess, hashlib, wave, threading
+import argparse
 import numpy as np
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
@@ -12,55 +13,84 @@ except ImportError:
     orjson = None
 
 # ----------------------------
-# USER SETTINGS
+# USER SETTINGS (CLI overrides)
 # ----------------------------
-ACFT_MODEL_ID = "futo-org/acft-whisper-small.en"     # weights
-BASE_PROCESSOR_ID = "openai/whisper-small.en"        # processor (feature extractor + tokenizer)
-LOAD_MODEL_FOR_DEBUG = False  # Stage 1 normally shouldn't load model weights.
+def parse_args() -> argparse.Namespace:
+    p = argparse.ArgumentParser(description="Stage 1: build pending manifest/tasks from transcripts")
+    p.add_argument("--acft-model-id", default="futo-org/acft-whisper-small.en", help="Model id for metadata")
+    p.add_argument("--base-processor-id", default="openai/whisper-small.en", help="Tokenizer/processor id")
+    p.add_argument("--load-model-for-debug", action="store_true", help="Load model weights for debugging")
 
-TRANSCRIPT_DIR = r"I:\Transcriptions_patched_corrected"
-CHUNKS_DIR = "i:\\Record_chunks"
-AUDIO_SOURCE_DIR = "i:\\Record_harsha"  # directory containing full-length audios to include
+    p.add_argument("--transcript-dir", default=r"I:\Transcriptions_patched_corrected", help="Directory of transcript JSON files")
+    p.add_argument("--chunks-dir", default=r"I:\Record_chunks", help="Output chunks directory")
+    p.add_argument("--audio-source-dir", default=r"I:\Record_harsha", help="Directory containing source audio files")
 
-TARGET_SR = 16000
-MAX_OUT_SECONDS = 30.0
+    p.add_argument("--target-sr", type=int, default=16000)
+    p.add_argument("--max-out-seconds", type=float, default=30.0)
+
+    # Training-label safety
+    p.add_argument("--max-label-tokens", type=int, default=420)
+
+    # Segment-level behaviour
+    p.add_argument("--context-pad", type=float, default=0.20)
+    p.add_argument("--min-seg-sec", type=float, default=2.00)
+    p.add_argument("--merge-gap-for-short", type=float, default=0.5)
+    p.add_argument("--merge-short-segments", action="store_true", help="Merge short segments forward")
+    p.add_argument("--no-keep-tiny-segments", dest="keep_tiny_segments", action="store_false")
+    p.set_defaults(keep_tiny_segments=True)
+
+    # Segment-quality filtering (Groq / Whisper verbose metrics)
+    p.add_argument("--no-apply-segment-quality-filters", dest="apply_segment_quality_filters", action="store_false")
+    p.set_defaults(apply_segment_quality_filters=True)
+    p.add_argument("--no-include-review-segments", dest="include_review_segments", action="store_false")
+    p.set_defaults(include_review_segments=True)
+
+    p.add_argument("--no-speech-prob-safe-max", type=float, default=0.10)
+    p.add_argument("--no-speech-prob-drop-min", type=float, default=0.60)
+    p.add_argument("--avg-logprob-safe-min", type=float, default=-0.30)
+    p.add_argument("--avg-logprob-drop-max", type=float, default=-0.60)
+    p.add_argument("--compression-ratio-safe-max", type=float, default=2.00)
+    p.add_argument("--compression-ratio-drop-min", type=float, default=2.50)
+    return p.parse_args()
+
+
+args = parse_args()
+
+ACFT_MODEL_ID = args.acft_model_id
+BASE_PROCESSOR_ID = args.base_processor_id
+LOAD_MODEL_FOR_DEBUG = args.load_model_for_debug
+
+TRANSCRIPT_DIR = args.transcript_dir
+CHUNKS_DIR = args.chunks_dir
+AUDIO_SOURCE_DIR = args.audio_source_dir
+
+TARGET_SR = int(args.target_sr)
+MAX_OUT_SECONDS = float(args.max_out_seconds)
 MAX_OUT_FRAMES = int(MAX_OUT_SECONDS * TARGET_SR)
 DUR_CAP_SEC = (MAX_OUT_FRAMES - 1) / float(TARGET_SR)  # ~29.9999s at 16k
 
 # Training-label safety
-MAX_LABEL_TOKENS = 420
+MAX_LABEL_TOKENS = int(args.max_label_tokens)
 
 # Segment-level behaviour
-CONTEXT_PAD = 0.20            # small padding (0.05–0.20 recommended)
-MIN_SEG_SEC = 2.00            # if a segment is shorter than this, merge forward
-MERGE_GAP_FOR_SHORT = 0.5    # only merge short segments if the gap is <= this
-MERGE_SHORT_SEGMENTS = False  # set True to merge short segments; False keeps every segment standalone
-KEEP_TINY_SEGMENTS = True     # keep very short segments even if under MIN_SEG_SEC
+CONTEXT_PAD = float(args.context_pad)            # small padding (0.05–0.20 recommended)
+MIN_SEG_SEC = float(args.min_seg_sec)            # if a segment is shorter than this, merge forward
+MERGE_GAP_FOR_SHORT = float(args.merge_gap_for_short)    # only merge short segments if the gap is <= this
+MERGE_SHORT_SEGMENTS = bool(args.merge_short_segments)  # set True to merge short segments; False keeps every segment standalone
+KEEP_TINY_SEGMENTS = bool(args.keep_tiny_segments)     # keep very short segments even if under MIN_SEG_SEC
 
-# ----------------------------
 # Segment-quality filtering (Groq / Whisper verbose metrics)
-#
-# You asked for these heuristics:
-#   no_speech_prob:   keep <0.2, review 0.2–0.6, drop >=0.6
-#   avg_logprob:      keep >-0.3, review -0.5..-0.3, drop <-0.5
-#   compression_ratio: keep <2.0, review 2.0–2.4, drop >2.4
-#
-# Default policy below:
-#   - drop only the hard-drop segments
-#   - keep review segments but tag them
-#   - flip INCLUDE_REVIEW_SEGMENTS=False if you want SAFE-ONLY training data
-# ----------------------------
-APPLY_SEGMENT_QUALITY_FILTERS = True
-INCLUDE_REVIEW_SEGMENTS = True
+APPLY_SEGMENT_QUALITY_FILTERS = bool(args.apply_segment_quality_filters)
+INCLUDE_REVIEW_SEGMENTS = bool(args.include_review_segments)
 
-NO_SPEECH_PROB_SAFE_MAX = 0.20
-NO_SPEECH_PROB_DROP_MIN = 0.60
+NO_SPEECH_PROB_SAFE_MAX = float(args.no_speech_prob_safe_max)
+NO_SPEECH_PROB_DROP_MIN = float(args.no_speech_prob_drop_min)
 
-AVG_LOGPROB_SAFE_MIN = -0.30
-AVG_LOGPROB_DROP_MAX = -0.50
+AVG_LOGPROB_SAFE_MIN = float(args.avg_logprob_safe_min)
+AVG_LOGPROB_DROP_MAX = float(args.avg_logprob_drop_max)
 
-COMPRESSION_RATIO_SAFE_MAX = 2.00
-COMPRESSION_RATIO_DROP_MIN = 2.40
+COMPRESSION_RATIO_SAFE_MAX = float(args.compression_ratio_safe_max)
+COMPRESSION_RATIO_DROP_MIN = float(args.compression_ratio_drop_min)
 
 # Output files
 CHUNKS_DIR_P = pathlib.Path(CHUNKS_DIR)
