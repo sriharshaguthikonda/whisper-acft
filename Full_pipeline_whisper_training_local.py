@@ -1,88 +1,308 @@
 # %% [markdown]
-# # Colab: run stages 1 -> 17 (full script)
-# Paste into Colab: lines starting with `# %%` are cell separators.
+# # Local: run stages 1 -> 17 (full script)
+# Windows/local version of Full_pipeline_whisper_training.py.
 
 # %%
-from google.colab import drive
-drive.mount('/content/drive')
+import os
+import argparse
+import json
+from pathlib import Path
+from run_folder_naming import build_run_folder_name, slug_token as slug_run_token
 
-# %%
 # ---------- CONFIG (EDIT THESE) ----------
 REPO_URL = "https://github.com/sriharshaguthikonda/whisper-acft.git"
-REPO_DIR_DRIVE = "/content/drive/MyDrive/whisper-acft"
-REPO_DIR_LOCAL = "/content/whisper-acft"
-USE_LOCAL_REPO = True  # keep repo on local disk (avoid Drive writes)
+REPO_DIR = str(Path(__file__).resolve().parent)  # set to your repo root if different
+UPDATE_REPO = False  # set True to git fetch/reset; use with care
+RESET_REPO_HARD = False  # only applies when UPDATE_REPO is True
 
-REPO_DIR = REPO_DIR_LOCAL if USE_LOCAL_REPO else REPO_DIR_DRIVE
+# Data root selection (scan I:\ for expected folders)
+DATA_ROOT_OVERRIDE = ""  # e.g. r"I:\"
+DATA_ROOT_SCAN_ROOT = r"I:\\"
+PROMPT_FOR_DATA_ROOT = True
 
-DATA_ROOT_DRIVE = "/content/drive/MyDrive"  # <-- change to your data root on Drive
-LOCAL_DATA_ROOT = "/content/whisper-data"   # local (faster) copy
-USE_LOCAL_DATA = True                       # copy data locally and run from there
+# Python to run all stages (set "" to use current interpreter)
+PYTHON_EXE = r"I:\Whisper-training-env\Scripts\python.exe"
 
-DATA_ROOT = LOCAL_DATA_ROOT if USE_LOCAL_DATA else DATA_ROOT_DRIVE
+# Optional RIRS overrides
+RIRS_ROOT_OVERRIDE = ""  # e.g. r"I:\noise\RIRS_NOISES"
+NOISE_DIR_OVERRIDE = ""  # e.g. r"I:\noise\RIRS_NOISES\pointsource_noises"
+RIR_DIR_OVERRIDE = ""    # e.g. r"I:\noise\RIRS_NOISES\real_rirs_isotropic_noises"
 
-# Save key manifests back to Drive to survive crashes/disconnects.
-SYNC_IMPORTANT_TO_DRIVE = True
-DRIVE_SYNC_ROOT = f"{DATA_ROOT_DRIVE}"
-PIPELINE_STATE_FILE = f"{DRIVE_SYNC_ROOT}/pipeline_state.json"
-DRIVE_RECORD_CHUNKS = f"{DRIVE_SYNC_ROOT}/Record_chunks"
-SYNC_RECORD_CHUNKS_TO_DRIVE = True
-RESTORE_RECORD_CHUNKS = True  # pull Record_chunks back from Drive when local is missing/incomplete
+# Disable Drive sync on local runs
+USE_LOCAL_DATA = False  # local data is already on disk; no rsync/rclone
+SYNC_IMPORTANT_TO_DRIVE = False
+SYNC_RECORD_CHUNKS_TO_DRIVE = False
+SYNC_CACHE_TO_DRIVE = False
+RESTORE_RECORD_CHUNKS = False
 
-# Logging
-PIPELINE_LOG = f"{DATA_ROOT}/pipeline.log"
-DRIVE_SUMMARY_LOG = f"{DRIVE_SYNC_ROOT}/pipeline_summary.log"
+# Copy strategy (unused when USE_LOCAL_DATA is False)
+COPY_TRANSCRIPTS_FOR_STAGE1 = False
+COPY_AUDIO_FOR_STAGE1 = False
+BACKGROUND_COPY_LATER = False
 
-# Caches (avoid re-downloading HF/transformers/torch assets)
-CACHE_ROOT = "/content/cache"
-HF_HOME = f"{CACHE_ROOT}/hf"
-TRANSFORMERS_CACHE = f"{CACHE_ROOT}/transformers"
-TORCH_HOME = f"{CACHE_ROOT}/torch"
-SYNC_CACHE_TO_DRIVE = True
-CACHE_DRIVE_ROOT = f"{DATA_ROOT_DRIVE}/cache"
-CACHE_RSYNC_SIZE_ONLY = True
-
-# Copy strategy
-COPY_TRANSCRIPTS_FOR_STAGE1 = True
-COPY_AUDIO_FOR_STAGE1 = False  # set True if stage 1 should use local audio
-BACKGROUND_COPY_LATER = True  # copy stage3/6/7/9 deps in background during stage1/2
+# Optional: rclone (unused on local)
+USE_RCLONE = False
+RCLONE_REMOTE = ""
+RCLONE_TRANSFERS = 8
 
 # Output verification
 VERIFY_OUTPUTS = True
 VERIFY_JSONL_SAMPLE = 5
 ENABLE_OUTPUT_SIGNATURES = True  # manifest diff / hash skip
-# Capture hides live tqdm/progress bars; set False to stream output live.
-CAPTURE_STAGE_OUTPUT = True
-
-
-# Optional: rclone (faster on huge transfers; requires rclone config)
-
-
-USE_RCLONE = False
-RCLONE_REMOTE = "gdrive:MyDrive"
-RCLONE_TRANSFERS = 8
-
-
+CAPTURE_STAGE_OUTPUT = True  # set False to stream tqdm/progress live
+AUTO_SKIP_IF_OUTPUTS_PRESENT = True  # skip stages when expected outputs already exist
+AUTO_SKIP_EXCLUDE_STAGES = {"stage_17"}  # stages that should resume even if outputs exist
+AUTO_SKIP_UPSTREAM_FROM_OUTPUTS = True  # skip earlier stages if a later stage output exists
 
 # Torch/torchvision compatibility fix (for pyannote/lightning)
 FIX_TORCHVISION = True
 TORCH_INDEX_URL = "https://download.pytorch.org/whl/cu121"
-# optional override, e.g. "https://download.pytorch.org/whl/cu121"
 TORCH_FORCE_REINSTALL = True
 TORCH_FIX_ONCE = False
-TORCH_FIX_MARKER = f"{CACHE_ROOT}/torch_fix_ok.txt"
 
-# Optional: pre-stage1 audio copy using existing tasks_pending.jsonl from Drive
+def _inspect_root(p: Path, required: list[str], optional: list[str]) -> tuple[bool, int]:
+    if not p.exists() or not p.is_dir():
+        return False, 0
+    if any(not (p / d).exists() for d in required):
+        return False, 0
+    score = sum(1 for d in optional if (p / d).exists())
+    return True, score
+
+def pick_data_root() -> Path:
+    if DATA_ROOT_OVERRIDE:
+        return Path(DATA_ROOT_OVERRIDE)
+    scan_root = Path(DATA_ROOT_SCAN_ROOT)
+    required = ["Transcriptions_corrected", "Record_harsha"]
+    optional = [
+        "Record_only_by_harsha",
+        "Record_others_compacted",
+        "Record_chunks",
+        "Record_test_chunks",
+        "RIRS_NOISES",
+    ]
+    candidates: list[tuple[int, Path]] = []
+    ok, score = _inspect_root(scan_root, required, optional)
+    if ok:
+        candidates.append((score, scan_root))
+    try:
+        for child in scan_root.iterdir():
+            ok, score = _inspect_root(child, required, optional)
+            if ok:
+                candidates.append((score, child))
+    except Exception:
+        pass
+    if not candidates:
+        print(f"[data] no candidates under {scan_root}; using scan root")
+        return scan_root
+    candidates.sort(key=lambda item: (-item[0], str(item[1]).lower()))
+    if len(candidates) == 1 or not PROMPT_FOR_DATA_ROOT:
+        return candidates[0][1]
+    print("[data] candidates:")
+    for idx, (score, path) in enumerate(candidates, 1):
+        present = [d for d in optional if (path / d).exists()]
+        present_txt = ", ".join(present) if present else "none"
+        print(f"  {idx}) {path} (score {score}; optional: {present_txt})")
+    choice = input(f"Select data root [1-{len(candidates)}] (blank=1): ").strip()
+    if choice.isdigit():
+        pick = max(1, min(len(candidates), int(choice)))
+        return candidates[pick - 1][1]
+    return candidates[0][1]
+
+def _parse_override_value(raw: str):
+    try:
+        return json.loads(raw)
+    except Exception:
+        return raw
+
+
+def _parse_overrides_from_set(items: list[str]) -> dict:
+    overrides: dict = {}
+    for item in items or []:
+        if "=" not in item:
+            print(f"[warn] ignoring invalid --set (expected KEY=VALUE): {item}")
+            continue
+        key, raw = item.split("=", 1)
+        key = key.strip()
+        if not key:
+            continue
+        overrides[key] = _parse_override_value(raw.strip())
+    return overrides
+
+
+def _apply_skip_list(skip_list: str, overrides: dict) -> None:
+    if not skip_list:
+        return
+    mapping = {
+        "1": "SKIP_STAGE_1_MANIFEST_CREATION",
+        "2": "SKIP_STAGE_2_CHUNK_TRANSCRIPTS",
+        "3": "SKIP_STAGE_3_SPEAKER_SORT",
+        "3b": "SKIP_STAGE_3B_FILTER_ENGLISH",
+        "4": "SKIP_STAGE_4_DELETE_COMMON_FILLERS",
+        "5": "SKIP_STAGE_5_CONVERT_NUMBER_WORDS",
+        "6": "SKIP_STAGE_6_ADD_NOISE",
+        "7": "SKIP_STAGE_7_ADD_OTHER_VOICES",
+        "8": "SKIP_STAGE_8_ADD_RANDOM_GAIN",
+        "9": "SKIP_STAGE_9_ADD_REVERB",
+        "10b": "SKIP_STAGE_10B_ADD_TEMPO_PAUSE",
+        "11": "SKIP_STAGE_11_ADD_FREQUENCY",
+        "12": "SKIP_STAGE_12_REMOVE_BOTTOM_PERCENT",
+        "13": "SKIP_STAGE_13_SPLIT_TRAIN_TEST",
+        "14": "SKIP_STAGE_14_REMOVE_TARGET_FILES",
+        "15": "SKIP_STAGE_15_RANDOMIZE_MANIFEST",
+        "16": "SKIP_STAGE_16_MOVE_TEST_CHUNKS",
+        "17": "SKIP_STAGE_17_TRAIN",
+    }
+    tokens = [t.strip() for t in skip_list.replace(";", ",").split(",") if t.strip()]
+    for token in tokens:
+        norm = token.lower().replace("stage", "").replace("_", "")
+        key = mapping.get(norm)
+        if key:
+            overrides[key] = True
+        else:
+            print(f"[warn] unknown skip token: {token}")
+
+
+def _parse_cli_args() -> argparse.Namespace:
+    ap = argparse.ArgumentParser(description="Full pipeline (local)")
+    ap.add_argument("--config", help="JSON config overrides (keys match variable names)")
+    ap.add_argument(
+        "--set",
+        action="append",
+        default=[],
+        help="Override config KEY=JSON_VALUE (repeatable), e.g. --set DATA_ROOT_OVERRIDE=\"I:\\\"",
+    )
+    ap.add_argument("--data-root", help="Override data root (sets DATA_ROOT_OVERRIDE)")
+    ap.add_argument("--data-root-scan-root", help="Override data root scan base (DATA_ROOT_SCAN_ROOT)")
+    ap.add_argument("--prompt-for-data-root", dest="prompt_for_data_root", action="store_true")
+    ap.add_argument("--no-prompt-for-data-root", dest="prompt_for_data_root", action="store_false")
+    ap.set_defaults(prompt_for_data_root=None)
+    ap.add_argument("--python-exe", help="Python interpreter to run all stages")
+    ap.add_argument("--rirs-root", help="Override RIRS root (RIRS_NOISES)")
+    ap.add_argument("--noise-dir", help="Override noises dir (pointsource_noises)")
+    ap.add_argument("--rir-dir", help="Override RIR dir (real_rirs_isotropic_noises)")
+    ap.add_argument("--base-model-id", help="Base model id for training")
+    ap.add_argument("--processor-id", help="Processor id for training")
+    ap.add_argument("--stage17-script", help="Stage 17 training script filename")
+    ap.add_argument("--start-fresh", type=int, choices=[0, 1], help="Refuse to resume if checkpoints exist")
+    ap.add_argument("--skip", help="Comma-separated stages to skip (e.g., 1,3b,10b,17)")
+    ap.add_argument("--run-eval-19c", action="store_true")
+    ap.add_argument("--run-eval-19d", action="store_true")
+    ap.add_argument("--auto-skip-existing-outputs", dest="auto_skip_outputs", action="store_true")
+    ap.add_argument("--no-auto-skip-existing-outputs", dest="auto_skip_outputs", action="store_false")
+    ap.set_defaults(auto_skip_outputs=None)
+    ap.add_argument("--auto-skip-upstream", dest="auto_skip_upstream", action="store_true")
+    ap.add_argument("--no-auto-skip-upstream", dest="auto_skip_upstream", action="store_false")
+    ap.set_defaults(auto_skip_upstream=None)
+    ap.add_argument("--no-gguf-conversion", dest="run_gguf_conversion", action="store_false")
+    ap.set_defaults(run_gguf_conversion=None)
+    ap.add_argument("--print-config", action="store_true", help="Print resolved config and exit")
+    return ap.parse_args()
+
+
+def _load_overrides(args: argparse.Namespace) -> dict:
+    overrides: dict = {}
+    if args.config:
+        try:
+            with open(args.config, "r", encoding="utf-8") as f:
+                cfg = json.load(f) or {}
+            if isinstance(cfg, dict):
+                overrides.update(cfg)
+            else:
+                print("[warn] config file did not contain a JSON object; ignoring")
+        except Exception as e:
+            raise SystemExit(f"Failed to read config: {args.config} ({e})")
+    overrides.update(_parse_overrides_from_set(args.set))
+    if args.data_root:
+        overrides["DATA_ROOT_OVERRIDE"] = args.data_root
+    if args.data_root_scan_root:
+        overrides["DATA_ROOT_SCAN_ROOT"] = args.data_root_scan_root
+    if args.prompt_for_data_root is not None:
+        overrides["PROMPT_FOR_DATA_ROOT"] = bool(args.prompt_for_data_root)
+    if args.python_exe:
+        overrides["PYTHON_EXE"] = args.python_exe
+    if args.rirs_root:
+        overrides["RIRS_ROOT_OVERRIDE"] = args.rirs_root
+    if args.noise_dir:
+        overrides["NOISE_DIR_OVERRIDE"] = args.noise_dir
+    if args.rir_dir:
+        overrides["RIR_DIR_OVERRIDE"] = args.rir_dir
+    if args.base_model_id:
+        overrides["BASE_MODEL_ID"] = args.base_model_id
+    if args.processor_id:
+        overrides["PROCESSOR_ID"] = args.processor_id
+    if args.stage17_script:
+        overrides["STAGE17_SCRIPT"] = args.stage17_script
+    if args.start_fresh is not None:
+        overrides["START_FRESH"] = int(args.start_fresh)
+    if args.run_eval_19c:
+        overrides["RUN_EVAL_19C"] = True
+    if args.run_eval_19d:
+        overrides["RUN_EVAL_19D"] = True
+    if args.auto_skip_outputs is not None:
+        overrides["AUTO_SKIP_IF_OUTPUTS_PRESENT"] = bool(args.auto_skip_outputs)
+    if args.auto_skip_upstream is not None:
+        overrides["AUTO_SKIP_UPSTREAM_FROM_OUTPUTS"] = bool(args.auto_skip_upstream)
+    if args.run_gguf_conversion is not None:
+        overrides["RUN_GGUF_CONVERSION"] = bool(args.run_gguf_conversion)
+    _apply_skip_list(args.skip, overrides)
+    return overrides
+
+
+def _apply_overrides(overrides: dict, *, warn_unknown: bool = True) -> None:
+    if not overrides:
+        return
+    for key, value in overrides.items():
+        if not key.isupper():
+            print(f"[warn] ignoring non-uppercase key '{key}'")
+            continue
+        if key not in globals():
+            if warn_unknown:
+                print(f"[warn] unknown key '{key}' ignored")
+            continue
+        globals()[key] = value
+
+
+_CLI_ARGS = _parse_cli_args()
+_CLI_OVERRIDES = _load_overrides(_CLI_ARGS)
+_apply_overrides(_CLI_OVERRIDES, warn_unknown=False)
+if _CLI_ARGS.print_config:
+    _cfg = {k: globals()[k] for k in sorted(globals()) if k.isupper()}
+    print(json.dumps(_cfg, indent=2, default=str))
+    raise SystemExit(0)
+
+DATA_ROOT_PATH = pick_data_root()
+DATA_ROOT = str(DATA_ROOT_PATH)
+DATA_ROOT_DRIVE = DATA_ROOT  # no Drive on local runs
+LOCAL_DATA_ROOT = DATA_ROOT
+print(f"[data] DATA_ROOT = {DATA_ROOT}")
+
+DRIVE_SYNC_ROOT = str(Path(DATA_ROOT) / "pipeline_checkpoints")
+PIPELINE_STATE_FILE = str(Path(DRIVE_SYNC_ROOT) / "pipeline_state.json")
+DRIVE_RECORD_CHUNKS = str(Path(DRIVE_SYNC_ROOT) / "Record_chunks")
+
+PIPELINE_LOG = str(Path(DATA_ROOT) / "pipeline.log")
+DRIVE_SUMMARY_LOG = str(Path(DRIVE_SYNC_ROOT) / "pipeline_summary.log")
+
+# Caches (avoid re-downloading HF/transformers/torch assets)
+CACHE_ROOT = str(Path(DATA_ROOT) / "cache")
+HF_HOME = str(Path(CACHE_ROOT) / "hf")
+TRANSFORMERS_CACHE = str(Path(CACHE_ROOT) / "transformers")
+TORCH_HOME = str(Path(CACHE_ROOT) / "torch")
+TORCH_FIX_MARKER = str(Path(CACHE_ROOT) / "torch_fix_ok.txt")
+CACHE_DRIVE_ROOT = str(Path(DATA_ROOT) / "cache_drive_unused")
+CACHE_RSYNC_SIZE_ONLY = True
+
+# Optional: pre-stage1 audio copy (unused on local)
 PRESTAGE1_AUDIO_COPY = False
-PRESTAGE1_TASKS_PENDING = f"{DATA_ROOT_DRIVE}/Record_chunks/tasks_pending.jsonl"
+PRESTAGE1_TASKS_PENDING = str(Path(DATA_ROOT) / "Record_chunks" / "tasks_pending.jsonl")
 
-TRANSCRIPT_DIR = f"{DATA_ROOT}/Transcriptions_corrected"
-AUDIO_SOURCE_DIR = f"{DATA_ROOT}/Record_harsha"
+TRANSCRIPT_DIR = str(Path(DATA_ROOT) / "Transcriptions_corrected")
+AUDIO_SOURCE_DIR = str(Path(DATA_ROOT) / "Record_harsha")
 
-TRANSCRIPT_DIR_DRIVE = f"{DATA_ROOT_DRIVE}/Transcriptions_corrected"
-TRANSCRIPT_DIR_LOCAL = f"{LOCAL_DATA_ROOT}/Transcriptions_corrected"
-AUDIO_SOURCE_DIR_DRIVE = f"{DATA_ROOT_DRIVE}/Record_harsha"
-AUDIO_SOURCE_DIR_LOCAL = f"{LOCAL_DATA_ROOT}/Record_harsha"
+TRANSCRIPT_DIR_DRIVE = str(Path(DATA_ROOT_DRIVE) / "Transcriptions_corrected")
+TRANSCRIPT_DIR_LOCAL = str(Path(LOCAL_DATA_ROOT) / "Transcriptions_corrected")
+AUDIO_SOURCE_DIR_DRIVE = str(Path(DATA_ROOT_DRIVE) / "Record_harsha")
+AUDIO_SOURCE_DIR_LOCAL = str(Path(LOCAL_DATA_ROOT) / "Record_harsha")
 
 if USE_LOCAL_DATA:
     TRANSCRIPT_DIR_STAGE1 = TRANSCRIPT_DIR_LOCAL if COPY_TRANSCRIPTS_FOR_STAGE1 else TRANSCRIPT_DIR_DRIVE
@@ -90,18 +310,51 @@ if USE_LOCAL_DATA:
 else:
     TRANSCRIPT_DIR_STAGE1 = TRANSCRIPT_DIR
     AUDIO_SOURCE_DIR_STAGE1 = AUDIO_SOURCE_DIR
-CHUNKS_DIR = f"{DATA_ROOT}/Record_chunks"
+CHUNKS_DIR = str(Path(DATA_ROOT) / "Record_chunks")
 
-TARGET_REF_DIR = f"{DATA_ROOT}/Record_only_by_harsha"
-OTHER_REF_DIR = f"{DATA_ROOT}/Record_others_compacted"  # set "" to disable
-OTHER_VOICES_DIR = f"{DATA_ROOT}/Record_others_compacted"
+TARGET_REF_DIR = str(Path(DATA_ROOT) / "Record_only_by_harsha")
+OTHER_REF_DIR = str(Path(DATA_ROOT) / "Record_others_compacted")  # set "" to disable
+OTHER_VOICES_DIR = str(Path(DATA_ROOT) / "Record_others_compacted")
 
-NOISE_DIR = f"{DATA_ROOT}/RIRS_NOISES/pointsource_noises"
-RIR_DIR = f"{DATA_ROOT}/RIRS_NOISES/real_rirs_isotropic_noises"
+def pick_rirs_root() -> Path:
+    candidates = [
+        Path(DATA_ROOT) / "RIRS_NOISES",
+        Path(DATA_ROOT) / "noise" / "RIRS_NOISES",
+        Path(DATA_ROOT_SCAN_ROOT) / "noise" / "RIRS_NOISES",
+    ]
+    for p in candidates:
+        if p.exists():
+            return p
+    return candidates[0]
 
-TEST_CHUNKS_DIR = f"{DATA_ROOT}/Record_test_chunks"
+if RIRS_ROOT_OVERRIDE:
+    RIRS_ROOT = Path(RIRS_ROOT_OVERRIDE)
+else:
+    RIRS_ROOT = pick_rirs_root()
+if NOISE_DIR_OVERRIDE:
+    NOISE_DIR = NOISE_DIR_OVERRIDE
+else:
+    NOISE_DIR = str(RIRS_ROOT / "pointsource_noises")
+if RIR_DIR_OVERRIDE:
+    RIR_DIR = RIR_DIR_OVERRIDE
+else:
+    RIR_DIR = str(RIRS_ROOT / "real_rirs_isotropic_noises")
+print(f"[data] RIRS_ROOT = {RIRS_ROOT}")
 
-CHECKPOINT_DIR = f"{DATA_ROOT}/stage17_checkpoints"
+TEST_CHUNKS_DIR = str(Path(DATA_ROOT) / "Record_test_chunks")
+
+# Stage 17 checkpoint directory (auto when empty)
+CHECKPOINT_DIR = ""  # set to a full path to force a specific dir
+CHECKPOINTS_ROOT = ""  # base folder for auto-named checkpoints (default: DATA_ROOT)
+STAGE17_CHECKPOINT_PREFIX = ""  # override auto prefix (no trailing index)
+STAGE17_CHECKPOINT_TAG = ""  # optional experiment tag (legacy suffix or canonical run-id suffix)
+USE_CANONICAL_RUN_FOLDER_NAMING = True
+STAGE17_REUSE_EXISTING_PREFIX = False  # set True only if you want to keep resuming old legacy prefixes
+RUN_NAME_KIND_OVERRIDE = ""  # e.g. "train-eval"
+RUN_NAME_METHOD_OVERRIDE = ""  # e.g. "s17-qat-dora"
+RUN_NAME_ADAPTER_OVERRIDE = ""  # e.g. "dora-r64-a16"
+RUN_NAME_ROWS_OVERRIDE = ""  # integer row count or "unk"
+RUN_NAME_ID_HINT = "auto"  # stable hint; resolver appends _N for repeated runs
 STAGE17_SCRIPT = "stage_17_WER_acft_Whisper_Futo_finetuned_model_training_only_local_en_version_only_qat_dora.py"
 START_FRESH = 0  # 1 = refuse to resume if checkpoints exist
 BASE_MODEL_ID = "futo-org/acft-whisper-small.en"
@@ -116,10 +369,11 @@ RANDOM_SEED = 1337
 
 # Augmentation ratios / copies
 NOISE_RATIO, NOISE_COPIES = 0.5, 1
-VOICE_RATIO, VOICE_COPIES = 0.8, 1
+VOICE_RATIO, VOICE_COPIES = 0.3, 1
 GAIN_RATIO,  GAIN_COPIES  = 0.1, 1
 REVERB_RATIO, REVERB_COPIES = 0.3, 1
 TEMPO_RATIO, TEMPO_COPIES = 0.3, 1
+FREQ_RATIO, FREQ_COPIES = 0.1, 1
 
 BOTTOM_PERCENT = 30.0
 TEST_RATIO = 0.1
@@ -135,36 +389,40 @@ STAGE2_CHECK_CHUNKS = True  # verify Stage-2 manifest rows exist on disk after r
 STAGE2_RESET_ON_MISSING = True  # reset stage2 state if manifest rows are missing
 
 # Stage toggles (set True to skip)
-SKIP_STAGE_1 = False
-SKIP_STAGE_2 = False
-SKIP_STAGE_3 = False
-SKIP_STAGE_3B = False
-SKIP_STAGE_4 = False
-SKIP_STAGE_6 = False
-SKIP_STAGE_7 = False
-SKIP_STAGE_8 = False
-SKIP_STAGE_9 = False
-SKIP_STAGE_10B = False
-SKIP_STAGE_12 = True
-SKIP_STAGE_13 = False
-SKIP_STAGE_14 = False
-SKIP_STAGE_15 = False
-SKIP_STAGE_16 = False
-SKIP_STAGE_17 = False
+SKIP_STAGE_1_MANIFEST_CREATION = False
+SKIP_STAGE_2_CHUNK_TRANSCRIPTS = False
+SKIP_STAGE_3_SPEAKER_SORT = False
+SKIP_STAGE_3B_FILTER_ENGLISH = False
+SKIP_STAGE_4_DELETE_COMMON_FILLERS = False
+SKIP_STAGE_5_CONVERT_NUMBER_WORDS = False
+SKIP_STAGE_6_ADD_NOISE = False
+SKIP_STAGE_7_ADD_OTHER_VOICES = False
+SKIP_STAGE_8_ADD_RANDOM_GAIN = False
+SKIP_STAGE_9_ADD_REVERB = False
+SKIP_STAGE_10B_ADD_TEMPO_PAUSE = False
+SKIP_STAGE_11_ADD_FREQUENCY = False
+SKIP_STAGE_12_REMOVE_BOTTOM_PERCENT = True
+SKIP_STAGE_13_SPLIT_TRAIN_TEST = False
+SKIP_STAGE_14_REMOVE_TARGET_FILES = False
+SKIP_STAGE_15_RANDOMIZE_MANIFEST = False
+SKIP_STAGE_16_MOVE_TEST_CHUNKS = False
+SKIP_STAGE_17_TRAIN = False
+
+RUN_EVAL_19C = False
+RUN_EVAL_19D = False
 
 
-# Post-train: evaluation + charts + export
-RUN_EVAL_19C = True
-RUN_EVAL_19D = True
-EVAL_19C_SCRIPT = "evaluation_19c.py"
-EVAL_19D_SCRIPT = "evaluation_19d.py"
+
+
+EVAL_19C_SCRIPT = "stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py"
+EVAL_19D_SCRIPT = "stage_19d_plot_eval_charts.py"
 EVAL_19C_ARGS = []  # e.g. ["--model", "path", "--data", "path"]
 EVAL_19D_ARGS = []
 EVAL_ADD_BATCH_ARGS = False  # set True if eval scripts accept --batch_size/--max_samples
 EVAL_BATCH_SIZE = 4
 EVAL_MAX_SAMPLES = 0  # 0 = no limit
-EVAL_19C_OUT_JSON = f"{DATA_ROOT}/eval_19c.json"
-EVAL_19D_OUT_JSON = f"{DATA_ROOT}/eval_19d.json"
+EVAL_19C_OUT_JSON = ""
+EVAL_19D_OUT_JSON = ""
 
 CHARTS_DIR = f"{DATA_ROOT}/charts"
 CHARTS_DRIVE_DIR = f"{DRIVE_SYNC_ROOT}/charts"
@@ -185,12 +443,14 @@ GGUF_OUT_DIR = f"{DATA_ROOT}/gguf_output"
 
 # %%
 # ---------- DERIVED PATHS ----------
+_apply_overrides(_CLI_OVERRIDES)
 TASKS_PENDING = f"{CHUNKS_DIR}/tasks_pending.jsonl"
 PAIRS_PENDING = f"{CHUNKS_DIR}/pairs_pending.jsonl"
 
 STAGE2_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stereo.jsonl"
 STAGE3B_MANIFEST = f"{CHUNKS_DIR}/pairs_manifest_stereo_english_only.jsonl"
 STAGE4_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stereo_english_only_filtered.jsonl"
+STAGE5_MANIFEST  = STAGE4_MANIFEST if SKIP_STAGE_5_CONVERT_NUMBER_WORDS else f"{CHUNKS_DIR}/pairs_manifest_stage5_numbers.jsonl"
 
 STAGE6_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stage6_noise.jsonl"
 STAGE7_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stage7_voice.jsonl"
@@ -198,17 +458,20 @@ STAGE8_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stage8_gain.jsonl"
 STAGE9_MANIFEST  = f"{CHUNKS_DIR}/pairs_manifest_stage9_reverb.jsonl"
 STAGE10B_MANIFEST = f"{CHUNKS_DIR}/pairs_manifest_stage10b_tempo_pause.jsonl"
 
-STAGE12_MANIFEST = STAGE10B_MANIFEST if SKIP_STAGE_12 else f"{CHUNKS_DIR}/pairs_manifest_stage12_bottom_filtered.jsonl"
+STAGE11_MANIFEST = STAGE10B_MANIFEST if SKIP_STAGE_11_ADD_FREQUENCY else f"{CHUNKS_DIR}/pairs_manifest_stage11_frequency.jsonl"
+STAGE12_MANIFEST = STAGE11_MANIFEST if SKIP_STAGE_12_REMOVE_BOTTOM_PERCENT else f"{CHUNKS_DIR}/pairs_manifest_stage12_bottom_filtered.jsonl"
 STAGE13_TRAIN    = f"{CHUNKS_DIR}/pairs_manifest_stage13_train.jsonl"
 STAGE13_TEST     = f"{CHUNKS_DIR}/pairs_manifest_stage13_test.jsonl"
 STAGE14_TRAIN    = f"{CHUNKS_DIR}/pairs_manifest_stage14_train_no_targets.jsonl"
 STAGE15_TRAIN    = f"{CHUNKS_DIR}/pairs_manifest_stage15_train_no_targets_randomized.jsonl"
+STAGE16_BACKUP   = f"{STAGE13_TEST}.backup"
 
 NOISE_OUT_DIR  = f"{CHUNKS_DIR}/noise_augmented"
 VOICE_OUT_DIR  = f"{CHUNKS_DIR}/voice_augmented"
 GAIN_OUT_DIR   = f"{CHUNKS_DIR}/gain_augmented"
 REVERB_OUT_DIR = f"{CHUNKS_DIR}/reverb_augmented"
 TEMPO_OUT_DIR  = f"{CHUNKS_DIR}/tempo_pause_augmented"
+FREQ_OUT_DIR   = f"{CHUNKS_DIR}/frequency_augmented"
 SEEN_DIR       = f"{CHUNKS_DIR}/_seen"
 
 TARGET_OUT_DIR = f"{CHUNKS_DIR}/speaker_sorted/target"
@@ -272,7 +535,7 @@ if not HF_TOKEN:
         HF_TOKEN = ""
 if not HF_TOKEN:
     HF_TOKEN = os.environ.get("HF_TOKEN", "") or os.environ.get("HUGGINGFACE_TOKEN", "")
-if not HF_TOKEN and not SKIP_STAGE_3:
+if not HF_TOKEN and not SKIP_STAGE_3_SPEAKER_SORT:
     try:
         from getpass import getpass
         HF_TOKEN = getpass("HF_TOKEN (optional, for pyannote). Leave blank to skip: ").strip()
@@ -321,6 +584,349 @@ def log_drive_summary(msg: str) -> None:
         path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     except Exception:
         pass
+
+def _sanitize_checkpoint_tag(value: str) -> str:
+    if not value:
+        return ""
+    cleaned = re.sub(r"[^A-Za-z0-9]+", "_", str(value))
+    return cleaned.strip("_")
+
+def _model_tag_from_id(model_id: str) -> str:
+    name = (model_id or "").split("/")[-1].lower()
+    size = ""
+    for cand in ("tiny", "small", "base", "medium", "large"):
+        if cand in name:
+            size = cand
+            break
+    if not size:
+        size = _sanitize_checkpoint_tag(name) or "model"
+    lang = "en" if (".en" in name or name.endswith("en") or "_en" in name) else ""
+    return f"{size}_{lang}" if lang else size
+
+def _provider_tag_from_id(model_id: str) -> str:
+    low = (model_id or "").lower()
+    if "futo" in low:
+        return "futo"
+    if "openai" in low:
+        return "openai"
+    org = low.split("/", 1)[0] if "/" in low else low
+    return _sanitize_checkpoint_tag(org) or "model"
+
+def _stage17_aug_tag() -> str:
+    aug_stages = [
+        SKIP_STAGE_6_ADD_NOISE,
+        SKIP_STAGE_7_ADD_OTHER_VOICES,
+        SKIP_STAGE_8_ADD_RANDOM_GAIN,
+        SKIP_STAGE_9_ADD_REVERB,
+        SKIP_STAGE_10B_ADD_TEMPO_PAUSE,
+        SKIP_STAGE_11_ADD_FREQUENCY,
+    ]
+    any_aug = any(not flag for flag in aug_stages)
+    return "aug" if any_aug else "no_aug"
+
+def _stage17_script_path() -> Path:
+    p = Path(STAGE17_SCRIPT)
+    if p.is_absolute():
+        return p
+    return Path(REPO_DIR) / p
+
+def _detect_stage17_script_flags(script_path: str) -> dict:
+    flags = {"acft": False, "dora": False, "lora": False, "dyn_ctx": None, "qat": False}
+    p = Path(script_path)
+    name = p.name.lower()
+    if "acft" in name:
+        flags["acft"] = True
+    if "dora" in name:
+        flags["dora"] = True
+    if "lora" in name:
+        flags["lora"] = True
+    if "qat" in name:
+        flags["qat"] = True
+    try:
+        text = p.read_text(encoding="utf-8", errors="ignore")
+        m = re.search(r"^\s*FORCE_FULL_AUDIO_CTX\s*=\s*(True|False)", text, flags=re.M)
+        if m:
+            flags["dyn_ctx"] = (m.group(1) == "False")
+        if re.search(r"WHISPER_LORA_USE_DORA\s*=\s*['\"]?1", text):
+            flags["dora"] = True
+        if re.search(r"WHISPER_USE_PEFT\s*=\s*['\"]?1", text) or "WHISPER_LORA_" in text:
+            flags["lora"] = True
+        m = re.search(r"^\s*QAT_ENABLE\s*=\s*(True|False)", text, flags=re.M)
+        if m and m.group(1) == "True":
+            flags["qat"] = True
+    except Exception:
+        pass
+    return flags
+
+def _qat_bits_from_env_or_script(script_path: str) -> str:
+    env_bits = os.environ.get("WHISPER_QAT_BITS", "").strip()
+    if env_bits.isdigit():
+        return env_bits
+    try:
+        text = Path(script_path).read_text(encoding="utf-8", errors="ignore")
+        m = re.search(r"QAT_BITS\s*=\s*int\([^,]+,\s*['\"](\d+)['\"]", text)
+        if m:
+            return m.group(1)
+    except Exception:
+        pass
+    return "6"
+
+def _count_manifest_rows(path: str) -> str:
+    p = Path(path)
+    if not p.exists():
+        return "unk"
+    try:
+        total = 0
+        with p.open("rb") as f:
+            while True:
+                chunk = f.read(1024 * 1024)
+                if not chunk:
+                    break
+                total += chunk.count(b"\n")
+        if total > 0:
+            return str(total)
+    except Exception:
+        pass
+    return "unk"
+
+def _canonical_base_tag_from_id(model_id: str) -> str:
+    low = (model_id or "").lower()
+    if "futo" in low:
+        provider = "futo"
+    elif "openai" in low:
+        provider = "openai"
+    else:
+        provider = slug_run_token(low.split("/", 1)[0] if "/" in low else low, default="unk")
+    size = "unk"
+    for cand in ("tiny", "small", "base", "medium", "large"):
+        if cand in low:
+            size = cand
+            break
+    lang = "en" if (".en" in low or low.endswith("en") or "_en" in low) else "multi"
+    if size == "unk":
+        return "unk"
+    return slug_run_token(f"{provider}-{size}-{lang}", default="unk")
+
+def _canonical_method_tag(flags: dict) -> str:
+    if RUN_NAME_METHOD_OVERRIDE:
+        return slug_run_token(RUN_NAME_METHOD_OVERRIDE, default="unk")
+    if flags["dora"]:
+        return "s17-qat-dora" if flags["qat"] else "s17-dora"
+    if flags["lora"]:
+        return "s17-qat-lora" if flags["qat"] else "s17-lora"
+    if flags["acft"]:
+        return "s17-qat-full" if flags["qat"] else "s17-full"
+    return "s17-unk"
+
+def _canonical_adapter_tag(flags: dict) -> str:
+    if RUN_NAME_ADAPTER_OVERRIDE:
+        return slug_run_token(RUN_NAME_ADAPTER_OVERRIDE, default="unk")
+    rank = os.environ.get("WHISPER_LORA_R", "").strip()
+    alpha = os.environ.get("WHISPER_LORA_ALPHA", "").strip()
+    if flags["dora"]:
+        if rank.isdigit() and alpha.isdigit():
+            return f"dora-r{rank}-a{alpha}"
+        if rank.isdigit():
+            return f"dora-r{rank}"
+        return "dora"
+    if flags["lora"]:
+        if rank.isdigit() and alpha.isdigit():
+            return f"lora-r{rank}-a{alpha}"
+        if rank.isdigit():
+            return f"lora-r{rank}"
+        return "lora"
+    if flags["acft"]:
+        return "full"
+    return "unk"
+
+def _canonical_rows_tag() -> str:
+    if RUN_NAME_ROWS_OVERRIDE:
+        return slug_run_token(RUN_NAME_ROWS_OVERRIDE, default="unk")
+    return _count_manifest_rows(STAGE15_TRAIN)
+
+def _canonical_kind_tag() -> str:
+    if RUN_NAME_KIND_OVERRIDE:
+        return slug_run_token(RUN_NAME_KIND_OVERRIDE, default="unk")
+    return "train-eval" if (RUN_EVAL_19C or RUN_EVAL_19D) else "train-only"
+
+def _canonical_ctx_tag(flags: dict) -> str:
+    if flags["dyn_ctx"] is True:
+        return "dyn"
+    if flags["dyn_ctx"] is False:
+        return "static"
+    return "unk"
+
+def _canonical_run_id_tag() -> str:
+    base = RUN_NAME_ID_HINT or "auto"
+    if STAGE17_CHECKPOINT_TAG:
+        base = f"{base}-{STAGE17_CHECKPOINT_TAG}"
+    return slug_run_token(base, default="auto")
+
+def _stage17_canonical_prefix(flags: dict) -> str:
+    return build_run_folder_name(
+        kind=_canonical_kind_tag(),
+        stage="17",
+        base=_canonical_base_tag_from_id(BASE_MODEL_ID),
+        method=_canonical_method_tag(flags),
+        adapter=_canonical_adapter_tag(flags),
+        quant="qat" if flags["qat"] else "noqat",
+        ctx=_canonical_ctx_tag(flags),
+        rows=_canonical_rows_tag(),
+        run_id=_canonical_run_id_tag(),
+    )
+
+def _stage17_checkpoint_prefix() -> str:
+    if STAGE17_CHECKPOINT_PREFIX:
+        return STAGE17_CHECKPOINT_PREFIX
+    script_path = _stage17_script_path()
+    flags = _detect_stage17_script_flags(str(script_path))
+    if USE_CANONICAL_RUN_FOLDER_NAMING:
+        return _stage17_canonical_prefix(flags)
+    parts = ["Stage_17", _stage17_aug_tag(), _provider_tag_from_id(BASE_MODEL_ID), "wer"]
+    if flags["acft"]:
+        parts.append("acft")
+    if flags["dora"]:
+        parts.append("dora")
+    elif flags["lora"]:
+        parts.append("lora")
+    if flags["dyn_ctx"] is True:
+        parts.append("dyn_ctx")
+    elif flags["dyn_ctx"] is False:
+        parts.append("full_ctx")
+    if flags["qat"]:
+        parts.append(f"qat{_qat_bits_from_env_or_script(str(script_path))}_0")
+    if STAGE17_CHECKPOINT_TAG:
+        parts.append(_sanitize_checkpoint_tag(STAGE17_CHECKPOINT_TAG))
+    parts.append("chkpts")
+    parts.append(_model_tag_from_id(BASE_MODEL_ID))
+    return "_".join(p for p in parts if p)
+
+def _split_tokens(value: str) -> list[str]:
+    return [t for t in value.lower().split("_") if t]
+
+def _strip_checkpoint_index(name: str) -> tuple[str, int | None]:
+    base = name[:-7] if name.endswith("_merged") else name
+    m = re.match(r"^(.*?)(?:_(\d+))$", base)
+    if m:
+        return m.group(1), int(m.group(2))
+    return base, None
+
+def _desired_stage17_tokens() -> tuple[list[str], list[str], list[str]]:
+    base_tokens: list[str] = []
+    def add(token: str) -> None:
+        base_tokens.extend(_split_tokens(token))
+
+    add("Stage_17")
+    add(_stage17_aug_tag())
+    add(_provider_tag_from_id(BASE_MODEL_ID))
+    add("wer")
+    flags = _detect_stage17_script_flags(str(_stage17_script_path()))
+    if flags["dora"]:
+        add("dora")
+    elif flags["lora"]:
+        add("lora")
+    if flags["dyn_ctx"] is True:
+        add("dyn_ctx")
+    elif flags["dyn_ctx"] is False:
+        add("full_ctx")
+    add("chkpts")
+    model_tag = _model_tag_from_id(BASE_MODEL_ID)
+    add(model_tag)
+
+    optional_tokens: list[str] = []
+    if flags["acft"]:
+        optional_tokens.extend(_split_tokens("acft"))
+    if flags["qat"]:
+        optional_tokens.extend(_split_tokens(f"qat{_qat_bits_from_env_or_script(str(_stage17_script_path()))}_0"))
+
+    model_tokens = _split_tokens(model_tag)
+    size_token = model_tokens[0] if model_tokens else "model"
+    core_tokens = ["stage", "17", _provider_tag_from_id(BASE_MODEL_ID), "wer", size_token]
+    if "en" in model_tokens:
+        core_tokens.append("en")
+    return base_tokens, optional_tokens, core_tokens
+
+def _pick_existing_stage17_prefix(root: Path) -> str | None:
+    base_tokens, optional_tokens, core_tokens = _desired_stage17_tokens()
+    best_prefix = None
+    best_score = -1
+    best_idx = -1
+    try:
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            base, idx = _strip_checkpoint_index(child.name)
+            tokens = _split_tokens(base)
+            if not all(t in tokens for t in core_tokens):
+                continue
+            if "chkpts" not in tokens and "checkpoints" not in tokens:
+                continue
+            score = sum(1 for t in base_tokens + optional_tokens if t in tokens)
+            idx_val = idx if idx is not None else 0
+            if score > best_score or (score == best_score and idx_val > best_idx):
+                best_prefix = base
+                best_score = score
+                best_idx = idx_val
+    except Exception:
+        return None
+    return best_prefix
+
+def _checkpoint_has_state(path: Path) -> bool:
+    try:
+        if (path / "run_state.json").exists():
+            return True
+        for child in path.iterdir():
+            if child.is_dir() and child.name.startswith("model_epoch_"):
+                return True
+            if child.is_file() and child.name.startswith("training_state_epoch_"):
+                return True
+    except Exception:
+        return False
+    return False
+
+def _parse_checkpoint_index(name: str, prefix: str) -> int | None:
+    if name.endswith("_merged"):
+        return None
+    if name == prefix:
+        return 0
+    if not name.startswith(prefix + "_"):
+        return None
+    tail = name[len(prefix) + 1 :]
+    m = re.match(r"^(\d+)$", tail)
+    if not m:
+        return None
+    return int(m.group(1))
+
+def resolve_stage17_checkpoint_dir() -> str:
+    if CHECKPOINT_DIR:
+        return CHECKPOINT_DIR
+    root = Path(CHECKPOINTS_ROOT) if CHECKPOINTS_ROOT else Path(DATA_ROOT)
+    root.mkdir(parents=True, exist_ok=True)
+    prefix = _stage17_checkpoint_prefix() or "Stage_17_chkpts"
+    if not STAGE17_CHECKPOINT_PREFIX and STAGE17_REUSE_EXISTING_PREFIX:
+        existing_prefix = _pick_existing_stage17_prefix(root)
+        if existing_prefix:
+            prefix = existing_prefix
+    candidates = []
+    try:
+        for child in root.iterdir():
+            if not child.is_dir():
+                continue
+            idx = _parse_checkpoint_index(child.name, prefix)
+            if idx is None:
+                continue
+            candidates.append((idx, child.stat().st_mtime, _checkpoint_has_state(child), child))
+    except Exception:
+        candidates = []
+    if candidates and not START_FRESH:
+        with_state = [c for c in candidates if c[2]]
+        pick = max(with_state or candidates, key=lambda c: (c[0], c[1]))
+        return str(pick[3])
+    next_idx = max((c[0] for c in candidates), default=0) + 1
+    return str(root / f"{prefix}_{next_idx}")
+
+CHECKPOINT_DIR = resolve_stage17_checkpoint_dir()
+log(f"[stage17] CHECKPOINT_DIR = {CHECKPOINT_DIR}")
 
 def run(cmd):
     if isinstance(cmd, str):
@@ -1077,7 +1683,7 @@ def rel_paths_to_drive(paths: list[str]) -> list[str]:
 def rsync_files_from(rel_paths: list[str], src_root: str, dst_root: str, label=""):
     if not rel_paths:
         return
-    tmp = Path("/tmp/rsync_files.txt")
+    tmp = Path(os.environ.get("TEMP", "/tmp")) / "rsync_files.txt"
     tmp.write_text("\n".join(rel_paths) + "\n", encoding="utf-8")
     run(["rsync", "-a", "--info=progress2", f"--files-from={tmp}", f"{src_root}/", f"{dst_root}/"])
     log(f"[copy] files-from {label}: {len(rel_paths)} files")
@@ -1278,23 +1884,108 @@ def assert_outputs(paths, stage):
     missing = [str(p) for p in paths if not Path(p).exists()]
     raise RuntimeError(f"[{stage}] expected outputs missing/empty: {missing}")
 
+STAGE_ORDER_FOR_AUTO_SKIP = [
+    "stage_1",
+    "stage_2",
+    "stage_3",
+    "stage_3b",
+    "stage_4",
+    "stage_5",
+    "stage_6",
+    "stage_7",
+    "stage_8",
+    "stage_9",
+    "stage_10b",
+    "stage_11",
+    "stage_12",
+    "stage_13",
+    "stage_14",
+    "stage_15",
+    "stage_16",
+]
+
+STAGE_OUTPUTS_FOR_AUTO_SKIP = {
+    "stage_1": [TASKS_PENDING, PAIRS_PENDING],
+    "stage_2": [STAGE2_MANIFEST],
+    "stage_3": [SCORES_CSV],
+    "stage_3b": [STAGE3B_MANIFEST],
+    "stage_4": [STAGE4_MANIFEST],
+    "stage_5": [STAGE5_MANIFEST],
+    "stage_6": [STAGE6_MANIFEST],
+    "stage_7": [STAGE7_MANIFEST],
+    "stage_8": [STAGE8_MANIFEST],
+    "stage_9": [STAGE9_MANIFEST],
+    "stage_10b": [STAGE10B_MANIFEST],
+    "stage_11": [STAGE11_MANIFEST],
+    "stage_12": [STAGE12_MANIFEST],
+    "stage_13": [STAGE13_TRAIN, STAGE13_TEST],
+    "stage_14": [STAGE14_TRAIN],
+    "stage_15": [STAGE15_TRAIN],
+    "stage_16": [STAGE13_TEST, STAGE16_BACKUP],
+}
+
+STAGE_SKIP_VAR_MAP = {
+    "stage_1": "SKIP_STAGE_1_MANIFEST_CREATION",
+    "stage_2": "SKIP_STAGE_2_CHUNK_TRANSCRIPTS",
+    "stage_3": "SKIP_STAGE_3_SPEAKER_SORT",
+    "stage_3b": "SKIP_STAGE_3B_FILTER_ENGLISH",
+    "stage_4": "SKIP_STAGE_4_DELETE_COMMON_FILLERS",
+    "stage_5": "SKIP_STAGE_5_CONVERT_NUMBER_WORDS",
+    "stage_6": "SKIP_STAGE_6_ADD_NOISE",
+    "stage_7": "SKIP_STAGE_7_ADD_OTHER_VOICES",
+    "stage_8": "SKIP_STAGE_8_ADD_RANDOM_GAIN",
+    "stage_9": "SKIP_STAGE_9_ADD_REVERB",
+    "stage_10b": "SKIP_STAGE_10B_ADD_TEMPO_PAUSE",
+    "stage_11": "SKIP_STAGE_11_ADD_FREQUENCY",
+    "stage_12": "SKIP_STAGE_12_REMOVE_BOTTOM_PERCENT",
+    "stage_13": "SKIP_STAGE_13_SPLIT_TRAIN_TEST",
+    "stage_14": "SKIP_STAGE_14_REMOVE_TARGET_FILES",
+    "stage_15": "SKIP_STAGE_15_RANDOMIZE_MANIFEST",
+    "stage_16": "SKIP_STAGE_16_MOVE_TEST_CHUNKS",
+}
+
+def _infer_latest_completed_stage() -> str | None:
+    for stage in reversed(STAGE_ORDER_FOR_AUTO_SKIP):
+        outputs = STAGE_OUTPUTS_FOR_AUTO_SKIP.get(stage)
+        if outputs and outputs_ok(outputs):
+            return stage
+    return None
+
+def _apply_auto_skip_upstream_from_outputs() -> None:
+    if not AUTO_SKIP_UPSTREAM_FROM_OUTPUTS:
+        return
+    latest = _infer_latest_completed_stage()
+    if not latest:
+        return
+    log(f"[auto] latest completed stage from outputs: {latest}; skipping upstream stages")
+    for stage in STAGE_ORDER_FOR_AUTO_SKIP:
+        if stage == latest:
+            break
+        var = STAGE_SKIP_VAR_MAP.get(stage)
+        if var:
+            globals()[var] = True
+
+_apply_auto_skip_upstream_from_outputs()
+
 SKIP_FLAGS = {
-    "stage_1": SKIP_STAGE_1,
-    "stage_2": SKIP_STAGE_2,
-    "stage_3": SKIP_STAGE_3,
-    "stage_3b": SKIP_STAGE_3B,
-    "stage_4": SKIP_STAGE_4,
-    "stage_6": SKIP_STAGE_6,
-    "stage_7": SKIP_STAGE_7,
-    "stage_8": SKIP_STAGE_8,
-    "stage_9": SKIP_STAGE_9,
-    "stage_10b": SKIP_STAGE_10B,
-    "stage_12": SKIP_STAGE_12,
-    "stage_13": SKIP_STAGE_13,
-    "stage_14": SKIP_STAGE_14,
-    "stage_15": SKIP_STAGE_15,
-    "stage_16": SKIP_STAGE_16,
-    "stage_17": SKIP_STAGE_17,
+    "stage_1": SKIP_STAGE_1_MANIFEST_CREATION,
+    "stage_2": SKIP_STAGE_2_CHUNK_TRANSCRIPTS,
+    "stage_3": SKIP_STAGE_3_SPEAKER_SORT,
+    "stage_3b": SKIP_STAGE_3B_FILTER_ENGLISH,
+    "stage_4": SKIP_STAGE_4_DELETE_COMMON_FILLERS,
+    "stage_5": SKIP_STAGE_5_CONVERT_NUMBER_WORDS,
+    "stage_6": SKIP_STAGE_6_ADD_NOISE,
+    "stage_7": SKIP_STAGE_7_ADD_OTHER_VOICES,
+    "stage_8": SKIP_STAGE_8_ADD_RANDOM_GAIN,
+    "stage_9": SKIP_STAGE_9_ADD_REVERB,
+    "stage_10b": SKIP_STAGE_10B_ADD_TEMPO_PAUSE,
+    "stage_11": SKIP_STAGE_11_ADD_FREQUENCY,
+    "stage_12": SKIP_STAGE_12_REMOVE_BOTTOM_PERCENT,
+    "stage_13": SKIP_STAGE_13_SPLIT_TRAIN_TEST,
+    "stage_14": SKIP_STAGE_14_REMOVE_TARGET_FILES,
+    "stage_15": SKIP_STAGE_15_RANDOMIZE_MANIFEST,
+    "stage_16": SKIP_STAGE_16_MOVE_TEST_CHUNKS,
+    "stage_17": SKIP_STAGE_17_TRAIN,
 }
 
 def should_run(stage, outputs, force=False):
@@ -1304,12 +1995,17 @@ def should_run(stage, outputs, force=False):
         return False
     if force:
         return True
+    outputs_ready = outputs_ok(outputs)
+    if outputs_ready and AUTO_SKIP_IF_OUTPUTS_PRESENT and stage not in AUTO_SKIP_EXCLUDE_STAGES:
+        log(f"[skip] {stage} outputs already exist")
+        update_stage_state(stage, "skipped_existing")
+        return False
     completed = set(PIPELINE_STATE.get("completed", []))
-    if stage in completed and outputs_ok(outputs):
+    if outputs_ready and stage in completed:
         log(f"[skip] {stage} already completed and outputs present")
         update_stage_state(stage, "skipped_existing")
         return False
-    if outputs_ok(outputs) and outputs_signature_matches(stage, outputs):
+    if outputs_ready and outputs_signature_matches(stage, outputs):
         log(f"[skip] {stage} outputs match previous signature")
         update_stage_state(stage, "skipped_existing")
         return False
@@ -1402,7 +2098,7 @@ def check_required_paths():
         if not Path(path).exists():
             missing.append(f"{label}: {path}")
 
-    if not SKIP_STAGE_1:
+    if not SKIP_STAGE_1_MANIFEST_CREATION:
         req(TRANSCRIPT_DIR_STAGE1, "TRANSCRIPT_DIR_STAGE1")
         req(AUDIO_SOURCE_DIR_STAGE1, "AUDIO_SOURCE_DIR_STAGE1")
 
@@ -1431,19 +2127,61 @@ if AUTO_WORKERS:
 # ---------- CLONE / UPDATE ----------
 if not Path(REPO_DIR).exists():
     run(["git", "clone", REPO_URL, REPO_DIR])
-else:
+elif UPDATE_REPO:
     run(["git", "-C", REPO_DIR, "fetch", "--all", "--prune"])
-    # Hard reset to remote HEAD to avoid stale local changes
-    run(["git", "-C", REPO_DIR, "reset", "--hard", "origin/HEAD"])
+    if RESET_REPO_HARD:
+        run(["git", "-C", REPO_DIR, "reset", "--hard", "origin/HEAD"])
 os.chdir(REPO_DIR)
 
 # %%
 # ---------- SYSTEM DEPS ----------
-run(["apt-get", "update", "-y"])
-pkgs = ["ffmpeg", "sox", "rsync"]
-if USE_RCLONE:
-    pkgs.append("rclone")
-run(["apt-get", "install", "-y"] + pkgs)
+import zipfile
+
+def _add_to_path(p: Path) -> None:
+    if not p.exists():
+        return
+    os.environ["PATH"] = str(p) + os.pathsep + os.environ.get("PATH", "")
+
+def _ensure_tool(name: str, extra_paths: list[Path] | None = None) -> bool:
+    if shutil.which(name):
+        return True
+    if extra_paths:
+        for p in extra_paths:
+            _add_to_path(p)
+            if shutil.which(name):
+                return True
+    return False
+
+def _ensure_sox_from_zip() -> None:
+    if shutil.which("sox"):
+        return
+    sox_dir = Path(REPO_DIR) / "sox_bin"
+    sox_exe = sox_dir / "sox.exe"
+    sox_zip = sox_dir / "sox.zip"
+    if sox_exe.exists():
+        _add_to_path(sox_dir)
+        return
+    if sox_zip.exists():
+        try:
+            with zipfile.ZipFile(sox_zip, "r") as zf:
+                zf.extractall(sox_dir)
+            _add_to_path(sox_dir)
+        except Exception as exc:
+            log(f"[deps] failed to extract sox.zip: {exc}")
+
+_ensure_sox_from_zip()
+missing_tools = []
+if not _ensure_tool("ffmpeg"):
+    missing_tools.append("ffmpeg")
+if not _ensure_tool("sox", extra_paths=[Path(REPO_DIR) / "sox_bin"]):
+    missing_tools.append("sox")
+if USE_LOCAL_DATA or SYNC_CACHE_TO_DRIVE or SYNC_RECORD_CHUNKS_TO_DRIVE:
+    if not _ensure_tool("rsync"):
+        missing_tools.append("rsync")
+if USE_RCLONE and not _ensure_tool("rclone"):
+    missing_tools.append("rclone")
+if missing_tools:
+    log(f"[deps] missing system tools: {', '.join(sorted(set(missing_tools)))}")
 
 # %%
 # ---------- RESTORE CACHE ----------
@@ -1483,7 +2221,10 @@ restore_files_from_drive([TASKS_PENDING, PAIRS_PENDING, STAGE2_MANIFEST], label=
 
 # %%
 # ---------- PYTHON DEPS ----------
-PY = sys.executable
+PY = PYTHON_EXE if PYTHON_EXE else sys.executable
+if PYTHON_EXE and not Path(PYTHON_EXE).exists():
+    log(f"[warn] PYTHON_EXE not found: {PYTHON_EXE}; falling back to {sys.executable}")
+    PY = sys.executable
 run([PY, "-m", "pip", "install", "-q", "-U", "pip"])
 
 def get_installed_version(pkg: str) -> str | None:
@@ -1540,25 +2281,6 @@ ensure_torchvision_compat()
 
 # %%
 # ---------- PATCH WINDOWS-SPECIFIC PATHS ----------
-replace_line("stage_1_Manifest_creation_local_only.py", "TRANSCRIPT_DIR", TRANSCRIPT_DIR_STAGE1)
-replace_line("stage_1_Manifest_creation_local_only.py", "CHUNKS_DIR", CHUNKS_DIR)
-replace_line("stage_1_Manifest_creation_local_only.py", "AUDIO_SOURCE_DIR", AUDIO_SOURCE_DIR_STAGE1)
-replace_line("stage_1_Manifest_creation_local_only.py", "ACFT_MODEL_ID", BASE_MODEL_ID)
-replace_line("stage_1_Manifest_creation_local_only.py", "BASE_PROCESSOR_ID", PROCESSOR_ID)
-
-replace_line(STAGE17_SCRIPT, "MANIFEST_PATH", STAGE15_TRAIN)
-replace_line(STAGE17_SCRIPT, "CHECKPOINT_DIR", CHECKPOINT_DIR)
-replace_line(STAGE17_SCRIPT, "FUTO_MODEL_ID", BASE_MODEL_ID)
-replace_line(STAGE17_SCRIPT, "PROCESSOR_ID", PROCESSOR_ID)
-
-patch_winsound_stage14("stage_14_remove_target_files_from_manifest.py")
-patch_winsound_stage17(STAGE17_SCRIPT)
-patch_stage1_tokenizer("stage_1_Manifest_creation_local_only.py")
-patch_winsound_simple("stage17_merge_peft_checkpoint_to_full_model.py")
-patch_stage9_reverb_mono("stage_9_add_reverb_idempotent.py")
-patch_stage12_scores_fallback("stage_12_remove_bottom_percent_by_speaker_scores.py")
-patch_stage14_scores_robust("stage_14_remove_target_files_from_manifest.py")
-
 # %%
 # ---------- CONFIG SANITY CHECKS ----------
 check_required_paths()
@@ -1572,7 +2294,14 @@ check_required_paths()
 if should_run("stage_1", [TASKS_PENDING, PAIRS_PENDING]):
     stage_banner("STAGE 1")
     update_stage_state("stage_1", "running")
-    run_stage([PY, "stage_1_Manifest_creation_local_only.py"])
+    run_stage([
+        PY, "stage_1_Manifest_creation_local_only.py",
+        "--transcript-dir", TRANSCRIPT_DIR_STAGE1,
+        "--chunks-dir", CHUNKS_DIR,
+        "--audio-source-dir", AUDIO_SOURCE_DIR_STAGE1,
+        "--acft-model-id", BASE_MODEL_ID,
+        "--base-processor-id", PROCESSOR_ID,
+    ])
     assert_outputs([TASKS_PENDING, PAIRS_PENDING], "stage_1")
     # If stage1 ran on Drive paths, rewrite to local root for downstream stages.
     if USE_LOCAL_DATA:
@@ -1706,15 +2435,26 @@ if should_run("stage_4", [STAGE4_MANIFEST]):
     assert_outputs([STAGE4_MANIFEST], "stage_4")
     update_stage_state("stage_4", "done")
 # %%
+# ---------- STAGE 5 ----------
+if should_run("stage_5", [STAGE5_MANIFEST]):
+    stage_banner("STAGE 5")
+    update_stage_state("stage_5", "running")
+    run_stage([PY, "stage_5_convert_number_words_to_digits.py",
+         "--input", STAGE4_MANIFEST,
+         "--output", STAGE5_MANIFEST,
+         "--field", "raw_transcription"])
+    assert_outputs([STAGE5_MANIFEST], "stage_5")
+    update_stage_state("stage_5", "done")
+# %%
 # ---------- STAGE 6 ----------
 if should_run("stage_6", [STAGE6_MANIFEST]):
     stage_banner("STAGE 6")
     ensure_local_paths([NOISE_DIR], label="stage_6")
     update_stage_state("stage_6", "running")
     Path(SEEN_DIR).mkdir(parents=True, exist_ok=True)
-    seed_manifest(STAGE4_MANIFEST, STAGE6_MANIFEST)
+    seed_manifest(STAGE5_MANIFEST, STAGE6_MANIFEST)
     run_stage([PY, "stage_6_add_noise_to_high_score_audio_chunks_manifest_with_noise.py",
-         "--in_manifest", STAGE4_MANIFEST,
+         "--in_manifest", STAGE5_MANIFEST,
          "--out_manifest", STAGE6_MANIFEST,
          "--noises_dir", NOISE_DIR,
          "--scores_csv", SCORES_CSV,
@@ -1818,12 +2558,34 @@ if should_run("stage_10b", [STAGE10B_MANIFEST]):
     sync_record_chunks_to_drive()
     update_stage_state("stage_10b", "done")
 # %%
+# ---------- STAGE 11 ----------
+if should_run("stage_11", [STAGE11_MANIFEST]):
+    stage_banner("STAGE 11")
+    update_stage_state("stage_11", "running")
+    seed_manifest(STAGE10B_MANIFEST, STAGE11_MANIFEST)
+    run_stage([PY, "stage_11_add_frequency_manipulation_idempotent.py",
+         "--in_manifest", STAGE10B_MANIFEST,
+         "--out_manifest", STAGE11_MANIFEST,
+         "--out_dir", FREQ_OUT_DIR,
+         "--ratio", str(FREQ_RATIO),
+         "--copies", str(FREQ_COPIES),
+         "--workers", str(AUG_WORKERS),
+         "--stage_name", "frequency_shift",
+         "--seen_db", f"{SEEN_DIR}/stage11_frequency_shift.sqlite",
+         "--semitones_min", "-1.0",
+         "--semitones_max", "1.0",
+         "--mode", "choice",
+         "--semitones_choices=-1.5,-1.0,-0.5,0.5,1.0,1.5"])
+    assert_outputs([STAGE11_MANIFEST], "stage_11")
+    sync_record_chunks_to_drive()
+    update_stage_state("stage_11", "done")
+# %%
 # ---------- STAGE 12 ----------
 if should_run("stage_12", [STAGE12_MANIFEST]):
     stage_banner("STAGE 12")
     update_stage_state("stage_12", "running")
     run_stage([PY, "stage_12_remove_bottom_percent_by_speaker_scores.py",
-         "--input_manifest", STAGE10B_MANIFEST,
+         "--input_manifest", STAGE11_MANIFEST,
          "--output_manifest", STAGE12_MANIFEST,
          "--speaker_scores_csv", SCORES_CSV,
          "--bottom_percent", str(BOTTOM_PERCENT)])
@@ -1873,7 +2635,7 @@ if should_run("stage_15", [STAGE15_TRAIN]):
     update_stage_state("stage_15", "done")
 # %%
 # ---------- STAGE 16 ----------
-if should_run("stage_16", [STAGE13_TEST]):
+if should_run("stage_16", [STAGE13_TEST, STAGE16_BACKUP]):
     stage_banner("STAGE 16")
     update_stage_state("stage_16", "running")
     run_stage([
@@ -1883,7 +2645,7 @@ if should_run("stage_16", [STAGE13_TEST]):
         "--mode", "move",
         "--backup_suffix", ".backup",
     ])
-    assert_outputs([STAGE13_TEST], "stage_16")
+    assert_outputs([STAGE13_TEST, STAGE16_BACKUP], "stage_16")
     sync_record_chunks_to_drive()
     update_stage_state("stage_16", "done")
 # %%
@@ -1892,7 +2654,14 @@ if should_run("stage_17", [CHECKPOINT_DIR]):
     stage_banner("STAGE 17")
     update_stage_state("stage_17", "running")
     os.environ["WHISPER_START_FRESH"] = str(START_FRESH)
-    run_stage([PY, STAGE17_SCRIPT])
+    run_stage([
+        PY, STAGE17_SCRIPT,
+        "--manifest-path", STAGE15_TRAIN,
+        "--checkpoint-dir", CHECKPOINT_DIR,
+        "--futo-model-id", BASE_MODEL_ID,
+        "--processor-id", PROCESSOR_ID,
+        "--start-fresh", str(START_FRESH),
+    ])
     assert_outputs([CHECKPOINT_DIR], "stage_17")
     update_stage_state("stage_17", "done")
 
