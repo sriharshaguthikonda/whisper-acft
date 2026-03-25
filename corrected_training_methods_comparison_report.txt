@@ -1,0 +1,200 @@
+================================================================================
+CORRECTED TRAINING METHODS COMPARISON REPORT
+================================================================================
+
+OVERALL RANKING (by Target WER Mean - lower is better):
+--------------------------------------------------
+ 1. Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_23
+    Target WER: 0.619 ± 1.341
+    Target CER: 0.525 ± 1.161
+    Samples: 1107
+    Has Precomputed Metrics: True
+    Models Found: 6
+
+ 2. Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_22
+    Target WER: 0.835 ± 2.842
+    Target CER: 0.775 ± 3.530
+    Samples: 1107
+    Has Precomputed Metrics: True
+    Models Found: 9
+
+ 3. Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_24
+    Target WER: 0.901 ± 2.328
+    Target CER: 0.635 ± 1.452
+    Samples: 477
+    Has Precomputed Metrics: True
+    Models Found: 17
+
+ 4. stage17_checkpoints
+    Target WER: 1.018 ± 1.928
+    Target CER: 0.781 ± 1.639
+    Samples: 4770
+    Has Precomputed Metrics: True
+    Models Found: 1
+
+ 5. Stage_17_aug_futo_wer_rank32_dora_dyn_ctx_chkpts_small_en_25
+    Target WER: 1.022 ± 2.023
+    Target CER: 0.783 ± 1.668
+    Samples: 4770
+    Has Precomputed Metrics: True
+    Models Found: 6
+
+ 6. Stage_17_aug_futo_wer_rank64_dora_dyn_ctx_chkpts_small_en_26
+    Target WER: 1.282 ± 3.515
+    Target CER: 0.916 ± 2.488
+    Samples: 4770
+    Has Precomputed Metrics: True
+    Models Found: 23
+
+ 7. Stage_17_no_aug_openai_wer_acft_lora_qat6_0_chkpts_tiny_en_17_merged
+    Target WER: 1.325 ± 2.981
+    Target CER: 1.026 ± 2.230
+    Samples: 616
+    Has Precomputed Metrics: True
+    Models Found: 7
+
+ 8. Stage_17_no_augmentation_wer_acft_qat6_0_checkpoints_partialctx_tiny_en_16
+    Target WER: 1.622 ± 2.966
+    Target CER: 1.367 ± 2.592
+    Samples: 616
+    Has Precomputed Metrics: True
+    Models Found: 3
+
+ 9. Stage_17_aug_openai_wer_lora_dyn_ctx_qat6_0_chkpts_tiny_en_19
+    Target WER: 1.784 ± 2.884
+    Target CER: 1.322 ± 2.084
+    Samples: 1500
+    Has Precomputed Metrics: True
+    Models Found: 29
+
+10. Stage_17_aug_openai_wer_acft_lora_qat6_0_chkpts_tiny_en_18
+    Target WER: 2.225 ± 7.674
+    Target CER: 2.168 ± 9.242
+    Samples: 1386
+    Has Precomputed Metrics: True
+    Models Found: 29
+
+11. Stage_17_shuffle_wer_acft_qat6_0_checkpoints_partialctx_tiny_en_15
+    Target WER: 2.263 ± 3.370
+    Target CER: 1.928 ± 2.968
+    Samples: 1386
+    Has Precomputed Metrics: True
+    Models Found: 5
+
+12. Stage_17_no_aug_openai_wer_acft_qat6_0_checkpoints_partialctx_tiny_en_16
+    Target WER: 2.365 ± 3.547
+    Target CER: 2.056 ± 3.212
+    Samples: 616
+    Has Precomputed Metrics: True
+    Models Found: 7
+
+13. Stage_18_shuffle_Dynamic_n_ctx_checkpoints_partialctx6
+    Target WER: 2.392 ± 3.189
+    Target CER: 1.972 ± 2.702
+    Samples: 7050
+    Has Precomputed Metrics: False
+    Models Found: 11
+
+14. Stage_17_shuffle_wer_acft_checkpoints_partialctx_tiny_en_14
+    Target WER: 2.671 ± 4.436
+    Target CER: 2.172 ± 3.398
+    Samples: 2781
+    Has Precomputed Metrics: True
+    Models Found: 5
+
+15. Stage_18_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_12
+    Target WER: 2.954 ± 2.978
+    Target CER: 2.311 ± 2.430
+    Samples: 750
+    Has Precomputed Metrics: True
+    Models Found: 7
+
+16. Stage_18_shuffle_n_ctx_stage_7_checkpoints_partialctx_tiny_en_11
+    Target WER: 3.430 ± 2.442
+    Target CER: 3.411 ± 2.623
+    Samples: 150
+    Has Precomputed Metrics: True
+    Models Found: 8
+
+17. Stage_18_shuffle_Dynamic_n_ctx_checkpoints_partialctx_tiny_en_8
+    Target WER: 4.198 ± 4.430
+    Target CER: 3.645 ± 3.632
+    Samples: 1377
+    Has Precomputed Metrics: True
+    Models Found: 11
+
+18. Stage_17_aug_futo_wer_dora_dyn_ctx_qat6_0_chkpts_tiny_en_20
+    Target WER: 6.693 ± 14.416
+    Target CER: 6.808 ± 17.897
+    Samples: 1386
+    Has Precomputed Metrics: True
+    Models Found: 17
+
+19. Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_tiny_en_21
+    Target WER: 10.780 ± 18.236
+    Target CER: 10.537 ± 24.669
+    Samples: 2781
+    Has Precomputed Metrics: True
+    Models Found: 8
+
+TOP 5 PERFORMERS:
+--------------------
+1. Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_23
+   WER: 0.619, CER: 0.525
+   Metrics: Precomputed
+2. Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_22
+   WER: 0.835, CER: 0.775
+   Metrics: Precomputed
+3. Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_24
+   WER: 0.901, CER: 0.635
+   Metrics: Precomputed
+4. stage17_checkpoints
+   WER: 1.018, CER: 0.781
+   Metrics: Precomputed
+5. Stage_17_aug_futo_wer_rank32_dora_dyn_ctx_chkpts_small_en_25
+   WER: 1.022, CER: 0.783
+   Metrics: Precomputed
+
+STATISTICAL SUMMARY:
+--------------------
+Total methods compared: 19
+Best WER: 0.619
+Worst WER: 10.780
+WER improvement: 94.3%
+Files with precomputed metrics: 18
+Files with calculated metrics: 1
+
+SAMPLE PREDICTIONS INSPECTION:
+-----------------------------------
+
+stage17_checkpoints:
+  Sample 1:
+    Reference: A Google switch on....
+    Prediction: Hey, who would switch on?...
+    WER: 0.750
+  Sample 2:
+    Reference: A Google switch on....
+    Prediction: Hey, who would switch on?...
+    WER: 0.750
+
+
+Stage_17_aug_futo_wer_rank32_dora_dyn_ctx_chkpts_small_en_25:
+  Sample 1:
+    Reference: A Google switch on....
+    Prediction: Hey, who would switch on?...
+    WER: 0.750
+  Sample 2:
+    Reference: A Google switch on....
+    Prediction: Hey, who would switch on?...
+    WER: 0.750
+
+
+Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_22:
+  Sample 1:
+    Reference: we can always order a ultrasound and check what it might be, okay?...
+    Prediction: We can always order an ultrasound and check what it might be....
+    WER: 0.154
+  Sample 2:
+    Reference: we can always order a ultrasound and check what it might be, okay?...
+    Prediction: We can always order an ultrasound and check what it might be....
+    WER: 0.154

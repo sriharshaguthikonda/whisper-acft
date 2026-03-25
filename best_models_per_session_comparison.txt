@@ -1,0 +1,95 @@
+================================================================================
+BEST MODEL FROM EACH TRAINING SESSION COMPARISON
+================================================================================
+
+OVERALL RANKING (by WER - lower is better):
+--------------------------------------------------
+1. Stage_17_FUTO_DoRA
+   Model: model_epoch_000000__merged
+   WER: 0.498 ± 1.545
+   CER: 0.389 ± 1.076
+   Samples: 1107
+   File: Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_22
+
+2. Stage_18_Shuffle_Static
+   Model: futo-org/acft-whisper-tiny.en
+   WER: 0.537 ± 0.354
+   CER: 0.468 ± 0.230
+   Samples: 150
+   File: Stage_18_shuffle_n_ctx_stage_7_checkpoints_partialctx_tiny_en_11
+
+3. Stage_17_Base
+   Model: futo-org/acft-whisper-small.en
+   WER: 1.018 ± 1.928
+   CER: 0.781 ± 1.639
+   Samples: 4770
+   File: stage17_checkpoints
+
+4. Stage_18_Shuffle_Dynamic
+   Model: model_epoch_000002
+   WER: 1.223 ± 1.664
+   CER: 1.091 ± 1.494
+   Samples: 7050
+   File: Stage_18_shuffle_Dynamic_n_ctx_checkpoints_partialctx6
+
+5. Stage_17_No_Aug
+   Model: model_epoch_000001_merged
+   WER: 1.251 ± 2.843
+   CER: 0.962 ± 2.066
+   Samples: 616
+   File: Stage_17_no_aug_openai_wer_acft_lora_qat6_0_chkpts_tiny_en_17_merged
+
+6. Stage_17_Shuffle
+   Model: futo-org/acft-whisper-tiny.en
+   WER: 1.414 ± 2.899
+   CER: 1.093 ± 2.164
+   Samples: 1386
+   File: Stage_17_shuffle_wer_acft_qat6_0_checkpoints_partialctx_tiny_en_15
+
+7. Stage_17_Aug_OpenAI
+   Model: futo-org/acft-whisper-tiny.en
+   WER: 1.538 ± 2.526
+   CER: 1.121 ± 1.829
+   Samples: 750
+   File: Stage_17_aug_openai_wer_lora_dyn_ctx_qat6_0_chkpts_tiny_en_19
+
+TOP 3 DETAILED COMPARISON:
+-----------------------------------
+
+1. Stage_17_FUTO_DoRA - model_epoch_000000__merged
+   Performance: WER 0.498, CER 0.389
+   Consistency: ±1.545 WER, ±1.076 CER
+   Sample size: 1107
+   Metrics type: Precomputed
+
+2. Stage_18_Shuffle_Static - futo-org/acft-whisper-tiny.en
+   Performance: WER 0.537, CER 0.468
+   Consistency: ±0.354 WER, ±0.230 CER
+   Sample size: 150
+   Metrics type: Precomputed
+
+3. Stage_17_Base - futo-org/acft-whisper-small.en
+   Performance: WER 1.018, CER 0.781
+   Consistency: ±1.928 WER, ±1.639 CER
+   Sample size: 4770
+   Metrics type: Precomputed
+
+SESSION PERFORMANCE ANALYSIS:
+------------------------------
+Stage_17_FUTO_DoRA: Average WER 0.498
+Stage_18_Shuffle_Static: Average WER 0.537
+Stage_17_Base: Average WER 1.018
+Stage_18_Shuffle_Dynamic: Average WER 1.223
+Stage_17_No_Aug: Average WER 1.251
+Stage_17_Shuffle: Average WER 1.414
+Stage_17_Aug_OpenAI: Average WER 1.538
+
+==================================================
+🏆 OVERALL WINNER 🏆
+==================================================
+Session: Stage_17_FUTO_DoRA
+Model: model_epoch_000000__merged
+WER: 0.498 ± 1.545
+CER: 0.389 ± 1.076
+File: Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_22
+Performance improvement over runner-up: 7.4%
