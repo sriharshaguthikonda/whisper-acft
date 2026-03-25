@@ -10,15 +10,14 @@ A JSON produced by:
 
 Outputs
 -------
-- PNG charts (bar charts, pareto, ranked leaderboards, robustness boxplots,
-  overlap/SNR curves, bump ranks, scorecard, per-model heatmaps)
+- Image charts (format selectable via --img_format)
 - model_summary.csv
 
 Usage (Windows PowerShell)
 -------------------------
 I:\Whisper-training-env\Scripts\python.exe i:\whisper-acft\stage_19d_plot_eval_charts.py `
-  --in_json "I:\Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_22\evaluation_results_futo_like_targetmix_sweep.json" `
-  --out_dir "I:\Stage_17_aug_futo_wer_dora_dyn_ctx_chkpts_small_en_22"
+  --in_json "I:\Stage_17_aug_futo_wer_rank64_dora_dyn_ctx_chkpts_small_en_26\evaluation_per_sample_predictions_targetmix_sweep.json" `
+  --out_dir "I:\Stage_17_aug_futo_wer_rank64_dora_dyn_ctx_chkpts_small_en_26"
 
 Notes
 -----
@@ -26,6 +25,7 @@ Notes
 - Dark theme plots (explicit styling applied).
 - Heatmaps use VIBGYOR; red = worse, violet = better.
 - One plot per figure (no subplots).
+- Use --img_format webp/jpg for smaller files.
 """
 
 from __future__ import annotations
@@ -39,6 +39,66 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 HEATMAP_CMAP = "rainbow_r"  # VIBGYOR with red = low/bad, violet = high/good
+
+IMG_FORMAT = "png"
+IMG_QUALITY = 90
+IMG_DPI = 200
+
+def _normalize_format(fmt: str) -> str:
+    fmt = (fmt or "png").strip().lower()
+    if fmt == "jpeg":
+        return "jpg"
+    return fmt
+
+
+def _with_format(path: Path, fmt: str) -> Path:
+    fmt = _normalize_format(fmt)
+    ext = f".{fmt}"
+    if path.suffix.lower() != ext:
+        return path.with_suffix(ext)
+    return path
+
+def _extract_per_sample_meta(data: object) -> dict | None:
+    if isinstance(data, dict):
+        if "__meta__" in data and isinstance(data.get("__meta__"), dict):
+            meta = data.get("__meta__")
+            if isinstance(meta.get("run_args"), dict):
+                return meta.get("run_args")
+            return meta
+        if isinstance(data.get("run_args"), dict):
+            return data.get("run_args")
+        items = data.get("items") or data.get("samples")
+        if isinstance(items, list):
+            return _extract_per_sample_meta(items)
+        return None
+
+    if isinstance(data, list):
+        for item in data:
+            if not isinstance(item, dict):
+                continue
+            if "__meta__" in item and isinstance(item.get("__meta__"), dict):
+                meta = item.get("__meta__")
+                if isinstance(meta.get("run_args"), dict):
+                    return meta.get("run_args")
+                return meta
+            if "run_args" in item and "mix_key" not in item and isinstance(item.get("run_args"), dict):
+                return item.get("run_args")
+    return None
+
+
+def _resolve_results_json(in_path: Path, data: object) -> Path | None:
+    meta = _extract_per_sample_meta(data)
+    if isinstance(meta, dict) and isinstance(meta.get("args"), dict):
+        out_json = meta.get("args", {}).get("out_json")
+        if out_json:
+            p = Path(str(out_json))
+            if p.exists():
+                return p
+    fallback = in_path.parent / "evaluation_results_futo_like_targetmix_sweep.json"
+    if fallback.exists():
+        return fallback
+    return None
+
 
 def _beep() -> None:
     try:
@@ -107,7 +167,21 @@ def zscore(series: pd.Series) -> pd.Series:
 def save_fig(path: Path) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     plt.tight_layout()
-    plt.savefig(path, dpi=200, facecolor=plt.rcParams.get("figure.facecolor", "black"))
+    fmt = _normalize_format(IMG_FORMAT)
+    out_path = _with_format(path, fmt)
+    face = plt.rcParams.get("figure.facecolor", "black")
+    save_kwargs = {"dpi": IMG_DPI, "facecolor": face, "format": "jpeg" if fmt == "jpg" else fmt}
+    if fmt in {"jpg", "webp"}:
+        save_kwargs["pil_kwargs"] = {"quality": int(IMG_QUALITY), "optimize": True}
+    try:
+        plt.savefig(out_path, **save_kwargs)
+    except Exception as e:
+        if fmt != "png":
+            print(f"[warn] savefig failed for format '{fmt}': {e}. Falling back to png.")
+            out_path = _with_format(path, "png")
+            plt.savefig(out_path, dpi=IMG_DPI, facecolor=face, format="png")
+        else:
+            raise
     plt.close()
 
 
@@ -266,6 +340,35 @@ def parallel_scorecard(
     save_fig(out_path)
 
 
+def grouped_bar_two_metrics(
+    df: pd.DataFrame,
+    metric_a: str,
+    metric_b: str,
+    label_a: str,
+    label_b: str,
+    title: str,
+    ylabel: str,
+    out_path: Path,
+) -> None:
+    s = df[["model_label", metric_a, metric_b]].copy()
+    s[metric_a] = pd.to_numeric(s[metric_a], errors="coerce")
+    s[metric_b] = pd.to_numeric(s[metric_b], errors="coerce")
+    s = s.dropna()
+    if s.empty:
+        return
+    x = np.arange(len(s))
+    width = 0.38
+    plt.figure(figsize=(10, 5))
+    plt.bar(x - width / 2, s[metric_a], width, label=label_a)
+    plt.bar(x + width / 2, s[metric_b], width, label=label_b)
+    plt.ylabel(ylabel)
+    plt.xlabel("Model")
+    plt.xticks(x, s["model_label"], rotation=30, ha="right")
+    plt.title(title)
+    plt.legend()
+    save_fig(out_path)
+
+
 def build_summary_df(models: list[dict]) -> pd.DataFrame:
     rows = []
     for m in models:
@@ -345,6 +448,9 @@ def build_long_df(data: dict) -> pd.DataFrame:
                     "samples": float(met.get("samples") or 0),
                     "win_rate": met.get("win_rate_target_closer"),
                     "margin": met.get("avg_margin_other_minus_target"),
+                    "cer_t": met.get("cer_micro_target"),
+                    "cer_o": met.get("cer_micro_other"),
+                    "margin_cer": met.get("avg_margin_cer_other_minus_target"),
                     "wer_t": met.get("wer_micro_target"),
                     "wer_o": met.get("wer_micro_other"),
                 }
@@ -399,11 +505,23 @@ def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--in_json", required=True)
     ap.add_argument("--out_dir", required=True)
+    ap.add_argument("--no_cer", action="store_true",
+                    help="Disable CER charts (CER charts are enabled by default).")
+    ap.add_argument("--img_format", default="webp", choices=["png", "jpg", "jpeg", "webp"],
+                    help="Image format for plots (default: webp).")
+    ap.add_argument("--img_quality", type=int, default=90,
+                    help="Lossy image quality for jpg/webp (1-100).")
+    ap.add_argument("--img_dpi", type=int, default=200,
+                    help="DPI for saved figures.")
     args = ap.parse_args()
 
     in_path = Path(args.in_json)
     out_dir = Path(args.out_dir)
     out_dir.mkdir(parents=True, exist_ok=True)
+    global IMG_FORMAT, IMG_QUALITY, IMG_DPI
+    IMG_FORMAT = args.img_format
+    IMG_QUALITY = max(1, min(100, int(args.img_quality)))
+    IMG_DPI = max(50, int(args.img_dpi))
 
     # Dark theme for all plots
     plt.style.use("dark_background")
@@ -426,6 +544,17 @@ def main() -> None:
     )
 
     data = json.loads(in_path.read_text(encoding="utf-8"))
+    if isinstance(data, list) or (isinstance(data, dict) and "models" not in data):
+        results_path = _resolve_results_json(in_path, data)
+        if results_path is None:
+            raise SystemExit(
+                "Input JSON looks like per-sample predictions. "
+                "Could not find the results JSON. "
+                "Pass --in_json pointing at evaluation_results_futo_like_targetmix_sweep.json."
+            )
+        print(f"Detected per-sample JSON; loading results from: {results_path}")
+        data = json.loads(results_path.read_text(encoding="utf-8"))
+    include_cer = not bool(args.no_cer)
 
     df = build_summary_df(data.get("models") or [])
     label_map = dict(zip(df["model_short"], df["model_label"]))
@@ -447,7 +576,7 @@ def main() -> None:
 
     top_models = pick_top_models(df, top_k=8)
 
-    # Bar charts
+    # Bar charts (WER)
     plt.figure(figsize=(10, 5))
     plt.bar(df["model_label"], df["win_rate_target_closer"])
     plt.ylabel("Win rate: P(WER_target < WER_other)")
@@ -472,7 +601,7 @@ def main() -> None:
     plt.title("Target WER (lower is better)")
     save_fig(out_dir / "03_target_wer.png")
 
-    # Pareto scatter
+    # Pareto scatter (WER)
     plt.figure(figsize=(8, 6))
     plt.scatter(df["wer_micro_target"], df["avg_margin_other_minus_target"])
     plt.xlabel("WER_target (lower is better)")
@@ -613,6 +742,149 @@ def main() -> None:
             label_map=label_map,
         )
 
+    # CER charts
+    if include_cer:
+        plt.figure(figsize=(10, 5))
+        plt.bar(df["model_label"], df["avg_margin_cer_other_minus_target"])
+        plt.ylabel("Avg margin (CER_other - CER_target)")
+        plt.xlabel("Model")
+        plt.xticks(rotation=30, ha="right")
+        plt.title("Overall CER separation margin (higher is better)")
+        save_fig(out_dir / "16_overall_cer_margin.png")
+
+        plt.figure(figsize=(10, 5))
+        plt.bar(df["model_label"], df["cer_micro_target"])
+        plt.ylabel("CER vs TARGET transcript (micro)")
+        plt.xlabel("Model")
+        plt.xticks(rotation=30, ha="right")
+        plt.title("Target CER (lower is better)")
+        save_fig(out_dir / "17_target_cer.png")
+
+        plt.figure(figsize=(10, 5))
+        plt.bar(df["model_label"], df["cer_micro_other"])
+        plt.ylabel("CER vs OTHER transcript (micro)")
+        plt.xlabel("Model")
+        plt.xticks(rotation=30, ha="right")
+        plt.title("Other CER (higher is better)")
+        save_fig(out_dir / "18_other_cer.png")
+
+        plt.figure(figsize=(8, 6))
+        plt.scatter(df["cer_micro_target"], df["avg_margin_cer_other_minus_target"])
+        plt.xlabel("CER_target (lower is better)")
+        plt.ylabel("Avg CER margin (higher is better)")
+        plt.title("Pareto view: CER accuracy vs separation")
+        for _, r in df.iterrows():
+            plt.annotate(
+                r["model_label"],
+                (float(r["cer_micro_target"]), float(r["avg_margin_cer_other_minus_target"])),
+                fontsize=8,
+            )
+        save_fig(out_dir / "19_pareto_targetcer_vs_margin_cer.png")
+
+        if not df_long.empty:
+            df_snr_cer = (
+                df_long.groupby(["model_short", "snr_db"], as_index=False)
+                .agg(cer_t=("cer_t", "mean"), cer_o=("cer_o", "mean"), margin_cer=("margin_cer", "mean"))
+                .sort_values(["model_short", "snr_db"])
+            )
+
+            plt.figure(figsize=(8, 6))
+            for ms in df_snr_cer["model_short"].unique():
+                s = df_snr_cer[df_snr_cer["model_short"] == ms]
+                plt.plot(s["snr_db"], s["cer_t"], marker="o", label=label_map.get(ms, ms))
+            plt.xlabel("SNR (TARGET over OTHER), dB")
+            plt.ylabel("Mean CER_target (over overlaps)")
+            plt.title("Target CER vs SNR (mean across overlaps)")
+            plt.legend()
+            save_fig(out_dir / "20_cer_target_vs_snr.png")
+
+            plt.figure(figsize=(8, 6))
+            for ms in df_snr_cer["model_short"].unique():
+                s = df_snr_cer[df_snr_cer["model_short"] == ms]
+                plt.plot(s["snr_db"], s["margin_cer"], marker="o", label=label_map.get(ms, ms))
+            plt.xlabel("SNR (TARGET over OTHER), dB")
+            plt.ylabel("Mean CER margin (CER_other - CER_target)")
+            plt.title("CER separation margin vs SNR (mean across overlaps)")
+            plt.legend()
+            save_fig(out_dir / "21_cer_margin_vs_snr.png")
+
+            df_ov_cer = (
+                df_long.groupby(["model_short", "overlap"], as_index=False)
+                .agg(cer_t=("cer_t", "mean"), margin_cer=("margin_cer", "mean"))
+                .sort_values(["model_short", "overlap"])
+            )
+
+            plt.figure(figsize=(8, 6))
+            for ms in df_ov_cer["model_short"].unique():
+                s = df_ov_cer[df_ov_cer["model_short"] == ms]
+                plt.plot(s["overlap"], s["cer_t"], marker="o", label=label_map.get(ms, ms))
+            plt.xlabel("Overlap placement ratio (0=start, 1=end)")
+            plt.ylabel("Mean CER_target (over SNRs)")
+            plt.title("Target CER vs overlap (mean across SNRs)")
+            plt.legend()
+            save_fig(out_dir / "22_cer_target_vs_overlap.png")
+
+            plt.figure(figsize=(8, 6))
+            for ms in df_ov_cer["model_short"].unique():
+                s = df_ov_cer[df_ov_cer["model_short"] == ms]
+                plt.plot(s["overlap"], s["margin_cer"], marker="o", label=label_map.get(ms, ms))
+            plt.xlabel("Overlap placement ratio (0=start, 1=end)")
+            plt.ylabel("Mean CER margin (CER_other - CER_target)")
+            plt.title("CER separation margin vs overlap (mean across SNRs)")
+            plt.legend()
+            save_fig(out_dir / "23_cer_margin_vs_overlap.png")
+
+            boxplot_by_model(
+                df_long,
+                metric="cer_t",
+                model_order=df["model_short"].tolist(),
+                label_map=label_map,
+                title="Target CER distribution across conditions",
+                xlabel="CER_target (lower is better)",
+                out_path=out_dir / "24_boxplot_cer_target_by_condition.png",
+            )
+            boxplot_by_model(
+                df_long,
+                metric="margin_cer",
+                model_order=df["model_short"].tolist(),
+                label_map=label_map,
+                title="CER margin distribution across conditions",
+                xlabel="CER margin (CER_other - CER_target)",
+                out_path=out_dir / "25_boxplot_cer_margin_by_condition.png",
+            )
+
+        # Combined WER+CER views (single images)
+        grouped_bar_two_metrics(
+            df,
+            metric_a="wer_micro_target",
+            metric_b="cer_micro_target",
+            label_a="WER_target",
+            label_b="CER_target",
+            title="Target error: WER vs CER (lower is better)",
+            ylabel="Error rate",
+            out_path=out_dir / "26_target_wer_vs_cer.png",
+        )
+        grouped_bar_two_metrics(
+            df,
+            metric_a="wer_micro_other",
+            metric_b="cer_micro_other",
+            label_a="WER_other",
+            label_b="CER_other",
+            title="Other error: WER vs CER (higher is better)",
+            ylabel="Error rate",
+            out_path=out_dir / "27_other_wer_vs_cer.png",
+        )
+        grouped_bar_two_metrics(
+            df,
+            metric_a="avg_margin_other_minus_target",
+            metric_b="avg_margin_cer_other_minus_target",
+            label_a="WER margin",
+            label_b="CER margin",
+            title="Separation margin: WER vs CER (higher is better)",
+            ylabel="Margin",
+            out_path=out_dir / "28_margin_wer_vs_cer.png",
+        )
+
     # Per-model heatmaps
     models = data.get("models") or []
     # Sort models by epoch number for consistent ordering
@@ -638,6 +910,25 @@ def main() -> None:
             cbar_label="Avg margin (WER_other - WER_target)",
             display_label=label,
         )
+        if include_cer:
+            heatmap_for_model(
+                data,
+                m,
+                out_dir,
+                metric_key="cer_micro_target",
+                title_suffix="target CER by SNR × overlap",
+                cbar_label="CER_target",
+                display_label=label,
+            )
+            heatmap_for_model(
+                data,
+                m,
+                out_dir,
+                metric_key="avg_margin_cer_other_minus_target",
+                title_suffix="CER margin by SNR × overlap",
+                cbar_label="Avg CER margin (other - target)",
+                display_label=label,
+            )
 
     print("Wrote:", out_dir)
     _beep()

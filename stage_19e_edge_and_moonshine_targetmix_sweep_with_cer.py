@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-r"""stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py
+r"""stage_19e_edge_and_moonshine_targetmix_sweep_with_cer.py
 
 Stage 19 evaluation (TARGET vs OTHER mixtures) with SWEPT conditions.
 
@@ -32,16 +32,14 @@ Resume-safe
 usage
 ---------------------------------------------------
 
-i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\stage_19c_specific_target_advanced_futo_like_evaluate_targetmix_sweep_with_cer.py" `
+i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\stage_19e_edge_and_moonshine_targetmix_sweep_with_cer.py" `
   --test_manifest "I:\Record_chunks\pairs_manifest_stage13_test_randomized.jsonl" `
   --speaker_scores_csv "I:\whisper-acft\speaker_sort_scores.csv" `
-  --checkpoint_dir "I:\Stage_17_aug_futo_wer_rank64_dora_dyn_ctx_chkpts_small_en_26" `
-  --import_per_sample_json "I:\P2GPT_google_drive\My Drive\Stage_17_aug_futo_wer_rank32_dora_dyn_ctx_chkpts_small_en_25\evaluation_per_sample_predictions_targetmix_sweep.json" `
+  --checkpoint_dir "I:\asr_edge_eval_runs\run_01" `
   --mix_per_target 5 `
   --other_peak_ratio 1.0 `
   --sweep_snr_db "15,5,0" `
   --sweep_overlap "0.25,0.75,1" `
-  --dynamic_audio_ctx 1 `
   --batch_size 1 `
   --auto_batch 0 `
   --resume `
@@ -50,11 +48,7 @@ i:\Whisper-training-env\Scripts\python.exe "i:\whisper-acft\stage_19c_specific_t
   --ffmpeg_path "ffmpeg" `
   --percentage 100 `
   --vad_filter 0 `
-  --lora_merge `
-  --lora_base_model "futo-org/acft-whisper-small.en" `
-  --groq_verify `
-
-  --recalc_metrics
+  --models_csv "openai/whisper-tiny.en,openai/whisper-base.en,openai/whisper-small.en,distil-whisper/distil-small.en,UsefulSensors/moonshine-tiny,UsefulSensors/moonshine-base,UsefulSensors/moonshine-streaming-tiny,UsefulSensors/moonshine-streaming-small,UsefulSensors/moonshine-streaming-medium"
 
 
 Outputs (in checkpoint_dir by default)
@@ -67,6 +61,8 @@ Dependencies
 pip install transformers torch soundfile jiwer tqdm numpy
 Optional (better resample): scipy
 Optional (VAD): torch hub will pull Silero-VAD
+For Moonshine Streaming with latest support:
+pip install --upgrade git+https://github.com/huggingface/transformers.git
 """
 
 from __future__ import annotations
@@ -85,7 +81,7 @@ import sys
 from datetime import datetime, timezone
 from dataclasses import dataclass
 from pathlib import Path, PureWindowsPath
-from typing import Dict, List, Tuple, Optional, Iterable
+from typing import Dict, List, Tuple, Optional, Iterable, Any
 from collections import OrderedDict
 
 import numpy as np
@@ -94,7 +90,25 @@ from tqdm import tqdm
 
 import soundfile as sf
 import jiwer
-from transformers import WhisperProcessor, WhisperForConditionalGeneration
+from transformers import (
+    AutoConfig,
+    AutoModelForSpeechSeq2Seq,
+    AutoProcessor,
+    WhisperForConditionalGeneration,
+)
+
+
+DEFAULT_EDGE_MODEL_PACK: List[str] = [
+    "openai/whisper-tiny.en",
+    "openai/whisper-base.en",
+    "openai/whisper-small.en",
+    "distil-whisper/distil-small.en",
+    "UsefulSensors/moonshine-tiny",
+    "UsefulSensors/moonshine-base",
+    "UsefulSensors/moonshine-streaming-tiny",
+    "UsefulSensors/moonshine-streaming-small",
+    "UsefulSensors/moonshine-streaming-medium",
+]
 
 
 # ----------------------------
@@ -714,6 +728,7 @@ class EvalConfig:
     mem_low: float
     mem_high: float
     cleanup_interval: int
+    moonshine_token_limit_tps: float
 
     # pairing / sweep
     mix_per_target: int
@@ -1573,7 +1588,6 @@ def group_items_by_condition(items: List[dict]) -> Dict[str, List[dict]]:
 def eval_one_model(
     model_id_or_path: str,
     pair_rows: List[dict],
-    processor: WhisperProcessor,
     cfg: EvalConfig,
     vad_trimmer: Optional[SileroVADTrimmer],
     all_predictions: dict,
@@ -1586,6 +1600,9 @@ def eval_one_model(
     save_every: int = 0,
 ) -> Tuple[Dict, Dict[str, Dict]]:
 
+    processor_id = _resolve_processor_id_for_model(model_id_or_path, cfg.base_processor_id)
+    processor = AutoProcessor.from_pretrained(processor_id)
+
     model = _load_model_for_eval(
         model_id_or_path,
         lora_merge=bool(lora_merge),
@@ -1594,14 +1611,19 @@ def eval_one_model(
     model.to(cfg.device)
     model.eval()
 
-    try:
-        fids = processor.get_decoder_prompt_ids(language=cfg.language, task=cfg.task)
-        if hasattr(model, "generation_config") and hasattr(model.generation_config, "forced_decoder_ids"):
-            model.generation_config.forced_decoder_ids = fids
-    except Exception:
-        pass
+    model_type = str(getattr(getattr(model, "config", None), "model_type", "") or "").lower()
+    is_whisper = _is_whisper_family(model_type, model_id_or_path)
+    is_moonshine = _is_moonshine_family(model_type, model_id_or_path)
 
-    gen_kwargs = build_generate_kwargs(cfg)
+    if is_whisper:
+        try:
+            fids = processor.get_decoder_prompt_ids(language=cfg.language, task=cfg.task)
+            if hasattr(model, "generation_config") and hasattr(model.generation_config, "forced_decoder_ids"):
+                model.generation_config.forced_decoder_ids = fids
+        except Exception:
+            pass
+
+    gen_kwargs_base = build_generate_kwargs(cfg)
 
     # Used for the "hit token cap" sanity metric.
     eos_id = None
@@ -1616,7 +1638,7 @@ def eval_one_model(
             eos_id = None
     if eos_id is None:
         try:
-            eos_id = getattr(processor.tokenizer, "eos_token_id", None)
+            eos_id = getattr(getattr(processor, "tokenizer", None), "eos_token_id", None)
         except Exception:
             eos_id = None
     if eos_id is None:
@@ -1664,6 +1686,179 @@ def eval_one_model(
 
         batch_buf: List[dict] = []
         batch_count = 0
+
+        def _prepare_model_inputs(audios: List[np.ndarray]) -> Dict[str, torch.Tensor]:
+            proc_kwargs = {
+                "sampling_rate": 16000,
+                "return_tensors": "pt",
+            }
+            # Some Whisper checkpoints require fixed 3000-frame mel inputs.
+            if is_whisper:
+                proc_kwargs["padding"] = "max_length"
+                proc_kwargs["max_length"] = 3000
+                proc_kwargs["truncation"] = True
+            else:
+                proc_kwargs["padding"] = True
+
+            try:
+                inputs = processor(
+                    audios,
+                    return_attention_mask=True,
+                    **proc_kwargs,
+                )
+            except TypeError:
+                inputs = processor(
+                    audios,
+                    **proc_kwargs,
+                )
+
+            out_inputs: Dict[str, torch.Tensor] = {}
+            for k, v in inputs.items():
+                if not torch.is_tensor(v):
+                    continue
+                t = v
+                if use_cuda and cfg.fp16 and t.is_floating_point():
+                    t = t.half()
+                out_inputs[k] = t.to(cfg.device, non_blocking=True)
+
+            # Final guard for legacy Whisper variants that still return non-3000 features.
+            if is_whisper and "input_features" in out_inputs:
+                feats = out_inputs["input_features"]
+                if feats.ndim == 3:
+                    cur = int(feats.shape[-1])
+                    if cur < 3000:
+                        pad = torch.zeros(
+                            (feats.shape[0], feats.shape[1], 3000 - cur),
+                            dtype=feats.dtype,
+                            device=feats.device,
+                        )
+                        out_inputs["input_features"] = torch.cat([feats, pad], dim=-1)
+                    elif cur > 3000:
+                        out_inputs["input_features"] = feats[..., :3000]
+            return out_inputs
+
+        def _moonshine_max_length(inputs: Dict[str, torch.Tensor]) -> Optional[int]:
+            if not is_moonshine:
+                return None
+            attn = inputs.get("attention_mask")
+            if attn is None:
+                return None
+            try:
+                seq_len = attn.sum(dim=-1).to(torch.float32).max().item()
+                max_len = int(math.ceil(float(seq_len) * (float(cfg.moonshine_token_limit_tps) / 16000.0)))
+                return max(8, min(512, max_len))
+            except Exception:
+                return None
+
+        def _run_chunk(chunk: List[dict]) -> None:
+            nonlocal cur_bs, oom_cooldown, batch_count, eval_count
+
+            audios = [np.asarray(c["audio_eval"], dtype=np.float32) for c in chunk]
+            model_inputs = _prepare_model_inputs(audios)
+
+            gen_kwargs = dict(gen_kwargs_base)
+            moonshine_max_len = _moonshine_max_length(model_inputs)
+            if moonshine_max_len is not None:
+                gen_kwargs.pop("max_new_tokens", None)
+                gen_kwargs["max_length"] = int(moonshine_max_len)
+
+            generated_ids = model.generate(**model_inputs, **gen_kwargs)
+            generated_ids_cpu = generated_ids.detach().cpu()
+            texts = processor.batch_decode(generated_ids_cpu, skip_special_tokens=True)
+
+            for c, text_out, seq in zip(chunk, texts, generated_ids_cpu):
+                pred = (text_out or "").strip()
+                tref = (c.get("target_ref") or "").strip()
+                oref = (c.get("other_ref") or "").strip()
+
+                ended_by_eos = bool((seq == int(eos_id)).any().item()) if eos_id is not None else True
+                likely_hit_cap = (not ended_by_eos)
+                pred_token_len = int(seq.numel())
+
+                if cfg.normalize_mode in {"whisper_basic", "basic"}:
+                    pred_n = _basic_whisperish_normalize(pred)
+                    tref_n = _basic_whisperish_normalize(tref)
+                    oref_n = _basic_whisperish_normalize(oref)
+                else:
+                    pred_n, tref_n, oref_n = pred, tref, oref
+
+                wt = float(jiwer.wer(tref_n, pred_n))
+                ct = float(jiwer.cer(tref_n, pred_n))
+                wo = float(jiwer.wer(oref_n, pred_n))
+                co = float(jiwer.cer(oref_n, pred_n))
+
+                rec = {
+                    "mix_key": c["mix_key"],
+                    "cond_id": c.get("cond_id", ""),
+                    "snr_db": float(c.get("snr_db")),
+                    "overlap": c.get("overlap", None),
+                    "target_audio_path": c["target_audio_path"],
+                    "other_audio_path": c["other_audio_path"],
+                    "duration_sec_target": c["duration_sec_target"],
+                    "duration_sec_other": c["duration_sec_other"],
+                    "duration_sec_eval": c["duration_sec_eval"],
+                    "target_ref": tref,
+                    "other_ref": oref,
+                    "pred": pred,
+                    "wer_target": wt,
+                    "cer_target": ct,
+                    "wer_other": wo,
+                    "cer_other": co,
+                    "win_target_closer": bool(wt < wo),
+                    "ended_by_eos": ended_by_eos,
+                    "likely_hit_max_token_cap": likely_hit_cap,
+                    "pred_token_len": pred_token_len,
+                    "vad": c.get("vad", {"vad_applied": False}),
+                    "mix": c.get("mix", {}),
+                }
+                per_item.append(rec)
+
+                all_predictions.setdefault(
+                    c["mix_key"],
+                    {
+                        "mix_key": c["mix_key"],
+                        "cond_id": c.get("cond_id", ""),
+                        "snr_db": float(c.get("snr_db")),
+                        "overlap": c.get("overlap", None),
+                        "target_audio_path": c["target_audio_path"],
+                        "other_audio_path": c["other_audio_path"],
+                        "target_reference": tref,
+                        "other_reference": oref,
+                        "predictions": {},
+                    },
+                )
+                all_predictions[c["mix_key"]]["predictions"][model_name] = {
+                    "pred": pred,
+                    "duration_sec_eval": c.get("duration_sec_eval"),
+                    "wer_target": wt,
+                    "wer_other": wo,
+                    "cer_target": ct,
+                    "cer_other": co,
+                    "win_target_closer": bool(wt < wo),
+                    "ended_by_eos": ended_by_eos,
+                    "likely_hit_max_token_cap": likely_hit_cap,
+                    "pred_token_len": pred_token_len,
+                    "vad": c.get("vad", {"vad_applied": False}),
+                    "mix": c.get("mix", {}),
+                }
+                eval_count += 1
+                _maybe_autosave()
+
+            if cfg.auto_batch and use_cuda:
+                ratio = _cuda_mem_ratio()
+                if oom_cooldown > 0:
+                    oom_cooldown -= 1
+                else:
+                    if ratio < cfg.mem_low and cur_bs < cfg.batch_max:
+                        cur_bs = min(cfg.batch_max, max(cur_bs + 1, int(cur_bs * 1.25)))
+                    elif ratio > cfg.mem_high and cur_bs > cfg.batch_min:
+                        cur_bs = max(cfg.batch_min, int(cur_bs * 0.8))
+
+            batch_count += 1
+            if batch_count % max(1, int(cfg.cleanup_interval)) == 0:
+                if use_cuda:
+                    torch.cuda.empty_cache()
+                gc.collect()
 
         pbar = tqdm(pair_rows, desc=f"eval {Path(model_id_or_path).name}")
         for item in pbar:
@@ -1789,20 +1984,6 @@ def eval_one_model(
 
                 dur_eval = seconds_from_audio(audio_eval, 16000)
 
-                inputs = processor(
-                    audio_eval,
-                    sampling_rate=16000,
-                    return_tensors="pt",
-                    return_attention_mask=True,
-                )
-                input_features = inputs["input_features"]
-                attn_mask = inputs.get("attention_mask")  # (1, T)
-
-                if cfg.dynamic_audio_ctx:
-                    input_features = crop_input_features_for_duration(input_features, dur_eval)
-                    if attn_mask is not None:
-                        attn_mask = attn_mask[:, : input_features.shape[-1]]
-
                 batch_buf.append(
                     {
                         "mix_key": key,
@@ -1818,8 +1999,7 @@ def eval_one_model(
                         "other_ref": (item.get("other_ref") or "").strip(),
                         "vad": vad_info,
                         "mix": mix_meta,
-                        "input_features": input_features,
-                        "attention_mask": attn_mask,
+                        "audio_eval": np.asarray(audio_eval, dtype=np.float32),
                     }
                 )
 
@@ -1830,127 +2010,14 @@ def eval_one_model(
             if len(batch_buf) < cur_bs:
                 continue
 
-            # Run a batch
             pending = batch_buf
             batch_buf = []
 
             while pending:
                 chunk = pending[:cur_bs]
-
                 try:
-                    feats = [c["input_features"] for c in chunk]
-                    masks = [c.get("attention_mask") for c in chunk]
-                    batch_feats, batch_mask = _pad_stack_input_features_and_mask(feats, masks)
-                    batch_feats = batch_feats.to(cfg.device, non_blocking=True)
-                    batch_mask = batch_mask.to(cfg.device, non_blocking=True)
-                    if use_cuda and cfg.fp16:
-                        batch_feats = batch_feats.half()
-
-                    generated_ids = model.generate(
-                        input_features=batch_feats,
-                        attention_mask=batch_mask,
-                        **gen_kwargs,
-                    )
-                    generated_ids_cpu = generated_ids.detach().cpu()
-                    texts = processor.batch_decode(generated_ids_cpu, skip_special_tokens=True)
-
-                    for c, text_out, seq in zip(chunk, texts, generated_ids_cpu):
-                        pred = (text_out or "").strip()
-                        tref = (c.get("target_ref") or "").strip()
-                        oref = (c.get("other_ref") or "").strip()
-
-                        ended_by_eos = bool((seq == int(eos_id)).any().item()) if eos_id is not None else True
-                        likely_hit_cap = (not ended_by_eos)
-                        pred_token_len = int(seq.numel())
-
-                        if cfg.normalize_mode in {"whisper_basic", "basic"}:
-                            pred_n = _basic_whisperish_normalize(pred)
-                            tref_n = _basic_whisperish_normalize(tref)
-                            oref_n = _basic_whisperish_normalize(oref)
-                        else:
-                            pred_n, tref_n, oref_n = pred, tref, oref
-
-                        wt = float(jiwer.wer(tref_n, pred_n))
-                        ct = float(jiwer.cer(tref_n, pred_n))
-                        wo = float(jiwer.wer(oref_n, pred_n))
-                        co = float(jiwer.cer(oref_n, pred_n))
-
-                        rec = {
-                            "mix_key": c["mix_key"],
-                            "cond_id": c.get("cond_id", ""),
-                            "snr_db": float(c.get("snr_db")),
-                            "overlap": c.get("overlap", None),
-                            "target_audio_path": c["target_audio_path"],
-                            "other_audio_path": c["other_audio_path"],
-                            "duration_sec_target": c["duration_sec_target"],
-                            "duration_sec_other": c["duration_sec_other"],
-                            "duration_sec_eval": c["duration_sec_eval"],
-                            "target_ref": tref,
-                            "other_ref": oref,
-                            "pred": pred,
-                            "wer_target": wt,
-                            "cer_target": ct,
-                            "wer_other": wo,
-                            "cer_other": co,
-                            "win_target_closer": bool(wt < wo),
-                            "ended_by_eos": ended_by_eos,
-                            "likely_hit_max_token_cap": likely_hit_cap,
-                            "pred_token_len": pred_token_len,
-                            "vad": c.get("vad", {"vad_applied": False}),
-                            "mix": c.get("mix", {}),
-                        }
-                        per_item.append(rec)
-
-                        all_predictions.setdefault(
-                            c["mix_key"],
-                            {
-                                "mix_key": c["mix_key"],
-                                "cond_id": c.get("cond_id", ""),
-                                "snr_db": float(c.get("snr_db")),
-                                "overlap": c.get("overlap", None),
-                                "target_audio_path": c["target_audio_path"],
-                                "other_audio_path": c["other_audio_path"],
-                                "target_reference": tref,
-                                "other_reference": oref,
-                                "predictions": {},
-                            },
-                        )
-                        all_predictions[c["mix_key"]]["predictions"][model_name] = {
-                            "pred": pred,
-                            "duration_sec_eval": c.get("duration_sec_eval"),
-                            "wer_target": wt,
-                            "wer_other": wo,
-                            "cer_target": ct,
-                            "cer_other": co,
-                            "win_target_closer": bool(wt < wo),
-                            "ended_by_eos": ended_by_eos,
-                            "likely_hit_max_token_cap": likely_hit_cap,
-                            "pred_token_len": pred_token_len,
-                            "vad": c.get("vad", {"vad_applied": False}),
-                            "mix": c.get("mix", {}),
-                        }
-                        eval_count += 1
-                        _maybe_autosave()
-
+                    _run_chunk(chunk)
                     pending = pending[cur_bs:]
-
-                    # Auto batch-size tuning
-                    if cfg.auto_batch and use_cuda:
-                        ratio = _cuda_mem_ratio()
-                        if oom_cooldown > 0:
-                            oom_cooldown -= 1
-                        else:
-                            if ratio < cfg.mem_low and cur_bs < cfg.batch_max:
-                                cur_bs = min(cfg.batch_max, max(cur_bs + 1, int(cur_bs * 1.25)))
-                            elif ratio > cfg.mem_high and cur_bs > cfg.batch_min:
-                                cur_bs = max(cfg.batch_min, int(cur_bs * 0.8))
-
-                    batch_count += 1
-                    if batch_count % max(1, int(cfg.cleanup_interval)) == 0:
-                        if use_cuda:
-                            torch.cuda.empty_cache()
-                        gc.collect()
-
                 except torch.cuda.OutOfMemoryError:
                     if not use_cuda:
                         raise
@@ -1961,106 +2028,50 @@ def eval_one_model(
                         torch.cuda.empty_cache()
                     gc.collect()
                     continue
+                except Exception as e:
+                    for c in chunk:
+                        skipped.append(
+                            {
+                                "mix_key": c.get("mix_key"),
+                                "reason": f"inference_exception: {type(e).__name__}: {e}",
+                                "cond_id": c.get("cond_id", ""),
+                            }
+                        )
+                    pending = pending[cur_bs:]
 
         # flush remaining
         if batch_buf:
             pending = batch_buf
             while pending:
                 chunk = pending[:cur_bs]
-                feats = [c["input_features"] for c in chunk]
-                masks = [c.get("attention_mask") for c in chunk]
-                batch_feats, batch_mask = _pad_stack_input_features_and_mask(feats, masks)
-                batch_feats = batch_feats.to(cfg.device, non_blocking=True)
-                batch_mask = batch_mask.to(cfg.device, non_blocking=True)
-                if use_cuda and cfg.fp16:
-                    batch_feats = batch_feats.half()
-                generated_ids = model.generate(
-                    input_features=batch_feats,
-                    attention_mask=batch_mask,
-                    **gen_kwargs,
-                )
-                generated_ids_cpu = generated_ids.detach().cpu()
-                texts = processor.batch_decode(generated_ids_cpu, skip_special_tokens=True)
-
-                for c, text_out, seq in zip(chunk, texts, generated_ids_cpu):
-                    pred = (text_out or "").strip()
-                    tref = (c.get("target_ref") or "").strip()
-                    oref = (c.get("other_ref") or "").strip()
-
-                    ended_by_eos = bool((seq == int(eos_id)).any().item()) if eos_id is not None else True
-                    likely_hit_cap = (not ended_by_eos)
-                    pred_token_len = int(seq.numel())
-
-                    if cfg.normalize_mode in {"whisper_basic", "basic"}:
-                        pred_n = _basic_whisperish_normalize(pred)
-                        tref_n = _basic_whisperish_normalize(tref)
-                        oref_n = _basic_whisperish_normalize(oref)
-                    else:
-                        pred_n, tref_n, oref_n = pred, tref, oref
-
-                    wt = float(jiwer.wer(tref_n, pred_n))
-                    ct = float(jiwer.cer(tref_n, pred_n))
-                    wo = float(jiwer.wer(oref_n, pred_n))
-                    co = float(jiwer.cer(oref_n, pred_n))
-
-                    rec = {
-                        "mix_key": c["mix_key"],
-                        "cond_id": c.get("cond_id", ""),
-                        "snr_db": float(c.get("snr_db")),
-                        "overlap": c.get("overlap", None),
-                        "target_audio_path": c["target_audio_path"],
-                        "other_audio_path": c["other_audio_path"],
-                        "duration_sec_target": c["duration_sec_target"],
-                        "duration_sec_other": c["duration_sec_other"],
-                        "duration_sec_eval": c["duration_sec_eval"],
-                        "target_ref": tref,
-                        "other_ref": oref,
-                        "pred": pred,
-                        "wer_target": wt,
-                        "cer_target": ct,
-                        "wer_other": wo,
-                        "cer_other": co,
-                        "win_target_closer": bool(wt < wo),
-                        "ended_by_eos": ended_by_eos,
-                        "likely_hit_max_token_cap": likely_hit_cap,
-                        "pred_token_len": pred_token_len,
-                        "vad": c.get("vad", {"vad_applied": False}),
-                        "mix": c.get("mix", {}),
-                    }
-                    per_item.append(rec)
-
-                    all_predictions.setdefault(
-                        c["mix_key"],
-                        {
-                            "mix_key": c["mix_key"],
-                            "cond_id": c.get("cond_id", ""),
-                            "snr_db": float(c.get("snr_db")),
-                            "overlap": c.get("overlap", None),
-                            "target_audio_path": c["target_audio_path"],
-                            "other_audio_path": c["other_audio_path"],
-                            "target_reference": tref,
-                            "other_reference": oref,
-                            "predictions": {},
-                        },
-                    )
-                    all_predictions[c["mix_key"]]["predictions"][model_name] = {
-                        "pred": pred,
-                        "duration_sec_eval": c.get("duration_sec_eval"),
-                        "wer_target": wt,
-                        "wer_other": wo,
-                        "cer_target": ct,
-                        "cer_other": co,
-                        "win_target_closer": bool(wt < wo),
-                        "ended_by_eos": ended_by_eos,
-                        "likely_hit_max_token_cap": likely_hit_cap,
-                        "pred_token_len": pred_token_len,
-                        "vad": c.get("vad", {"vad_applied": False}),
-                        "mix": c.get("mix", {}),
-                    }
-                    eval_count += 1
-                    _maybe_autosave()
-
-                pending = pending[cur_bs:]
+                try:
+                    _run_chunk(chunk)
+                    pending = pending[cur_bs:]
+                except torch.cuda.OutOfMemoryError:
+                    if not use_cuda:
+                        raise
+                    if cur_bs > cfg.batch_min:
+                        cur_bs = max(cfg.batch_min, int(cur_bs * 0.5))
+                        continue
+                    for c in chunk:
+                        skipped.append(
+                            {
+                                "mix_key": c.get("mix_key"),
+                                "reason": "cuda_oom_at_min_batch",
+                                "cond_id": c.get("cond_id", ""),
+                            }
+                        )
+                    pending = pending[cur_bs:]
+                except Exception as e:
+                    for c in chunk:
+                        skipped.append(
+                            {
+                                "mix_key": c.get("mix_key"),
+                                "reason": f"inference_exception: {type(e).__name__}: {e}",
+                                "cond_id": c.get("cond_id", ""),
+                            }
+                        )
+                    pending = pending[cur_bs:]
 
     # Overall metrics and per-condition metrics (from saved predictions, supports resume)
     active_keys = {pr["mix_key"] for pr in pair_rows}
@@ -2070,6 +2081,20 @@ def eval_one_model(
         cfg.normalize_mode,
         active_keys=active_keys,
     )
+
+    if int(overall.get("samples") or 0) == 0 and len(pair_rows) > 0:
+        first_reason = skipped[0].get("reason") if skipped else "no_predictions_saved"
+        raise RuntimeError(
+            f"No predictions were saved for model '{model_id_or_path}'. "
+            f"Skipped={len(skipped)} first_reason={first_reason}"
+        )
+
+    try:
+        overall["model_type"] = model_type
+        overall["processor_id"] = processor_id
+        overall["model_num_params"] = int(model.num_parameters())
+    except Exception:
+        pass
 
     overall["skipped"] = len(skipped)
     return overall, by_cond
@@ -2178,6 +2203,67 @@ def parse_overlap_list(s: Optional[str]) -> Optional[List[float]]:
     return out
 
 
+def parse_model_list_csv(s: Optional[str]) -> List[str]:
+    if s is None:
+        return []
+    text = str(s).strip()
+    if not text:
+        return []
+    parts = re.split(r"[\n,;]+", text)
+    out: List[str] = []
+    for p in parts:
+        item = p.strip()
+        if item:
+            out.append(item)
+    return out
+
+
+def _dedupe_keep_order(items: Iterable[str]) -> List[str]:
+    seen = set()
+    out: List[str] = []
+    for item in items:
+        if item in seen:
+            continue
+        seen.add(item)
+        out.append(item)
+    return out
+
+
+def _safe_model_type(model_id_or_path: str) -> str:
+    try:
+        cfg = AutoConfig.from_pretrained(model_id_or_path)
+        return str(getattr(cfg, "model_type", "") or "").lower()
+    except Exception:
+        return ""
+
+
+def _is_whisper_family(model_type: str, model_id_or_path: str) -> bool:
+    mt = (model_type or "").lower()
+    if "whisper" in mt:
+        return True
+    return "whisper" in str(model_id_or_path).lower()
+
+
+def _is_moonshine_family(model_type: str, model_id_or_path: str) -> bool:
+    mt = (model_type or "").lower()
+    if "moonshine" in mt:
+        return True
+    return "moonshine" in str(model_id_or_path).lower()
+
+
+def _resolve_processor_id_for_model(model_id_or_path: str, default_processor_id: str) -> str:
+    p = Path(model_id_or_path)
+    if not p.exists():
+        return model_id_or_path
+
+    has_local_processor = (
+        (p / "preprocessor_config.json").is_file()
+        or (p / "processor_config.json").is_file()
+        or (p / "tokenizer_config.json").is_file()
+    )
+    return str(p) if has_local_processor else str(default_processor_id)
+
+
 def beep() -> None:
     try:
         import winsound  # type: ignore
@@ -2226,7 +2312,16 @@ def _load_model_for_eval(model_id_or_path: str, *, lora_merge: bool, lora_base_m
             merged = peft_model.merge_and_unload()
         return merged
 
-    return WhisperForConditionalGeneration.from_pretrained(model_id_or_path)
+    try:
+        return AutoModelForSpeechSeq2Seq.from_pretrained(model_id_or_path)
+    except Exception as e:
+        mt = _safe_model_type(model_id_or_path)
+        if _is_moonshine_family(mt, model_id_or_path):
+            raise RuntimeError(
+                "Failed to load Moonshine model. Update transformers first:\n"
+                "pip install --upgrade git+https://github.com/huggingface/transformers.git"
+            ) from e
+        raise
 
 
 def _run_groq_verify(base_pairs: List[dict], checkpoint_dir: Path) -> None:
@@ -2330,8 +2425,17 @@ def main() -> None:
     ap.add_argument("--target_percentage", type=float, default=100.0, help="Subsample TARGET rows before pairing (percentage of TARGET samples).")
     ap.add_argument("--target_max", type=int, default=0, help="Optional cap on number of TARGET rows after target subsampling. 0=disabled")
 
-    ap.add_argument("--base_model", default="futo-org/acft-whisper-small.en")
+    ap.add_argument("--base_model", default="openai/whisper-small.en")
+    ap.add_argument(
+        "--models_csv",
+        default=",".join(DEFAULT_EDGE_MODEL_PACK),
+        help="Comma/semicolon/newline-separated model ids/paths to evaluate.",
+    )
     ap.add_argument("--compare_openai_tiny", action="store_true")
+    ap.add_argument("--append_checkpoints", type=int, default=0,
+                    help="If 1, append checkpoint folders from --checkpoint_dir to the model list.")
+    ap.add_argument("--skip_model_failures", type=int, default=1,
+                    help="If 1, continue run when a model fails to load/infer; failure is recorded in output JSON.")
     ap.add_argument("--base_processor_id", default="openai/whisper-small.en")
     ap.add_argument("--lora_merge", action="store_true",
                     help="If set, merge PEFT/LoRA adapter checkpoints into the base model before evaluation.")
@@ -2348,6 +2452,8 @@ def main() -> None:
     ap.add_argument("--num_beams", type=int, default=5)
     ap.add_argument("--temperature", type=float, default=0.0)
     ap.add_argument("--max_new_tokens", type=int, default=128)
+    ap.add_argument("--moonshine_token_limit_tps", type=float, default=6.5,
+                    help="Moonshine-specific decoding cap in tokens/sec of audio (recommended ~6.5).")
 
     # batching
     ap.add_argument("--batch_size", type=int, default=0, help="0=auto default (GPU:8, CPU:1)")
@@ -2428,12 +2534,14 @@ def main() -> None:
         raise ValueError("--target_max must be >= 0")
     if args.save_every < 0:
         raise ValueError("--save_every must be >= 0")
+    if args.moonshine_token_limit_tps <= 0:
+        raise ValueError("--moonshine_token_limit_tps must be > 0")
 
     rows = load_jsonl(args.test_manifest)
 
     # Optional ffmpeg fallback for broader formats
-    core_load_orig = globals()['load_audio_mono_16k']
-    load_audio_mono_16k = make_loader_with_ffmpeg(str(args.ffmpeg_path), core_load_orig)
+    core_load_orig = globals()["load_audio_mono_16k"]
+    globals()["load_audio_mono_16k"] = make_loader_with_ffmpeg(str(args.ffmpeg_path), core_load_orig)
 
     if args.others_dir is not None:
         score_db = load_speaker_scores_csv(args.speaker_scores_csv)
@@ -2532,12 +2640,16 @@ def main() -> None:
     checkpoints.sort(key=_ckpt_key)
 
     models: List[str] = []
+    models.extend(parse_model_list_csv(args.models_csv))
     if args.compare_openai_tiny:
-        models.append("openai/whisper-small.en")
-    models.append(str(args.base_model))
-    models.extend([str(p) for p in checkpoints])
-
-    processor = WhisperProcessor.from_pretrained(args.base_processor_id)
+        models.insert(0, "openai/whisper-tiny.en")
+    if args.base_model:
+        models.insert(0, str(args.base_model))
+    if bool(args.append_checkpoints):
+        models.extend([str(p) for p in checkpoints])
+    models = _dedupe_keep_order(models)
+    if not models:
+        raise RuntimeError("No models configured. Set --models_csv and/or --append_checkpoints 1.")
 
     vad_cfg = VADConfig(
         enabled=bool(args.vad_filter),
@@ -2569,6 +2681,7 @@ def main() -> None:
         mem_low=float(args.mem_low),
         mem_high=float(args.mem_high),
         cleanup_interval=int(args.cleanup_interval),
+        moonshine_token_limit_tps=float(args.moonshine_token_limit_tps),
         mix_per_target=int(args.mix_per_target),
         pairing_mode=str(args.pairing_mode),
         seed=int(args.seed),
@@ -2632,6 +2745,8 @@ def main() -> None:
             "audio_cache_gb": float(args.audio_cache_gb),
             "ffmpeg_path": str(args.ffmpeg_path),
         },
+        "models_requested": list(models),
+        "model_failures": [],
         "models": [],
     }
 
@@ -2644,6 +2759,10 @@ def main() -> None:
             all_predictions = existing_predictions
         previous_run_args = _select_previous_run_args(existing_results, per_sample_meta)
         warn_if_run_args_changed(previous_run_args, current_run_args)
+
+    results["models_requested"] = list(models)
+    if not isinstance(results.get("model_failures"), list):
+        results["model_failures"] = []
 
     active_keys = {pr["mix_key"] for pr in pair_rows}
 
@@ -2824,24 +2943,36 @@ def main() -> None:
             else:
                 print("⚠ Recalc requested but no saved predictions found; running full evaluation.")
 
-        overall, by_cond = eval_one_model(
-            model_id_or_path=m,
-            pair_rows=pair_rows,
-            processor=processor,
-            cfg=cfg,
-            vad_trimmer=vad_trimmer,
-            all_predictions=all_predictions,
-            out_json=out_json,
-            lora_merge=bool(args.lora_merge),
-            lora_base_model=args.lora_base_model,
-            results=results,
-            run_args=current_run_args,
-            save_every=int(args.save_every),
-        )
+        try:
+            overall, by_cond = eval_one_model(
+                model_id_or_path=m,
+                pair_rows=pair_rows,
+                cfg=cfg,
+                vad_trimmer=vad_trimmer,
+                all_predictions=all_predictions,
+                out_json=out_json,
+                lora_merge=bool(args.lora_merge),
+                lora_base_model=args.lora_base_model,
+                results=results,
+                run_args=current_run_args,
+                save_every=int(args.save_every),
+            )
+        except Exception as e:
+            msg = f"{type(e).__name__}: {e}"
+            if bool(args.skip_model_failures):
+                print(f"⚠ Model failed and will be skipped: {m} | {msg}")
+                results.setdefault("model_failures", [])
+                if isinstance(results["model_failures"], list):
+                    results["model_failures"].append({"model": str(m), "error": msg})
+                save_incremental_results(results, all_predictions, out_json, run_args=current_run_args)
+                continue
+            raise
 
         if model_already_done:
             results["models"] = [mm for mm in results.get("models", []) if mm.get("model") != model_results_key]
         results["models"].append({"model": model_results_key, "metrics_overall": overall, "metrics_by_condition": by_cond})
+        if isinstance(results.get("model_failures"), list):
+            results["model_failures"] = [f for f in results["model_failures"] if str(f.get("model")) != str(m)]
         save_incremental_results(results, all_predictions, out_json, run_args=current_run_args)
         if is_base_model:
             maybe_run_groq_verify()
