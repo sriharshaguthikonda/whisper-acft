@@ -179,6 +179,45 @@ def main() -> None:
     seen_db = args.seen_db or default_seen_db(out_path, args.stage_name)
     seen = SQLiteSeenSet(seen_db)
 
+    def has_pending_work() -> bool:
+        try:
+            with in_path.open("r", encoding="utf-8") as f_in:
+                for line in f_in:
+                    line = line.strip()
+                    if not line:
+                        continue
+                    row = json.loads(line)
+                    if not args.allow_augmented_input and not is_original_row(row):
+                        continue
+                    base_uid = row.get("base_uid") or row.get("uid")
+                    if not base_uid:
+                        continue
+                    if not should_select(base_uid, args.stage_name, float(args.ratio)):
+                        continue
+                    for copy_idx in range(1, int(args.copies) + 1):
+                        aug_key = f"{base_uid}:{args.stage_name}:{copy_idx}"
+                        if seen.contains(aug_key):
+                            continue
+                        new_uid = make_aug_uid(base_uid, args.stage_name, copy_idx)
+                        out_wav = build_out_wav_name(row, args.stage_name, new_uid, copy_idx, out_dir)
+                        out_wav_p = Path(out_wav)
+                        if out_wav_p.exists() and out_wav_p.stat().st_size > 0 and is_valid_wav(out_wav_p, min_frames=16):
+                            seen.add(aug_key)
+                            continue
+                        return True
+        except FileNotFoundError:
+            return False
+        return False
+
+    if not has_pending_work():
+        if not out_path.exists() and in_path.exists():
+            out_path.write_text(in_path.read_text(encoding="utf-8"), encoding="utf-8")
+        seen.commit()
+        seen.close()
+        print("Stage frequency_shift: no pending work (all selected items already seen); skipping.")
+        safe_beep()
+        return
+
     futures = []
     n_total = 0
     n_selected = 0

@@ -2,12 +2,13 @@
 Stage 3b: Filter manifest to keep only English language entries
 
 Usage:
-python stage_3b_filter_english_only.py --input I:\Record_chunks\pairs_manifest_stereo.jsonl --output I:\Record_chunks\pairs_manifest_stereo_english_only.jsonl
+python stage_3b_filter_english_only.py --input I:\\Record_chunks\\pairs_manifest_stereo.jsonl --output I:\\Record_chunks\\pairs_manifest_stereo_english_only.jsonl
 """
 
 import argparse
 import json
 import re
+import sys
 from pathlib import Path
 from tqdm.auto import tqdm
 
@@ -166,7 +167,13 @@ def filter_english_manifest(input_path, output_path, min_english_ratio=0.7):
         for i, sample in enumerate(samples_removed, 1):
             print(f"{i}. Line {sample['line']} ({sample['reason']}):")
             print(f"   Audio: {sample['audio_path']}")
-            print(f"   Text: {sample['transcription'][:100]}{'...' if len(sample['transcription']) > 100 else ''}")
+            preview = f"{sample['transcription'][:100]}{'...' if len(sample['transcription']) > 100 else ''}"
+            try:
+                print(f"   Text: {preview}")
+            except UnicodeEncodeError:
+                enc = sys.stdout.encoding or "utf-8"
+                safe_preview = preview.encode(enc, errors="replace").decode(enc, errors="replace")
+                print(f"   Text: {safe_preview}")
             print()
     
     return english_entries, non_english_entries
