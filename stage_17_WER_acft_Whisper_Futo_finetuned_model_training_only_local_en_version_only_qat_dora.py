@@ -10,13 +10,10 @@
 # - Default: DYNAMIC_BATCH_SIZE=False while you tune LR (you can turn it back on later)
 # Reference: https://chatgpt.com/g/g-p-6969433d33d4819187ec3158a8f3745f/c/698181e1-ed48-83a6-aa73-454716c3047b
 #
-# How to use (QAT):
-# 1) Run as usual, but enable QAT via env vars:
-#    $env:WHISPER_QAT="1"
-#    $env:WHISPER_QAT_BITS="8"        # 8, 6, 5, 4 (or 16 to disable)
-#    $env:WHISPER_QAT_START_STEP="50" # delay before fake-quant starts
-# 2) Train; checkpoints are still full-precision.
-# 3) After training, quantize/export to whisper.cpp (q8_0/q5_1) as normal.
+# Usage
+#---------------------------------------------------
+# 
+# 'I:\Whisper-training-env\Scripts\python.exe' stage_17_WER_acft_Whisper_Futo_finetuned_model_training_only_local_en_version_only_qat_dora.py --manifest-path 'I:\Record_chunks/pairs_manifest_stage15_train_no_targets_randomized.jsonl' --checkpoint-dir 'I:\Stage_17_aug_futo_wer_rank64_dora_dyn_ctx_chkpts_small_en_26' --futo-model-id futo-org/acft-whisper-small.en --processor-id openai/whisper-small.en
 # ============================================
 
 """
@@ -118,9 +115,9 @@ def _load_overrides(args: argparse.Namespace) -> dict:
             raise SystemExit(f"Failed to read config: {args.config} ({e})")
     overrides.update(_parse_overrides_from_set(args.set))
     if args.manifest_path:
-        overrides["MANIFEST_PATH"] = args.manifest_path
+        overrides["MANIFEST_PATH"] = args.manifest_path.strip("'\"")
     if args.checkpoint_dir:
-        overrides["CHECKPOINT_DIR"] = args.checkpoint_dir
+        overrides["CHECKPOINT_DIR"] = args.checkpoint_dir.strip("'\"")
     if args.futo_model_id:
         overrides["FUTO_MODEL_ID"] = args.futo_model_id
     if args.processor_id:
@@ -444,8 +441,10 @@ set_peft_overrides(
     WHISPER_USE_PEFT="1",
     # Your DoRA runs are collapsing early (repetition) -> this setup was too aggressive.
     # Start small + regularised; expand only if WER truly plateaus.
-    WHISPER_LORA_R=8,
-    WHISPER_LORA_ALPHA=16,
+    WHISPER_LORA_R=64,
+
+    WHISPER_LORA_ALPHA=32,
+
     WHISPER_LORA_DROPOUT=0.15,
     # Keep it to attention projections first (most robust). Add k_proj back only if needed.
     WHISPER_LORA_TARGET_MODULES="q_proj,v_proj,out_proj",
@@ -474,7 +473,7 @@ AUDIO_CTX_ROUND_TO = 16  # Round context to multiples of this value
 AUDIO_CTX_JITTER_MAX = 32  # Smaller jitter = fewer nasty distribution shifts early on
 
 TARGET_SR = 16000
-N_SAMPLES_PER_EPOCH = 5016
+N_SAMPLES_PER_EPOCH = 1000
 MAX_EPOCHS = 999999
 
 # --- Training knobs ---

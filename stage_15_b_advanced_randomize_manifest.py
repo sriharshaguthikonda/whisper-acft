@@ -356,7 +356,7 @@ def main() -> None:
     
     print(f"\nSuccessfully wrote {len(shuffled_rows):,} shuffled rows")
     print("\nRandomization complete! The manifest should now have:")
-    print("  ✓ Properly randomized chunk ordering")
+    print("  [ok] Properly randomized chunk ordering")
     print("  ✓ Reduced clustering of recordings")
     print("  ✓ Balanced distribution of voice-mixed entries")
 
