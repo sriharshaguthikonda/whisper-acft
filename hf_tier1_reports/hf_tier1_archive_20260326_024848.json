@@ -1,0 +1,28 @@
+{
+  "created_at_utc": "2026-03-25T21:18:48+00:00",
+  "root": "I:\\",
+  "repo_root": "I:\\whisper-acft",
+  "repo_prefix": "Whisper-acft",
+  "username": "Sri-Harsha-Guthikonda",
+  "min_size_mb": 50,
+  "dry_run": true,
+  "cleanup_local": false,
+  "runs_found": 34,
+  "runs_selected": 1,
+  "files_uploaded_count": 0,
+  "files_deleted_count": 0,
+  "bytes_freed": 0,
+  "gb_freed": 0.0,
+  "rows": [
+    {
+      "run_folder": "RUN__k-eval-only__s-legacy__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-2",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-eval-only-2-88c4af3f91",
+      "status": "dry_run",
+      "file_count": 1,
+      "upload_bytes": 297624616,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    }
+  ]
+}

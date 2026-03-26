@@ -1,0 +1,35 @@
+run_folder,repo_id,status,file_count,upload_bytes,deleted_bytes,revision,note
+RUN__k-eval-only__s-17__b-openai-tiny-en__m-eval-only__a-unk__q-unk__c-unk__r-unk__id-unk,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-eval-only__s-18__b-unk__m-eval-only__a-unk__q-noqat__c-dyn__r-56098__id-6,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-eval-only__s-18__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-4,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-eval-only__s-18__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-5,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-eval-only__s-19e__b-unk__m-eval-only__a-unk__q-unk__c-unk__r-unk__id-20260315,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-eval-only__s-19e__b-unk__m-eval-only__a-unk__q-unk__c-unk__r-unk__id-20260315__u-1,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-eval-only__s-legacy__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-2,Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-eval-only-2-88c4af3f91,dry_run,1,297624616,0,,
+RUN__k-eval-only__s-legacy__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-3,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-eval-only__s-legacy__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-unk,Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-eval-only-unk-7b031b6cae,dry_run,1,297624168,0,,
+RUN__k-misc__s-18__b-openai-tiny-en__m-unk__a-unk__q-unk__c-dyn__r-unk__id-11,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-misc__s-2__b-openai-tiny-en__m-unk__a-unk__q-unk__c-dyn__r-unk__id-11,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-misc__s-legacy__b-unk__m-unk__a-unk__q-unk__c-unk__r-unk__id-unk,Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-unk-unk-f71e2d1797,dry_run,1,77691730,0,,
+RUN__k-partial__s-18__b-futo-tiny-en__m-s18-full__a-unk__q-noqat__c-dyn__r-112987__id-7,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r16-a16__q-qat__c-dyn__r-161297__id-24,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r32-a16__q-qat__c-dyn__r-161297__id-25,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r64-a32__q-qat__c-dyn__r-161297__id-26,Sri-Harsha-Guthikonda/whisper-acft-s-17-futo-small-en-s17-qat-dora-26-f3d0979867,dry_run,21,1803625698,0,,
+RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r8-a16__q-qat__c-dyn__r-148296__id-22,Sri-Harsha-Guthikonda/whisper-acft-s-17-futo-small-en-s17-qat-dora-22-065c5e1164,dry_run,9,4324207854,0,,
+RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r8-a8__q-qat__c-dyn__r-148296__id-23,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-train-eval__s-17__b-futo-tiny-en__m-s17-qat-dora__a-dora-runk-aunk__q-qat__c-dyn__r-148296__id-20,Sri-Harsha-Guthikonda/whisper-acft-s-17-futo-tiny-en-s17-qat-dora-20-9665f8214e,dry_run,3,379824987,0,,
+RUN__k-train-eval__s-17__b-futo-tiny-en__m-s17-qat-dora__a-dora-runk-aunk__q-qat__c-dyn__r-148296__id-21,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-full__a-full__q-noqat__c-dyn__r-46760__id-14,Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-full-14-4f7fb03816,dry_run,12,1739366211,0,,
+RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-full__a-full__q-qat__c-dyn__r-28948__id-16,Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-qat-full-16-f24ebe2d06,dry_run,6,906360816,0,,
+RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-full__a-full__q-qat__c-dyn__r-28948__id-16__u-1,Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-qat-full-16-fa9cd29ad5,dry_run,4,897365212,0,,
+RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-full__a-full__q-qat__c-dyn__r-38560__id-15,Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-qat-full-15-0f1576b3ed,dry_run,9,1359541224,0,,
+RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-lora__a-lora__q-qat__c-dyn__r-143588__id-18,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-lora__a-lora__q-qat__c-dyn__r-143588__id-19,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-train-eval__s-18__b-futo-tiny-en__m-s18-full__a-full__q-noqat__c-dyn__r-112987__id-8,Sri-Harsha-Guthikonda/whisper-acft-s-18-futo-tiny-en-s18-full-8-9963936893,dry_run,14,1968131062,0,,
+RUN__k-train-eval__s-18__b-futo-tiny-en__m-s18-full__a-full__q-noqat__c-dyn__r-26059__id-12,Sri-Harsha-Guthikonda/whisper-acft-s-18-futo-tiny-en-s18-full-12-aab505f573,dry_run,6,906360816,0,,
+RUN__k-train-eval__s-18__b-openai-tiny-en__m-s18-full__a-full__q-noqat__c-static__r-34259__id-11,Sri-Harsha-Guthikonda/whisper-acft-s-18-openai-tiny-en-s18-full-11-a681b662e0,dry_run,7,1057420952,0,,
+RUN__k-train-eval__s-legacy__b-unk__m-unk__a-full__q-unk__c-unk__r-unk__id-unk,Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-unk-unk-6ba27f4a41,dry_run,3,526379957,0,,
+RUN__k-train-only__s-17__b-openai-tiny-en__m-s17-qat-lora__a-lora__q-qat__c-dyn__r-28948__id-17,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-train-only__s-18__b-futo-tiny-en__m-s18-full__a-full__q-noqat__c-dyn__r-26059__id-13,Sri-Harsha-Guthikonda/whisper-acft-s-18-futo-tiny-en-s18-full-13-d8fdd4e3c2,dry_run,4,897369504,0,,
+RUN__k-train-only__s-18__b-futo-tiny-en__m-s18-full__a-unk__q-noqat__c-dyn__r-34259__id-10,,skip_no_files,0,0,0,,no model files >= 50MB
+RUN__k-train-only__s-18__b-futo-tiny-en__m-s18-full__a-unk__q-noqat__c-dyn__r-34259__id-9,,skip_no_files,0,0,0,,no model files >= 50MB

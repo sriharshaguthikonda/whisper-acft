@@ -1,0 +1,164 @@
+{
+  "created_at_utc": "2026-03-25T22:27:49Z",
+  "input_csv": "I:\\whisper-acft\\hf_tier1_reports\\hf_tier1_archive_20260325_215859.csv",
+  "repo_root": "I:\\whisper-acft",
+  "runs_root": "I:\\",
+  "min_size_mb": 50,
+  "cleanup_local": true,
+  "total_runs": 15,
+  "uploaded_runs": 0,
+  "failed_runs": 0,
+  "bytes_deleted": 0,
+  "results": [
+    {
+      "run_folder": "RUN__k-eval-only__s-legacy__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-2",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-eval-only-2-88c4af3f91",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "209ffb95565263124469967805e0c05171baf054",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-eval-only__s-legacy__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-unk",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-eval-only-unk-7b031b6cae",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "0ace663b68701dc121eb4d3bf9b9b3fcd519bef5",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-misc__s-legacy__b-unk__m-unk__a-unk__q-unk__c-unk__r-unk__id-unk",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-unk-unk-f71e2d1797",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "370d38dec13d4299bc84f53b13a9278d28706df0",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r64-a32__q-qat__c-dyn__r-161297__id-26",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-futo-small-en-s17-qat-dora-26-f3d0979867",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "d7442f42e478a30fe6190d729bee8de116fab7aa",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r8-a16__q-qat__c-dyn__r-148296__id-22",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-futo-small-en-s17-qat-dora-22-065c5e1164",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "b7ad2ca4b9547afed4449599301de6d6564b6a51",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-futo-tiny-en__m-s17-qat-dora__a-dora-runk-aunk__q-qat__c-dyn__r-148296__id-20",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-futo-tiny-en-s17-qat-dora-20-9665f8214e",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "1224cc50f054153fe5c6d66617410b89063aecbc",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-full__a-full__q-noqat__c-dyn__r-46760__id-14",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-full-14-4f7fb03816",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "1ce440867b492f2267a9e15b871be01210426e07",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-full__a-full__q-qat__c-dyn__r-28948__id-16",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-qat-full-16-f24ebe2d06",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "1333671ab45411f8444a86e8675153993317f77d",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-full__a-full__q-qat__c-dyn__r-28948__id-16__u-1",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-qat-full-16-fa9cd29ad5",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "fa6e669a33fca2723b74e0d37b6e827d4b6c9965",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-full__a-full__q-qat__c-dyn__r-38560__id-15",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-qat-full-15-0f1576b3ed",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "a4ce11b5bb9b1dec25a73a4a7195dae3f40cdc0b",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-18__b-futo-tiny-en__m-s18-full__a-full__q-noqat__c-dyn__r-112987__id-8",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-18-futo-tiny-en-s18-full-8-9963936893",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "5300c9ccd126d403f53d06b93bee58b8fcdeee48",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-18__b-futo-tiny-en__m-s18-full__a-full__q-noqat__c-dyn__r-26059__id-12",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-18-futo-tiny-en-s18-full-12-aab505f573",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "7052241058c1dc7d3fe653afb65014d9c0b07614",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-18__b-openai-tiny-en__m-s18-full__a-full__q-noqat__c-static__r-34259__id-11",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-18-openai-tiny-en-s18-full-11-a681b662e0",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "808d3ab4df2c83344b939dc4cda1e670225b2d20",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-legacy__b-unk__m-unk__a-full__q-unk__c-unk__r-unk__id-unk",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-unk-unk-6ba27f4a41",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "26edc9fd05428488db0453853abde5c82b06e56c",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    },
+    {
+      "run_folder": "RUN__k-train-only__s-18__b-futo-tiny-en__m-s18-full__a-full__q-noqat__c-dyn__r-26059__id-13",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-18-futo-tiny-en-s18-full-13-d8fdd4e3c2",
+      "status": "pointer_only_no_local_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "9de1707880b5b30484f0c055849af27de48a3afe",
+      "note": "Local model files absent; pointer generated from existing remote repo"
+    }
+  ]
+}

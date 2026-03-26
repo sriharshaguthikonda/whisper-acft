@@ -1,0 +1,358 @@
+{
+  "created_at_utc": "2026-03-25T16:28:59+00:00",
+  "root": "I:\\",
+  "repo_root": "I:\\whisper-acft",
+  "repo_prefix": "Whisper-acft",
+  "username": "Sri-Harsha-Guthikonda",
+  "min_size_mb": 50,
+  "dry_run": true,
+  "cleanup_local": false,
+  "runs_found": 34,
+  "runs_selected": 34,
+  "files_uploaded_count": 0,
+  "files_deleted_count": 0,
+  "bytes_freed": 0,
+  "gb_freed": 0.0,
+  "rows": [
+    {
+      "run_folder": "RUN__k-eval-only__s-17__b-openai-tiny-en__m-eval-only__a-unk__q-unk__c-unk__r-unk__id-unk",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-eval-only__s-18__b-unk__m-eval-only__a-unk__q-noqat__c-dyn__r-56098__id-6",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-eval-only__s-18__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-4",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-eval-only__s-18__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-5",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-eval-only__s-19e__b-unk__m-eval-only__a-unk__q-unk__c-unk__r-unk__id-20260315",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-eval-only__s-19e__b-unk__m-eval-only__a-unk__q-unk__c-unk__r-unk__id-20260315__u-1",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-eval-only__s-legacy__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-2",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-eval-only-2-88c4af3f91",
+      "status": "dry_run",
+      "file_count": 1,
+      "upload_bytes": 297624616,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-eval-only__s-legacy__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-3",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-eval-only__s-legacy__b-unk__m-eval-only__a-unk__q-unk__c-dyn__r-unk__id-unk",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-eval-only-unk-7b031b6cae",
+      "status": "dry_run",
+      "file_count": 1,
+      "upload_bytes": 297624168,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-misc__s-18__b-openai-tiny-en__m-unk__a-unk__q-unk__c-dyn__r-unk__id-11",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-misc__s-2__b-openai-tiny-en__m-unk__a-unk__q-unk__c-dyn__r-unk__id-11",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-misc__s-legacy__b-unk__m-unk__a-unk__q-unk__c-unk__r-unk__id-unk",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-unk-unk-f71e2d1797",
+      "status": "dry_run",
+      "file_count": 1,
+      "upload_bytes": 77691730,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-partial__s-18__b-futo-tiny-en__m-s18-full__a-unk__q-noqat__c-dyn__r-112987__id-7",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r16-a16__q-qat__c-dyn__r-161297__id-24",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r32-a16__q-qat__c-dyn__r-161297__id-25",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r64-a32__q-qat__c-dyn__r-161297__id-26",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-futo-small-en-s17-qat-dora-26-f3d0979867",
+      "status": "dry_run",
+      "file_count": 21,
+      "upload_bytes": 1803625698,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r8-a16__q-qat__c-dyn__r-148296__id-22",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-futo-small-en-s17-qat-dora-22-065c5e1164",
+      "status": "dry_run",
+      "file_count": 9,
+      "upload_bytes": 4324207854,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-futo-small-en__m-s17-qat-dora__a-dora-r8-a8__q-qat__c-dyn__r-148296__id-23",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-futo-tiny-en__m-s17-qat-dora__a-dora-runk-aunk__q-qat__c-dyn__r-148296__id-20",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-futo-tiny-en-s17-qat-dora-20-9665f8214e",
+      "status": "dry_run",
+      "file_count": 3,
+      "upload_bytes": 379824987,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-futo-tiny-en__m-s17-qat-dora__a-dora-runk-aunk__q-qat__c-dyn__r-148296__id-21",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-full__a-full__q-noqat__c-dyn__r-46760__id-14",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-full-14-4f7fb03816",
+      "status": "dry_run",
+      "file_count": 12,
+      "upload_bytes": 1739366211,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-full__a-full__q-qat__c-dyn__r-28948__id-16",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-qat-full-16-f24ebe2d06",
+      "status": "dry_run",
+      "file_count": 6,
+      "upload_bytes": 906360816,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-full__a-full__q-qat__c-dyn__r-28948__id-16__u-1",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-qat-full-16-fa9cd29ad5",
+      "status": "dry_run",
+      "file_count": 4,
+      "upload_bytes": 897365212,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-full__a-full__q-qat__c-dyn__r-38560__id-15",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-17-openai-tiny-en-s17-qat-full-15-0f1576b3ed",
+      "status": "dry_run",
+      "file_count": 9,
+      "upload_bytes": 1359541224,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-lora__a-lora__q-qat__c-dyn__r-143588__id-18",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-17__b-openai-tiny-en__m-s17-qat-lora__a-lora__q-qat__c-dyn__r-143588__id-19",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-18__b-futo-tiny-en__m-s18-full__a-full__q-noqat__c-dyn__r-112987__id-8",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-18-futo-tiny-en-s18-full-8-9963936893",
+      "status": "dry_run",
+      "file_count": 14,
+      "upload_bytes": 1968131062,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-18__b-futo-tiny-en__m-s18-full__a-full__q-noqat__c-dyn__r-26059__id-12",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-18-futo-tiny-en-s18-full-12-aab505f573",
+      "status": "dry_run",
+      "file_count": 6,
+      "upload_bytes": 906360816,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-18__b-openai-tiny-en__m-s18-full__a-full__q-noqat__c-static__r-34259__id-11",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-18-openai-tiny-en-s18-full-11-a681b662e0",
+      "status": "dry_run",
+      "file_count": 7,
+      "upload_bytes": 1057420952,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-eval__s-legacy__b-unk__m-unk__a-full__q-unk__c-unk__r-unk__id-unk",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-legacy-unk-unk-unk-6ba27f4a41",
+      "status": "dry_run",
+      "file_count": 3,
+      "upload_bytes": 526379957,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-only__s-17__b-openai-tiny-en__m-s17-qat-lora__a-lora__q-qat__c-dyn__r-28948__id-17",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-train-only__s-18__b-futo-tiny-en__m-s18-full__a-full__q-noqat__c-dyn__r-26059__id-13",
+      "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-s-18-futo-tiny-en-s18-full-13-d8fdd4e3c2",
+      "status": "dry_run",
+      "file_count": 4,
+      "upload_bytes": 897369504,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": ""
+    },
+    {
+      "run_folder": "RUN__k-train-only__s-18__b-futo-tiny-en__m-s18-full__a-unk__q-noqat__c-dyn__r-34259__id-10",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    },
+    {
+      "run_folder": "RUN__k-train-only__s-18__b-futo-tiny-en__m-s18-full__a-unk__q-noqat__c-dyn__r-34259__id-9",
+      "repo_id": "",
+      "status": "skip_no_files",
+      "file_count": 0,
+      "upload_bytes": 0,
+      "deleted_bytes": 0,
+      "revision": "",
+      "note": "no model files >= 50MB"
+    }
+  ]
+}
