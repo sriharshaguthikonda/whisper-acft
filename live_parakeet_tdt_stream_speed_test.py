@@ -5,11 +5,15 @@ Controls (focused terminal window):
 - SPACE: toggle recognition active/inactive
 - S: print speed stats snapshot
 - Q or ESC: quit
+
+By default, this script prints only recognized text lines.
+Use --debug for detailed runtime logs and speed metrics.
 """
 
 from __future__ import annotations
 
 import argparse
+import contextlib
 import json
 import os
 import queue
@@ -56,6 +60,39 @@ def _beep_done() -> None:
         winsound.Beep(1500, 500)
     except Exception:
         pass
+
+
+def _beep_ready() -> None:
+    if os.name != "nt":
+        return
+    try:
+        import winsound  # type: ignore
+
+        winsound.Beep(900, 180)
+        winsound.Beep(1200, 220)
+    except Exception:
+        pass
+
+
+def _beep_toggle(is_active: bool) -> None:
+    if os.name != "nt":
+        return
+    try:
+        import winsound  # type: ignore
+
+        winsound.Beep(1200 if is_active else 650, 120)
+    except Exception:
+        pass
+
+
+@contextlib.contextmanager
+def _suppress_stream_output(enabled: bool) -> Any:
+    if not enabled:
+        yield
+        return
+    with open(os.devnull, "w", encoding="utf-8") as devnull:
+        with contextlib.redirect_stdout(devnull), contextlib.redirect_stderr(devnull):
+            yield
 
 
 def _write_wav_pcm16(path: Path, samples: Any, sample_rate: int) -> None:
@@ -148,7 +185,7 @@ def _keyboard_listener(cmd_q: "queue.Queue[str]", stop_event: threading.Event) -
         time.sleep(0.01)
 
 
-def _require_deps() -> tuple[Any, Any, Any]:
+def _require_deps(debug: bool) -> tuple[Any, Any, Any]:
     try:
         import numpy as np  # type: ignore
     except Exception as exc:
@@ -166,8 +203,17 @@ def _require_deps() -> tuple[Any, Any, Any]:
         ) from exc
 
     try:
+        if not debug:
+            os.environ.setdefault("NEMO_LOG_LEVEL", "ERROR")
         import torch  # type: ignore
         import nemo.collections.asr as nemo_asr  # type: ignore
+        if not debug:
+            try:
+                from nemo.utils import logging as nemo_logging  # type: ignore
+
+                nemo_logging.set_verbosity(nemo_logging.ERROR)
+            except Exception:
+                pass
     except Exception as exc:
         raise SystemExit(
             "Missing dependency: NeMo ASR stack. Install with:\n"
@@ -177,7 +223,7 @@ def _require_deps() -> tuple[Any, Any, Any]:
     return np, sd, (torch, nemo_asr)
 
 
-def _load_model(model_id: str, device_req: str, torch: Any, nemo_asr: Any) -> tuple[Any, str]:
+def _load_model(model_id: str, device_req: str, torch: Any, nemo_asr: Any, debug: bool) -> tuple[Any, str]:
     if device_req == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
     else:
@@ -185,21 +231,28 @@ def _load_model(model_id: str, device_req: str, torch: Any, nemo_asr: Any) -> tu
     if device == "cuda" and not torch.cuda.is_available():
         raise SystemExit("Requested CUDA, but torch.cuda.is_available() is False.")
 
-    print(_cyan(f"Loading model: {model_id}"))
-    asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=model_id)
+    if debug:
+        print(_cyan(f"Loading model: {model_id}"))
+    with _suppress_stream_output(enabled=not debug):
+        asr_model = nemo_asr.models.ASRModel.from_pretrained(model_name=model_id)
     asr_model = asr_model.to(device)
     asr_model.eval()
     return asr_model, device
 
 
-def _transcribe_once(asr_model: Any, wav_path: Path, timestamps: bool) -> str:
+def _transcribe_once(asr_model: Any, wav_path: Path, timestamps: bool, debug: bool) -> str:
+    kwargs: dict[str, Any] = {}
     if timestamps:
+        kwargs["timestamps"] = True
+    if not debug:
+        kwargs["verbose"] = False
+
+    with _suppress_stream_output(enabled=not debug):
         try:
-            out = asr_model.transcribe([str(wav_path)], timestamps=True)
+            out = asr_model.transcribe([str(wav_path)], **kwargs)
         except TypeError:
-            out = asr_model.transcribe([str(wav_path)])
-    else:
-        out = asr_model.transcribe([str(wav_path)])
+            kwargs.pop("verbose", None)
+            out = asr_model.transcribe([str(wav_path)], **kwargs)
 
     if isinstance(out, tuple) and out:
         out = out[0]
@@ -222,6 +275,7 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument("--start_active", action="store_true", help="Start recognition active immediately")
     ap.add_argument("--warmup", action="store_true", default=True, help="Warm up one chunk before live loop")
     ap.add_argument("--no_warmup", dest="warmup", action="store_false")
+    ap.add_argument("--debug", action="store_true", help="Show detailed logs and speed metrics")
     ap.add_argument("--list_devices", action="store_true")
     ap.add_argument("--max_chunks", type=int, default=0, help="Stop after N chunks (0 = run until quit)")
     ap.add_argument("--out_jsonl", default="", help="Optional JSONL file for per-chunk speed logs")
@@ -253,7 +307,7 @@ def main() -> int:
         print(sd.query_devices())
         return 0
 
-    np, sd, nemo_stack = _require_deps()
+    np, sd, nemo_stack = _require_deps(debug=args.debug)
     torch, nemo_asr = nemo_stack
 
     if args.chunk_secs <= 0:
@@ -265,8 +319,9 @@ def main() -> int:
     if os.name == "nt":
         os.system("")
 
-    asr_model, resolved_device = _load_model(args.model_id, args.device, torch, nemo_asr)
-    print(_green(f"Model ready on device={resolved_device}"))
+    asr_model, resolved_device = _load_model(args.model_id, args.device, torch, nemo_asr, debug=args.debug)
+    if args.debug:
+        print(_green(f"Model ready on device={resolved_device}"))
     mic_device = _normalize_device_arg(args.mic_device)
 
     sample_rate = int(args.sample_rate)
@@ -277,21 +332,28 @@ def main() -> int:
         raise SystemExit("Computed chunk_samples < 1. Check --chunk_secs and --sample_rate.")
 
     if args.warmup:
-        print(_cyan("Running warmup pass..."))
+        if args.debug:
+            print(_cyan("Running warmup pass..."))
         with tempfile.TemporaryDirectory(prefix="parakeet_live_warmup_") as warm_dir:
             warm_path = Path(warm_dir) / "warmup.wav"
             _write_wav_pcm16(warm_path, np.zeros(chunk_samples, dtype=np.float32), sample_rate)
-            _ = _transcribe_once(asr_model, warm_path, timestamps=False)
-        print(_green("Warmup done."))
+            _ = _transcribe_once(asr_model, warm_path, timestamps=False, debug=args.debug)
+        if args.debug:
+            print(_green("Warmup done."))
+
+    _beep_ready()
 
     out_jsonl_path: Optional[Path] = Path(args.out_jsonl).resolve() if args.out_jsonl else None
     if out_jsonl_path is not None:
         out_jsonl_path.parent.mkdir(parents=True, exist_ok=True)
 
-    print("")
-    print(_cyan("Controls: SPACE=toggle, S=stats, Q/ESC=quit"))
-    print(_yellow(f"Initial state: {'ACTIVE' if args.start_active else 'INACTIVE'}"))
-    print("")
+    if args.debug:
+        print("")
+        print(_cyan("Controls: SPACE=toggle, S=stats, Q/ESC=quit"))
+        print(_yellow(f"Initial state: {'ACTIVE' if args.start_active else 'INACTIVE'}"))
+        print("")
+    else:
+        print("Ready. SPACE=toggle, Q/ESC=quit, S=stats.")
 
     stop_event = threading.Event()
     cmd_q: "queue.Queue[str]" = queue.Queue()
@@ -343,8 +405,11 @@ def main() -> int:
                         active = not active
                         buffers.clear()
                         buffered_samples = 0
-                        state = _green("ACTIVE") if active else _yellow("INACTIVE")
-                        print(f"{state} at {time.strftime('%H:%M:%S')}")
+                        if args.debug:
+                            state = _green("ACTIVE") if active else _yellow("INACTIVE")
+                            print(f"{state} at {time.strftime('%H:%M:%S')}")
+                        else:
+                            _beep_toggle(active)
                     elif cmd == "stats":
                         print(_cyan(stats.summary_line()))
                     elif cmd == "quit":
@@ -381,7 +446,7 @@ def main() -> int:
                     _write_wav_pcm16(chunk_path, chunk, sample_rate)
 
                     infer_start = time.perf_counter()
-                    text = _transcribe_once(asr_model, chunk_path, timestamps=args.timestamps)
+                    text = _transcribe_once(asr_model, chunk_path, timestamps=args.timestamps, debug=args.debug)
                     infer_end = time.perf_counter()
 
                     infer_sec = infer_end - infer_start
@@ -392,12 +457,17 @@ def main() -> int:
 
                     stats.add(audio_sec, infer_sec)
 
-                    print(
-                        f"[{chunk_idx:05d}] "
-                        f"audio={audio_sec:4.2f}s | infer={infer_sec:4.2f}s | "
-                        f"RTF={rtf:5.3f} | xRealtime={xrt:4.2f}x | lag={queue_lag:4.2f}s | "
-                        f"text={_shorten(text)}"
-                    )
+                    if args.debug:
+                        print(
+                            f"[{chunk_idx:05d}] "
+                            f"audio={audio_sec:4.2f}s | infer={infer_sec:4.2f}s | "
+                            f"RTF={rtf:5.3f} | xRealtime={xrt:4.2f}x | lag={queue_lag:4.2f}s | "
+                            f"text={_shorten(text)}"
+                        )
+                    else:
+                        stripped = text.strip()
+                        if stripped:
+                            print(stripped, flush=True)
 
                     if log_fh is not None:
                         payload = {
@@ -437,10 +507,11 @@ def main() -> int:
         except Exception:
             pass
 
-    print("")
-    print(_cyan("Final stats: " + stats.summary_line()))
-    if dropped_blocks["count"] > 0:
-        print(_yellow(f"Dropped audio callback blocks: {dropped_blocks['count']}"))
+    if args.debug:
+        print("")
+        print(_cyan("Final stats: " + stats.summary_line()))
+        if dropped_blocks["count"] > 0:
+            print(_yellow(f"Dropped audio callback blocks: {dropped_blocks['count']}"))
     _beep_done()
     return 0
 
