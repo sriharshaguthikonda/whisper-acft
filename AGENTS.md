@@ -10,6 +10,8 @@
   [HF_PRIVATE_TIER1_ARCHIVAL_PLAYBOOK.md](./HF_PRIVATE_TIER1_ARCHIVAL_PLAYBOOK.md)
 - HF Tier-1 execution history:
   [HF_PRIVATE_TIER1_EXECUTION_LOG.md](./HF_PRIVATE_TIER1_EXECUTION_LOG.md)
+- HF profile (model namespace):
+  https://huggingface.co/Sri-Harsha-Guthikonda
 
 ## Important Reminder
 

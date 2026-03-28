@@ -1,0 +1,68 @@
+[
+  {
+    "file_path": "I:\\Record_harsha\\manual_ctrl_r_20260307_142310_489677_8502100ms.wav",
+    "file_name": "manual_ctrl_r_20260307_142310_489677_8502100ms.wav",
+    "total_duration": 8502.1,
+    "total_audio_time": 8502.08,
+    "silence_time": 0.020000000000436557,
+    "audio_percentage": 99.99976476399948,
+    "num_segments": 1,
+    "segments": [
+      {
+        "start_time": 0.0,
+        "end_time": 8502.08,
+        "duration": 8502.08,
+        "avg_amplitude": 0.003160202642902732,
+        "max_amplitude": 0.082733154296875,
+        "is_speech": false,
+        "start_time_formatted": "00:00.000",
+        "end_time_formatted": "141:42.080",
+        "duration_formatted": "141:42.080"
+      }
+    ]
+  },
+  {
+    "file_path": "I:\\Record_harsha\\manual_ctrl_r_20260307_142251_084499_8501200ms.wav",
+    "file_name": "manual_ctrl_r_20260307_142251_084499_8501200ms.wav",
+    "total_duration": 8501.2,
+    "total_audio_time": 8501.184,
+    "silence_time": 0.01600000000144064,
+    "audio_percentage": 99.9998117912765,
+    "num_segments": 1,
+    "segments": [
+      {
+        "start_time": 0.0,
+        "end_time": 8501.184,
+        "duration": 8501.184,
+        "avg_amplitude": 0.00316004385240376,
+        "max_amplitude": 0.082733154296875,
+        "is_speech": false,
+        "start_time_formatted": "00:00.000",
+        "end_time_formatted": "141:41.184",
+        "duration_formatted": "141:41.184"
+      }
+    ]
+  },
+  {
+    "file_path": "I:\\Record_harsha\\manual_f24_20260321_011145_789681_6890200ms.wav",
+    "file_name": "manual_f24_20260321_011145_789681_6890200ms.wav",
+    "total_duration": 6890.2,
+    "total_audio_time": 6890.176,
+    "silence_time": 0.023999999999432475,
+    "audio_percentage": 99.99965167919655,
+    "num_segments": 1,
+    "segments": [
+      {
+        "start_time": 0.0,
+        "end_time": 6890.176,
+        "duration": 6890.176,
+        "avg_amplitude": 0.003575969487428665,
+        "max_amplitude": 0.070465087890625,
+        "is_speech": false,
+        "start_time_formatted": "00:00.000",
+        "end_time_formatted": "114:50.176",
+        "duration_formatted": "114:50.176"
+      }
+    ]
+  }
+]

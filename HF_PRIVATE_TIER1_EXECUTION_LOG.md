@@ -6,6 +6,10 @@ Last updated: 2026-03-26
 
 Archive large model binaries from local `I:\RUN__*` folders to private Hugging Face repos (one repo per run), then keep local pointer/link files for restore.
 
+HF profile / namespace:
+
+- `https://huggingface.co/Sri-Harsha-Guthikonda`
+
 ## What Was Executed
 
 1. Verified token-based auth from `.env` (`HF_TOKEN`) and validated private repo access.

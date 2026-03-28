@@ -13,6 +13,7 @@ This project uses a hybrid access strategy:
 
 ## Naming and Scope
 
+- HF profile / namespace: `https://huggingface.co/Sri-Harsha-Guthikonda`
 - Repo prefix: `Whisper-acft` (as requested)
 - Repo layout: one private HF model repo per run folder
 - Upload scope: model artifact files with extensions:
