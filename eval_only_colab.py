@@ -103,47 +103,7 @@ run(["apt-get", "-qq", "update"])
 run(["apt-get", "-qq", "install", "-y", "ffmpeg", "rsync"])
 
 # %%
-# ---------- OPTIONAL PREFETCH TO LOCAL ----------
-def _to_local_path(p: str) -> str:
-    if p.startswith(DATA_ROOT_DRIVE):
-        return LOCAL_DATA_ROOT + p[len(DATA_ROOT_DRIVE):]
-    return p
-
-def _prefetch_one(src: str) -> None:
-    src_p = Path(src)
-    dst = _to_local_path(src)
-    dst_p = Path(dst)
-    rsync_args = ["rsync", "-a", "--info=progress2"]
-    if PREFETCH_IGNORE_EXISTING:
-        rsync_args.append("--ignore-existing")
-    if src_p.is_dir():
-        dst_p.mkdir(parents=True, exist_ok=True)
-        subprocess.run(rsync_args + [f"{src_p}/", f"{dst_p}/"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-    else:
-        dst_p.parent.mkdir(parents=True, exist_ok=True)
-        subprocess.run(rsync_args + [str(src_p), str(dst_p)], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
-
-def _prefetch_worker(items: list[str]) -> None:
-    for item in items:
-        _prefetch_one(item)
-
-if PREFETCH_TO_LOCAL:
-    Path(LOCAL_DATA_ROOT).mkdir(parents=True, exist_ok=True)
-    prefetch_items = [
-        f"{DATA_ROOT_DRIVE}/Record_test_chunks",
-        CHECKPOINT_DIR,
-    ]
-    if USE_OTHERS_DIR:
-        prefetch_items += [
-            OTHERS_DIR,
-        ]
-    if PREFETCH_IN_BACKGROUND:
-        threading.Thread(target=_prefetch_worker, args=(prefetch_items,), daemon=True).start()
-    else:
-        _prefetch_worker(prefetch_items)
-
-# %%
-# ---------- PATH REWRITE HELPERS ----------
+# ---------- PATH HELPERS ----------
 ANCHOR_DIRS = [
     "Record_test_chunks",
     "Record_chunks",
@@ -175,6 +135,120 @@ def _remap_by_anchor(p: str) -> str:
             suffix = s[idx_tail + 1:]
             return f"{DATA_ROOT_ACTIVE}/{suffix}"
     return s
+
+def _is_windows_absolute_path(p: str) -> bool:
+    s = _norm_slashes(p)
+    return len(s) >= 3 and s[1] == ":" and s[0].isalpha() and s[2] == "/"
+
+def _resolve_manifest_audio_path(manifest_path: str, audio_path: str) -> str:
+    raw = _norm_slashes(audio_path).strip()
+    if not raw:
+        return ""
+    if raw.startswith(DATA_ROOT_ACTIVE):
+        return raw
+    if raw.startswith("/"):
+        return raw
+    if _is_windows_absolute_path(raw):
+        return _remap_by_anchor(raw)
+
+    manifest_p = Path(manifest_path)
+    manifest_dir = manifest_p.parent
+    if raw.startswith("audio/") and manifest_dir.name.lower() == "manifests":
+        resolved = (manifest_dir.parent / raw).as_posix()
+    else:
+        resolved = (manifest_dir / raw).as_posix()
+    return resolved
+
+def _collapse_parent_dirs(paths: list[str]) -> list[str]:
+    cleaned = sorted(
+        {Path(p).as_posix().rstrip("/") for p in paths if p},
+        key=lambda x: (x.count("/"), len(x), x.lower()),
+    )
+    kept: list[str] = []
+    for p in cleaned:
+        if any(p == parent or p.startswith(parent + "/") for parent in kept):
+            continue
+        kept.append(p)
+    return kept
+
+def _collect_audio_prefetch_dirs(manifest_path: str) -> list[str]:
+    p = Path(manifest_path)
+    if not p.exists():
+        print(f"[prefetch] manifest missing, fallback will be used: {p}")
+        return []
+    dirs: list[str] = []
+    with p.open("r", encoding="utf-8", errors="ignore") as f:
+        for line in f:
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+            except Exception:
+                continue
+            ap = obj.get("audio_path")
+            if not isinstance(ap, str) or not ap.strip():
+                continue
+            resolved_audio = _resolve_manifest_audio_path(str(p), ap)
+            if not resolved_audio:
+                continue
+            dirs.append(Path(resolved_audio).parent.as_posix())
+    return _collapse_parent_dirs(dirs)
+
+# %%
+# ---------- OPTIONAL PREFETCH TO LOCAL ----------
+def _to_local_path(p: str) -> str:
+    if p.startswith(DATA_ROOT_DRIVE):
+        return LOCAL_DATA_ROOT + p[len(DATA_ROOT_DRIVE):]
+    return p
+
+def _prefetch_one(src: str) -> None:
+    src_p = Path(src)
+    dst = _to_local_path(src)
+    dst_p = Path(dst)
+    rsync_args = ["rsync", "-a", "--info=progress2"]
+    if PREFETCH_IGNORE_EXISTING:
+        rsync_args.append("--ignore-existing")
+    if src_p.is_dir():
+        dst_p.mkdir(parents=True, exist_ok=True)
+        subprocess.run(rsync_args + [f"{src_p}/", f"{dst_p}/"], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+    else:
+        dst_p.parent.mkdir(parents=True, exist_ok=True)
+        subprocess.run(rsync_args + [str(src_p), str(dst_p)], stdout=subprocess.DEVNULL, stderr=subprocess.STDOUT)
+
+def _prefetch_worker(items: list[str]) -> None:
+    for item in items:
+        _prefetch_one(item)
+
+if PREFETCH_TO_LOCAL:
+    Path(LOCAL_DATA_ROOT).mkdir(parents=True, exist_ok=True)
+    prefetch_audio_dirs = _collect_audio_prefetch_dirs(TEST_MANIFEST)
+    prefetch_items = [CHECKPOINT_DIR]
+    if prefetch_audio_dirs:
+        prefetch_items.extend(prefetch_audio_dirs)
+    else:
+        # Backward-compatible fallback for legacy flat test chunk layouts.
+        prefetch_items.append(f"{DATA_ROOT_DRIVE}/Record_test_chunks")
+    if USE_OTHERS_DIR:
+        prefetch_items.append(OTHERS_DIR)
+    deduped_items: list[str] = []
+    seen_keys: set[str] = set()
+    for item in prefetch_items:
+        key = _norm_slashes(str(item)).lower().rstrip("/")
+        if not key or key in seen_keys:
+            continue
+        seen_keys.add(key)
+        deduped_items.append(str(item))
+    prefetch_items = deduped_items
+    print(f"[prefetch] source roots: {prefetch_items}")
+    if PREFETCH_IN_BACKGROUND:
+        threading.Thread(target=_prefetch_worker, args=(prefetch_items,), daemon=True).start()
+    else:
+        _prefetch_worker(prefetch_items)
+
+# %%
+# ---------- PATH REWRITE HELPERS ----------
+# Uses _norm_slashes/_remap_by_anchor helpers defined above.
 
 # ---------- PATCH EVAL SCRIPT FOR CACHE FALLBACK ----------
 PATCH_EVAL_SCRIPT = True

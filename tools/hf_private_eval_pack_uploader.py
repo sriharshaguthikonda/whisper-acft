@@ -8,6 +8,7 @@ import json
 import os
 import sys
 import shutil
+import math
 from datetime import datetime, timezone
 from pathlib import Path, PureWindowsPath
 from typing import Any
@@ -90,6 +91,123 @@ def _portable_relpath(src_path: Path, source_root: Path) -> str:
     return src_path.name
 
 
+def _rel_to(base: Path, p: Path) -> str:
+    try:
+        return p.resolve().relative_to(base.resolve()).as_posix()
+    except Exception:
+        return str(p).replace("\\", "/")
+
+
+def _iter_dirs(root: Path) -> list[Path]:
+    if not root.exists() or not root.is_dir():
+        return []
+    dirs = [root]
+    dirs.extend(sorted((p for p in root.rglob("*") if p.is_dir()), key=lambda x: x.as_posix().lower()))
+    return dirs
+
+
+def _immediate_file_count(dir_path: Path) -> int:
+    return sum(1 for p in dir_path.iterdir() if p.is_file())
+
+
+def _collect_directory_file_counts(root: Path, base: Path, *, non_zero_only: bool = True) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for dir_path in _iter_dirs(root):
+        file_count = _immediate_file_count(dir_path)
+        if non_zero_only and file_count <= 0:
+            continue
+        rows.append(
+            {
+                "directory": _rel_to(base, dir_path),
+                "file_count": int(file_count),
+            }
+        )
+    rows.sort(key=lambda r: (-int(r["file_count"]), str(r["directory"]).lower()))
+    return rows
+
+
+def _validate_directory_file_limit(root: Path, base: Path, *, max_files_per_dir: int) -> list[dict[str, Any]]:
+    offenders: list[dict[str, Any]] = []
+    for dir_path in _iter_dirs(root):
+        file_count = _immediate_file_count(dir_path)
+        if file_count > max_files_per_dir:
+            offenders.append(
+                {
+                    "directory": _rel_to(base, dir_path),
+                    "file_count": int(file_count),
+                }
+            )
+    offenders.sort(key=lambda r: (-int(r["file_count"]), str(r["directory"]).lower()))
+    return offenders
+
+
+def _apply_audio_dir_sharding(
+    *,
+    staging_root: Path,
+    audio_root: Path,
+    path_map: dict[str, str],
+    max_files_per_dir: int,
+    shard_prefix: str,
+) -> dict[str, Any]:
+    report: dict[str, Any] = {
+        "max_files_per_dir": int(max_files_per_dir),
+        "shard_prefix": shard_prefix,
+        "directories_sharded": [],
+    }
+    if not audio_root.exists():
+        return report
+
+    reverse_map: dict[str, list[str]] = {}
+    for src_key, dst_rel in path_map.items():
+        nk = str(dst_rel).replace("\\", "/").strip("/")
+        reverse_map.setdefault(nk, []).append(src_key)
+
+    for dir_path in _iter_dirs(audio_root):
+        files = [p for p in dir_path.iterdir() if p.is_file()]
+        if len(files) <= max_files_per_dir:
+            continue
+
+        files_sorted = sorted(files, key=lambda p: (p.name.lower(), p.name))
+        shard_rows: list[dict[str, Any]] = []
+        shard_total = int(math.ceil(len(files_sorted) / float(max_files_per_dir)))
+        for shard_idx in range(shard_total):
+            start = shard_idx * max_files_per_dir
+            end = min(start + max_files_per_dir, len(files_sorted))
+            shard_name = f"{shard_prefix}_{shard_idx:04d}"
+            shard_dir = dir_path / shard_name
+            shard_dir.mkdir(parents=True, exist_ok=True)
+
+            for src in files_sorted[start:end]:
+                dst = shard_dir / src.name
+                old_rel = _rel_to(staging_root, src).replace("\\", "/").strip("/")
+                new_rel = _rel_to(staging_root, dst).replace("\\", "/").strip("/")
+                shutil.move(str(src), str(dst))
+                keys = reverse_map.pop(old_rel, [])
+                if keys:
+                    reverse_map.setdefault(new_rel, [])
+                for key in keys:
+                    path_map[key] = new_rel
+                    reverse_map[new_rel].append(key)
+
+            shard_rows.append(
+                {
+                    "shard": _rel_to(staging_root, shard_dir),
+                    "file_count": int(end - start),
+                }
+            )
+
+        report["directories_sharded"].append(
+            {
+                "directory": _rel_to(staging_root, dir_path),
+                "files_before": int(len(files_sorted)),
+                "shards_created": int(shard_total),
+                "shards": shard_rows,
+            }
+        )
+
+    return report
+
+
 def _copy_audio_files(
     audio_paths: list[Path],
     source_root: Path,
@@ -111,6 +229,29 @@ def _copy_audio_files(
         mapping[key] = dst_rel.as_posix()
         copied += 1
     return mapping, missing, copied
+
+
+def _copy_entire_folder(
+    folder: Path,
+    source_root: Path,
+    pack_root: Path,
+    *,
+    target_root: str = "audio",
+) -> tuple[int, int]:
+    copied = 0
+    skipped = 0
+    for src in folder.rglob("*"):
+        if not src.is_file():
+            continue
+        rel = _portable_relpath(src, source_root)
+        dst = pack_root / target_root / rel
+        if dst.exists():
+            skipped += 1
+            continue
+        dst.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copy2(src, dst)
+        copied += 1
+    return copied, skipped
 
 
 def _rewrite_manifest_rows(rows: list[dict], path_map: dict[str, str]) -> tuple[list[dict], int]:
@@ -145,6 +286,8 @@ def _rewrite_speaker_scores(src_csv: Path, dst_csv: Path, path_map: dict[str, st
 
     changed = 0
     for row in rows:
+        if None in row:
+            row.pop(None, None)
         raw = str(row.get("file", "") or "")
         mapped = path_map.get(_norm_key(raw))
         if mapped:
@@ -155,7 +298,8 @@ def _rewrite_speaker_scores(src_csv: Path, dst_csv: Path, path_map: dict[str, st
         writer = csv.DictWriter(fout, fieldnames=fieldnames)
         writer.writeheader()
         for row in rows:
-            writer.writerow(row)
+            clean_row = {k: row.get(k, "") for k in fieldnames}
+            writer.writerow(clean_row)
     return len(rows), changed
 
 
@@ -187,19 +331,24 @@ def _sha256_file(path: Path) -> str:
 
 
 def _main() -> int:
+    hf_hard_limit = 10_000
     ap = argparse.ArgumentParser(description="Create/upload private HF eval-pack for cloud testing")
     ap.add_argument("--repo-id", required=True, help="HF dataset repo, e.g. user/private-eval-pack")
     ap.add_argument("--repo-root", default=r"I:\whisper-acft", help="Repo root for .env fallback")
     ap.add_argument("--source-root", default=r"I:\\", help="Root used to resolve relative audio paths")
     ap.add_argument("--pack-tag", default="stage13-indian-accent-en", help="Human tag for this pack")
     ap.add_argument("--manifest", required=True, help="Input test manifest JSONL")
+    ap.add_argument("--extra-manifest", action="append", default=[], help="Additional manifest(s) to include and rewrite")
     ap.add_argument("--speaker-scores-csv", required=True, help="Input speaker_sort_scores.csv")
     ap.add_argument("--others-manifest", default="", help="Optional OTHER-manifest JSONL")
+    ap.add_argument("--extra-folder", action="append", default=[], help="Optional extra folder(s) to include under audio/")
     ap.add_argument("--private", type=int, default=1, help="Create repo as private if it doesn't exist")
     ap.add_argument("--revision", default="main", help="Branch/revision for upload")
     ap.add_argument("--dry-run", action="store_true", help="Build staging pack only, no upload")
     ap.add_argument("--keep-staging", action="store_true", help="Do not delete staging folder")
     ap.add_argument("--path-in-repo-prefix", default="eval_packs", help="Repo folder prefix")
+    ap.add_argument("--max-files-per-dir", type=int, default=9000, help="Shard any destination directory above this many files")
+    ap.add_argument("--shard-prefix", default="shard", help="Shard directory name prefix (e.g., shard -> shard_0000)")
     args = ap.parse_args()
 
     repo_root = Path(args.repo_root).resolve()
@@ -207,6 +356,9 @@ def _main() -> int:
     manifest_path = _resolve_input_path(args.manifest, repo_root)
     speaker_scores_path = _resolve_input_path(args.speaker_scores_csv, repo_root)
     others_manifest_path = _resolve_input_path(args.others_manifest, repo_root) if args.others_manifest else None
+    extra_manifest_paths = [_resolve_input_path(p, repo_root) for p in (args.extra_manifest or []) if str(p).strip()]
+    extra_folder_paths = [_resolve_input_path(p, repo_root) for p in (args.extra_folder or []) if str(p).strip()]
+    shard_prefix = str(args.shard_prefix or "").strip()
 
     if not manifest_path.exists():
         raise SystemExit(f"Manifest not found: {manifest_path}")
@@ -214,6 +366,20 @@ def _main() -> int:
         raise SystemExit(f"Speaker scores CSV not found: {speaker_scores_path}")
     if others_manifest_path and not others_manifest_path.exists():
         raise SystemExit(f"Others manifest not found: {others_manifest_path}")
+    for mp in extra_manifest_paths:
+        if not mp.exists():
+            raise SystemExit(f"Extra manifest not found: {mp}")
+    for fp in extra_folder_paths:
+        if not fp.exists() or not fp.is_dir():
+            raise SystemExit(f"Extra folder not found or not a directory: {fp}")
+    if int(args.max_files_per_dir) <= 0:
+        raise SystemExit("--max-files-per-dir must be > 0")
+    if int(args.max_files_per_dir) > hf_hard_limit:
+        raise SystemExit(f"--max-files-per-dir must be <= {hf_hard_limit}")
+    if not shard_prefix:
+        raise SystemExit("--shard-prefix must be non-empty")
+    if "/" in shard_prefix or "\\" in shard_prefix:
+        raise SystemExit("--shard-prefix must not contain path separators")
 
     pack_id = f"{_utc_compact()}__{_safe_slug(args.pack_tag)}"
     staging_root = repo_root / ".hf_eval_pack_staging" / pack_id
@@ -223,14 +389,39 @@ def _main() -> int:
 
     test_rows = _iter_jsonl(manifest_path)
     other_rows = _iter_jsonl(others_manifest_path) if others_manifest_path else []
+    extra_rows_by_path: dict[Path, list[dict]] = {mp: _iter_jsonl(mp) for mp in extra_manifest_paths}
     audio_paths = _collect_audio_paths_from_manifest(test_rows, source_root)
     if other_rows:
         audio_paths.extend(_collect_audio_paths_from_manifest(other_rows, source_root))
+    for extra_rows in extra_rows_by_path.values():
+        audio_paths.extend(_collect_audio_paths_from_manifest(extra_rows, source_root))
 
     path_map, missing_audio, copied_count = _copy_audio_files(
         audio_paths=audio_paths,
         source_root=source_root,
         pack_root=staging_root,
+    )
+    extra_folder_stats: list[dict[str, Any]] = []
+    for folder in extra_folder_paths:
+        copied_folder, skipped_folder = _copy_entire_folder(
+            folder=folder,
+            source_root=source_root,
+            pack_root=staging_root,
+            target_root="audio",
+        )
+        extra_folder_stats.append(
+            {
+                "folder": str(folder),
+                "copied_files": int(copied_folder),
+                "skipped_existing_files": int(skipped_folder),
+            }
+        )
+    sharding_report = _apply_audio_dir_sharding(
+        staging_root=staging_root,
+        audio_root=staging_root / "audio",
+        path_map=path_map,
+        max_files_per_dir=int(args.max_files_per_dir),
+        shard_prefix=shard_prefix,
     )
     print(f"Audio files copied: {copied_count} | missing: {len(missing_audio)}")
 
@@ -245,6 +436,22 @@ def _main() -> int:
         others_manifest_out = staging_root / "manifests" / "others_manifest.jsonl"
         _write_jsonl(others_manifest_out, rewritten_other_rows)
 
+    extra_manifest_outputs: list[dict[str, Any]] = []
+    for extra_path, extra_rows in extra_rows_by_path.items():
+        rewritten_extra_rows, changed_extra = _rewrite_manifest_rows(extra_rows, path_map)
+        out_name = f"{extra_path.stem}.jsonl"
+        out_path = staging_root / "manifests" / out_name
+        _write_jsonl(out_path, rewritten_extra_rows)
+        extra_manifest_outputs.append(
+            {
+                "source": str(extra_path),
+                "output": f"manifests/{out_name}",
+                "rows": int(len(extra_rows)),
+                "paths_rewritten": int(changed_extra),
+                "sha256": _sha256_file(out_path),
+            }
+        )
+
     speaker_scores_out = staging_root / "metadata" / "speaker_sort_scores.csv"
     speaker_rows, speaker_changed = _rewrite_speaker_scores(
         src_csv=speaker_scores_path,
@@ -252,19 +459,39 @@ def _main() -> int:
         path_map=path_map,
     )
 
+    audio_file_counts = _collect_directory_file_counts(staging_root / "audio", base=staging_root, non_zero_only=True)
+    hard_limit_offenders = _validate_directory_file_limit(
+        staging_root,
+        base=staging_root,
+        max_files_per_dir=hf_hard_limit,
+    )
+    if hard_limit_offenders:
+        top = "\n".join(
+            f"  - {x['directory']}: {x['file_count']} files"
+            for x in hard_limit_offenders[:10]
+        )
+        raise RuntimeError(
+            "Pre-upload directory file-count validation failed. "
+            f"Hub hard limit is {hf_hard_limit} files per directory.\n"
+            f"Top offenders:\n{top}"
+        )
+
     metadata = {
         "pack_id": pack_id,
         "pack_tag": args.pack_tag,
         "created_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat(),
         "source": {
             "manifest": str(manifest_path),
+            "extra_manifests": [str(p) for p in extra_manifest_paths],
             "speaker_scores_csv": str(speaker_scores_path),
             "others_manifest": str(others_manifest_path) if others_manifest_path else None,
             "source_root": str(source_root),
+            "extra_folders": [str(p) for p in extra_folder_paths],
         },
         "counts": {
             "test_rows": len(test_rows),
             "other_rows": len(other_rows),
+            "extra_manifest_rows_total": int(sum(len(v) for v in extra_rows_by_path.values())),
             "audio_paths_total": len(audio_paths),
             "audio_files_copied": copied_count,
             "audio_files_missing": len(missing_audio),
@@ -277,11 +504,21 @@ def _main() -> int:
             "test_manifest": "manifests/pairs_manifest_stage13_test.jsonl",
             "speaker_scores_csv": "metadata/speaker_sort_scores.csv",
             "others_manifest": "manifests/others_manifest.jsonl" if others_manifest_out else None,
+            "extra_manifests": [x["output"] for x in extra_manifest_outputs],
             "others_dir": "audio",
         },
         "checksums": {
             "test_manifest_sha256": _sha256_file(test_manifest_out),
             "speaker_scores_sha256": _sha256_file(speaker_scores_out),
+        },
+        "extra_manifest_outputs": extra_manifest_outputs,
+        "extra_folder_copy_stats": extra_folder_stats,
+        "layout": {
+            "hf_hard_limit_files_per_dir": int(hf_hard_limit),
+            "max_files_per_dir_requested": int(args.max_files_per_dir),
+            "shard_prefix": shard_prefix,
+            "directories_sharded": sharding_report["directories_sharded"],
+            "audio_directory_file_counts": audio_file_counts,
         },
     }
     if others_manifest_out is not None:

@@ -40,6 +40,8 @@ Use `I:\whisper-acft\cloud_eval_models.example.csv` as template.
 
 `I:\whisper-acft\cloud_eval_config.example.json` is already wired to `eval_packs/LATEST_PACK/...`.
 After running the eval-pack uploader, the orchestrator resolves `LATEST_PACK` via `eval_packs/LATEST_PACK.json` automatically.
+The manifest `audio_path` values are the source of truth for audio lookup.
+Nested folder depth under `audio/` (for example sharded layouts like `audio/Record_test_chunks/shard_0000/...`) is supported.
 
 ## Local Windows run
 
