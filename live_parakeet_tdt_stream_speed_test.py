@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Live mic speed test for Parakeet-TDT 0.6B v3 from Hugging Face (via NeMo).
 
+
+I:\Whisper-training-env\Scripts\python.exe I:\whisper-acft\live_parakeet_tdt_stream_speed_test.py --device cuda --mic_device 1 --chunk_secs 1.5 --left_context_secs 4 --right_context_secs 0.5 --block_secs 0.1 --start_active 
+
+
 Controls (focused terminal window):
 - SPACE: toggle recognition active/inactive
 - S: print speed stats snapshot
@@ -17,11 +21,10 @@ import contextlib
 import json
 import os
 import queue
+import re
 import sys
-import tempfile
 import threading
 import time
-import wave
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Optional
@@ -95,20 +98,6 @@ def _suppress_stream_output(enabled: bool) -> Any:
             yield
 
 
-def _write_wav_pcm16(path: Path, samples: Any, sample_rate: int) -> None:
-    # Keep WAV writing stdlib-only to avoid extra dependencies.
-    import numpy as np  # type: ignore
-
-    clipped = np.clip(samples, -1.0, 1.0)
-    pcm16 = (clipped * 32767.0).astype(np.int16, copy=False)
-
-    with wave.open(str(path), "wb") as wf:
-        wf.setnchannels(1)
-        wf.setsampwidth(2)
-        wf.setframerate(sample_rate)
-        wf.writeframes(pcm16.tobytes())
-
-
 def _extract_text(result_item: Any) -> str:
     if result_item is None:
         return ""
@@ -126,6 +115,23 @@ def _shorten(text: str, max_len: int = 160) -> str:
     if len(text) <= max_len:
         return text
     return text[: max_len - 3] + "..."
+
+
+def _word_tokens(text: str) -> list[str]:
+    return [tok for tok in text.strip().split() if tok]
+
+
+def _token_key(token: str) -> str:
+    key = re.sub(r"[^A-Za-z0-9]+", "", token).lower()
+    return key if key else token.lower()
+
+
+def _common_prefix_words(left: list[str], right: list[str]) -> list[str]:
+    limit = min(len(left), len(right))
+    idx = 0
+    while idx < limit and _token_key(left[idx]) == _token_key(right[idx]):
+        idx += 1
+    return right[:idx]
 
 
 @dataclass
@@ -240,25 +246,35 @@ def _load_model(model_id: str, device_req: str, torch: Any, nemo_asr: Any, debug
     return asr_model, device
 
 
-def _transcribe_once(asr_model: Any, wav_path: Path, timestamps: bool, debug: bool) -> str:
+def _transcribe_once(
+    asr_model: Any,
+    audio_input: Any,
+    timestamps: bool,
+    debug: bool,
+    batch_size: int,
+    num_workers: int,
+) -> list[str]:
     kwargs: dict[str, Any] = {}
     if timestamps:
         kwargs["timestamps"] = True
-    if not debug:
-        kwargs["verbose"] = False
+
+    kwargs["batch_size"] = max(1, int(batch_size))
+    kwargs["num_workers"] = max(0, int(num_workers))
+    kwargs["verbose"] = bool(debug)
+    kwargs["return_hypotheses"] = False
 
     with _suppress_stream_output(enabled=not debug):
         try:
-            out = asr_model.transcribe([str(wav_path)], **kwargs)
+            out = asr_model.transcribe(audio=audio_input, **kwargs)
         except TypeError:
             kwargs.pop("verbose", None)
-            out = asr_model.transcribe([str(wav_path)], **kwargs)
+            out = asr_model.transcribe(audio=audio_input, **kwargs)
 
     if isinstance(out, tuple) and out:
         out = out[0]
-    if isinstance(out, list) and out:
-        return _extract_text(out[0])
-    return _extract_text(out)
+    if isinstance(out, list):
+        return [_extract_text(item) for item in out]
+    return [_extract_text(out)]
 
 
 def _parse_args() -> argparse.Namespace:
@@ -268,8 +284,12 @@ def _parse_args() -> argparse.Namespace:
     ap.add_argument("--model_id", default="nvidia/parakeet-tdt-0.6b-v3")
     ap.add_argument("--device", choices=["auto", "cpu", "cuda"], default="auto")
     ap.add_argument("--sample_rate", type=int, default=16000)
-    ap.add_argument("--chunk_secs", type=float, default=2.0)
+    ap.add_argument("--chunk_secs", type=float, default=1.5)
+    ap.add_argument("--left_context_secs", type=float, default=8.0)
+    ap.add_argument("--right_context_secs", type=float, default=0.6)
     ap.add_argument("--block_secs", type=float, default=0.2)
+    ap.add_argument("--infer_batch_size", type=int, default=1, help="NeMo transcribe batch_size")
+    ap.add_argument("--infer_num_workers", type=int, default=0, help="NeMo transcribe num_workers")
     ap.add_argument("--mic_device", default=None, help="sounddevice input device id or name")
     ap.add_argument("--timestamps", action="store_true", help="Ask NeMo for timestamps (extra overhead)")
     ap.add_argument("--start_active", action="store_true", help="Start recognition active immediately")
@@ -312,8 +332,16 @@ def main() -> int:
 
     if args.chunk_secs <= 0:
         raise SystemExit("--chunk_secs must be > 0.")
+    if args.left_context_secs < 0:
+        raise SystemExit("--left_context_secs must be >= 0.")
+    if args.right_context_secs < 0:
+        raise SystemExit("--right_context_secs must be >= 0.")
     if args.block_secs <= 0:
         raise SystemExit("--block_secs must be > 0.")
+    if args.infer_batch_size <= 0:
+        raise SystemExit("--infer_batch_size must be > 0.")
+    if args.infer_num_workers < 0:
+        raise SystemExit("--infer_num_workers must be >= 0.")
 
     # Ensure ANSI colors work in modern Windows terminals.
     if os.name == "nt":
@@ -326,6 +354,8 @@ def main() -> int:
 
     sample_rate = int(args.sample_rate)
     chunk_samples = int(round(args.chunk_secs * sample_rate))
+    left_context_samples = int(round(args.left_context_secs * sample_rate))
+    right_context_samples = int(round(args.right_context_secs * sample_rate))
     block_samples = max(1, int(round(args.block_secs * sample_rate)))
 
     if chunk_samples < 1:
@@ -334,10 +364,14 @@ def main() -> int:
     if args.warmup:
         if args.debug:
             print(_cyan("Running warmup pass..."))
-        with tempfile.TemporaryDirectory(prefix="parakeet_live_warmup_") as warm_dir:
-            warm_path = Path(warm_dir) / "warmup.wav"
-            _write_wav_pcm16(warm_path, np.zeros(chunk_samples, dtype=np.float32), sample_rate)
-            _ = _transcribe_once(asr_model, warm_path, timestamps=False, debug=args.debug)
+        _ = _transcribe_once(
+            asr_model=asr_model,
+            audio_input=np.zeros(chunk_samples, dtype=np.float32),
+            timestamps=False,
+            debug=args.debug,
+            batch_size=args.infer_batch_size,
+            num_workers=args.infer_num_workers,
+        )
         if args.debug:
             print(_green("Warmup done."))
 
@@ -351,9 +385,18 @@ def main() -> int:
         print("")
         print(_cyan("Controls: SPACE=toggle, S=stats, Q/ESC=quit"))
         print(_yellow(f"Initial state: {'ACTIVE' if args.start_active else 'INACTIVE'}"))
+        print(
+            _cyan(
+                f"Streaming window: chunk={args.chunk_secs:.2f}s, "
+                f"left_ctx={args.left_context_secs:.2f}s, right_ctx={args.right_context_secs:.2f}s"
+            )
+        )
         print("")
     else:
-        print("Ready. SPACE=toggle, Q/ESC=quit, S=stats.")
+        print(
+            f"Ready. SPACE=toggle, Q/ESC=quit, S=stats. "
+            f"(chunk={args.chunk_secs:.1f}s, left={args.left_context_secs:.1f}s, right={args.right_context_secs:.1f}s)"
+        )
 
     stop_event = threading.Event()
     cmd_q: "queue.Queue[str]" = queue.Queue()
@@ -376,11 +419,12 @@ def main() -> int:
     stats = SpeedStats()
     active = bool(args.start_active)
     chunk_idx = 0
-    buffers: list[Any] = []
-    buffered_samples = 0
-    buffered_end_ts = time.perf_counter()
+    stream_buffer = np.zeros(0, dtype=np.float32)
+    stream_base_sample = 0
+    next_chunk_start_sample = 0
+    committed_words: list[str] = []
+    prev_window_words: Optional[list[str]] = None
 
-    tmp_dir = Path(tempfile.mkdtemp(prefix="parakeet_live_chunks_"))
     log_fh = None
     try:
         if out_jsonl_path is not None:
@@ -403,8 +447,11 @@ def main() -> int:
 
                     if cmd == "toggle":
                         active = not active
-                        buffers.clear()
-                        buffered_samples = 0
+                        stream_buffer = np.zeros(0, dtype=np.float32)
+                        stream_base_sample = 0
+                        next_chunk_start_sample = 0
+                        committed_words = []
+                        prev_window_words = None
                         if args.debug:
                             state = _green("ACTIVE") if active else _yellow("INACTIVE")
                             print(f"{state} at {time.strftime('%H:%M:%S')}")
@@ -427,66 +474,97 @@ def main() -> int:
                 if not active:
                     continue
 
-                buffers.append(block)
-                buffered_samples += int(block.shape[0])
-                buffered_end_ts = block_end_ts
+                stream_buffer = np.concatenate((stream_buffer, block), axis=0)
+                available_end_sample = stream_base_sample + int(stream_buffer.shape[0])
 
-                while buffered_samples >= chunk_samples:
-                    merged = np.concatenate(buffers, axis=0)
-                    chunk = merged[:chunk_samples]
-                    remainder = merged[chunk_samples:]
-                    remainder_sec = float(remainder.shape[0]) / float(sample_rate)
-                    chunk_end_ts = buffered_end_ts - remainder_sec
-
-                    buffers = [remainder] if remainder.size else []
-                    buffered_samples = int(remainder.shape[0])
-
+                # Process chunks only when we have enough lookahead (right context).
+                while available_end_sample >= (next_chunk_start_sample + chunk_samples + right_context_samples):
                     chunk_idx += 1
-                    chunk_path = tmp_dir / f"chunk_{chunk_idx:06d}.wav"
-                    _write_wav_pcm16(chunk_path, chunk, sample_rate)
+                    chunk_start_sample = next_chunk_start_sample
+                    chunk_end_sample = chunk_start_sample + chunk_samples
+
+                    window_start_sample = max(0, chunk_start_sample - left_context_samples)
+                    window_end_sample = chunk_end_sample + right_context_samples
+
+                    local_start = max(0, window_start_sample - stream_base_sample)
+                    local_end = max(local_start, window_end_sample - stream_base_sample)
+                    window_audio = stream_buffer[local_start:local_end]
+
+                    samples_after_chunk = max(0, available_end_sample - chunk_end_sample)
+                    chunk_end_ts = block_end_ts - (float(samples_after_chunk) / float(sample_rate))
 
                     infer_start = time.perf_counter()
-                    text = _transcribe_once(asr_model, chunk_path, timestamps=args.timestamps, debug=args.debug)
+                    texts = _transcribe_once(
+                        asr_model=asr_model,
+                        audio_input=window_audio,
+                        timestamps=args.timestamps,
+                        debug=args.debug,
+                        batch_size=args.infer_batch_size,
+                        num_workers=args.infer_num_workers,
+                    )
                     infer_end = time.perf_counter()
 
+                    text = texts[0] if texts else ""
                     infer_sec = infer_end - infer_start
-                    audio_sec = float(chunk.shape[0]) / float(sample_rate)
+                    chunk_audio_sec = float(chunk_samples) / float(sample_rate)
                     queue_lag = max(0.0, infer_start - chunk_end_ts)
-                    rtf = infer_sec / audio_sec if audio_sec > 0 else float("inf")
+                    rtf = infer_sec / chunk_audio_sec if chunk_audio_sec > 0 else float("inf")
                     xrt = (1.0 / rtf) if rtf > 0 else float("inf")
 
-                    stats.add(audio_sec, infer_sec)
+                    current_words = _word_tokens(text)
+                    emitted_words: list[str] = []
+                    if prev_window_words is not None:
+                        stable_words = _common_prefix_words(prev_window_words, current_words)
+                        if len(stable_words) > len(committed_words):
+                            emitted_words = stable_words[len(committed_words) :]
+                            committed_words.extend(emitted_words)
+                    prev_window_words = current_words
+                    emitted_text = " ".join(emitted_words).strip()
+
+                    stats.add(chunk_audio_sec, infer_sec)
 
                     if args.debug:
                         print(
                             f"[{chunk_idx:05d}] "
-                            f"audio={audio_sec:4.2f}s | infer={infer_sec:4.2f}s | "
+                            f"audio={chunk_audio_sec:4.2f}s | infer={infer_sec:4.2f}s | "
                             f"RTF={rtf:5.3f} | xRealtime={xrt:4.2f}x | lag={queue_lag:4.2f}s | "
-                            f"text={_shorten(text)}"
+                            f"window={len(window_audio)/sample_rate:4.2f}s | "
+                            f"emit={_shorten(emitted_text, 80)} | raw={_shorten(text, 120)}"
                         )
                     else:
-                        stripped = text.strip()
-                        if stripped:
-                            print(stripped, flush=True)
+                        if emitted_text:
+                            print(emitted_text, flush=True)
 
                     if log_fh is not None:
                         payload = {
                             "chunk_index": chunk_idx,
-                            "audio_sec": audio_sec,
+                            "audio_sec": chunk_audio_sec,
+                            "window_audio_sec": float(len(window_audio)) / float(sample_rate),
                             "infer_sec": infer_sec,
                             "rtf": rtf,
                             "x_realtime": xrt,
                             "queue_lag_sec": queue_lag,
-                            "text": text,
+                            "left_context_secs": float(args.left_context_secs),
+                            "right_context_secs": float(args.right_context_secs),
+                            "emitted_text": emitted_text,
+                            "raw_text": text,
                             "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
                         }
                         log_fh.write(json.dumps(payload, ensure_ascii=True) + "\n")
                         log_fh.flush()
 
-                    try:
-                        chunk_path.unlink(missing_ok=True)
-                    except Exception:
-                        pass
+                    next_chunk_start_sample += chunk_samples
+
+                    # Keep only what we need for left-context on the next step.
+                    keep_from_sample = max(0, next_chunk_start_sample - left_context_samples - block_samples)
+                    if keep_from_sample > stream_base_sample:
+                        drop_count = keep_from_sample - stream_base_sample
+                        if drop_count >= int(stream_buffer.shape[0]):
+                            stream_buffer = np.zeros(0, dtype=np.float32)
+                        else:
+                            stream_buffer = stream_buffer[drop_count:]
+                        stream_base_sample = keep_from_sample
+                        available_end_sample = stream_base_sample + int(stream_buffer.shape[0])
 
                     if args.max_chunks > 0 and chunk_idx >= args.max_chunks:
                         stop_event.set()
@@ -495,17 +573,21 @@ def main() -> int:
     except KeyboardInterrupt:
         stop_event.set()
     finally:
+        # Flush tail text that may never have become stable before shutdown.
+        if prev_window_words is not None and len(prev_window_words) > len(committed_words):
+            tail_words = prev_window_words[len(committed_words) :]
+            tail_text = " ".join(tail_words).strip()
+            if tail_text:
+                if args.debug:
+                    print(_cyan(f"Final tail emit: {_shorten(tail_text, 120)}"))
+                else:
+                    print(tail_text, flush=True)
+
         if log_fh is not None:
             try:
                 log_fh.close()
             except Exception:
                 pass
-        try:
-            for wav_file in tmp_dir.glob("*.wav"):
-                wav_file.unlink(missing_ok=True)
-            tmp_dir.rmdir()
-        except Exception:
-            pass
 
     if args.debug:
         print("")

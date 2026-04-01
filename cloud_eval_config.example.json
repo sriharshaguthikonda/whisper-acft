@@ -1,0 +1,95 @@
+{
+  "hf_eval_pack": {
+    "enabled": true,
+    "repo_id": "Sri-Harsha-Guthikonda/whisper-acft-indian-accent-eval-private",
+    "repo_type": "dataset",
+    "revision": "main",
+    "local_dir": "",
+    "allow_patterns": [
+      "eval_packs/**"
+    ],
+    "files": {
+      "test_manifest": "eval_packs/LATEST_PACK/manifests/pairs_manifest_stage13_test.jsonl",
+      "speaker_scores_csv": "eval_packs/LATEST_PACK/metadata/speaker_sort_scores.csv",
+      "others_dir": "eval_packs/LATEST_PACK/audio",
+      "others_manifest": "eval_packs/LATEST_PACK/manifests/others_manifest.jsonl",
+      "pairs_manifest": ""
+    }
+  },
+  "paths": {
+    "test_manifest": "",
+    "speaker_scores_csv": "",
+    "others_dir": "",
+    "others_manifest": "",
+    "pairs_manifest": ""
+  },
+  "protocols": {
+    "targetmix": {
+      "enabled": true,
+      "percentage": 100.0,
+      "target_percentage": 100.0,
+      "target_max": 0,
+      "mix_per_target": 5,
+      "pairing_mode": "round_robin",
+      "seed": 42,
+      "other_offset_mode": "start",
+      "other_peak_ratio": 1.0,
+      "sweep_snr_db": "15,5,0",
+      "sweep_overlap": "0.25,0.75,1",
+      "disable_overlap_sweep": false,
+      "force_resume": false,
+      "recalc_metrics": false
+    },
+    "clean": {
+      "enabled": true,
+      "percentage": 100.0,
+      "target_percentage": 100.0,
+      "target_max": 0,
+      "seed": 42,
+      "force_resume": false,
+      "recalc_metrics": false
+    }
+  },
+  "runtime": {
+    "language_mode_filter": "en",
+    "device": "cuda",
+    "batch_size": 4,
+    "nemo_batch_size": 4,
+    "nemo_infer_num_workers": 0,
+    "auto_batch": 0,
+    "batch_min": 1,
+    "batch_max": 8,
+    "fp16": 1,
+    "mem_low": 0.6,
+    "mem_high": 0.88,
+    "cleanup_interval": 50,
+    "audio_cache_gb": 0.5,
+    "ffmpeg_path": "ffmpeg",
+    "normalize": "whisper_basic",
+    "vad_filter": 0,
+    "base_processor_id": "openai/whisper-small.en",
+    "language": "en",
+    "task": "transcribe",
+    "num_beams": 5,
+    "temperature": 0.0,
+    "max_new_tokens": 128,
+    "moonshine_token_limit_tps": 6.5
+  },
+  "leaderboard": {
+    "accuracy_weight": 0.8,
+    "speed_weight": 0.2,
+    "targetmix_accuracy_blend": 0.6,
+    "clean_accuracy_blend": 0.4
+  },
+  "results": {
+    "root_dir": "cloud_eval_runs/latest",
+    "upload_to_hf": {
+      "enabled": false,
+      "repo_id": "",
+      "repo_type": "dataset",
+      "private": true,
+      "path_in_repo": "",
+      "commit_message": "Upload cloud eval run bundle"
+    }
+  }
+}

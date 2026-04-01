@@ -1,0 +1,3 @@
+model_name,backend,model_ref,language_mode,enabled,decoder_preset,batch_hint,notes,expected_sr
+whisper-small-en,hf_transformers,openai/whisper-small.en,en,true,default,4,baseline whisper,16000
+parakeet-tdt-0p6b-v3,nemo_parakeet,nvidia/parakeet-tdt-0.6b-v3,en,true,default,4,nemo parakeet baseline,16000

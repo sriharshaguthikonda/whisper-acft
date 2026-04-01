@@ -10,6 +10,10 @@
   [HF_PRIVATE_TIER1_ARCHIVAL_PLAYBOOK.md](./HF_PRIVATE_TIER1_ARCHIVAL_PLAYBOOK.md)
 - HF Tier-1 execution history:
   [HF_PRIVATE_TIER1_EXECUTION_LOG.md](./HF_PRIVATE_TIER1_EXECUTION_LOG.md)
+- Cloud eval stack (Kaggle + Colab):
+  [CLOUD_EVAL_STACK_KAGGLE_COLAB.md](./CLOUD_EVAL_STACK_KAGGLE_COLAB.md)
+- Private HF eval-pack creation workflow:
+  [HF_PRIVATE_EVAL_PACK_PLAYBOOK.md](./HF_PRIVATE_EVAL_PACK_PLAYBOOK.md)
 - HF profile (model namespace):
   https://huggingface.co/Sri-Harsha-Guthikonda
 
