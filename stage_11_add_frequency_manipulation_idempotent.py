@@ -23,6 +23,8 @@ from pipeline_uid_utils import (
     is_valid_wav,
     safe_unlink,
     atomic_write_wav_pcm16,
+    sanitize_kaggle_token,
+    kaggle_safe_wav_name,
     make_aug_uid,
     rng_for,
     safe_beep,
@@ -63,7 +65,8 @@ def build_out_wav_name(row: Dict[str, Any], stage_name: str, new_uid: str, copy_
     """Build stable output filename with shorter format to avoid path length issues."""
     base_uid = row.get("base_uid", "")[:12]
     aug_uid = new_uid[:12]
-    fname = f"{base_uid}_{aug_uid}__{stage_name}__copy{copy_idx:02d}.wav"
+    stage_tok = sanitize_kaggle_token(stage_name, default="stage", max_len=40)
+    fname = kaggle_safe_wav_name([base_uid, aug_uid, stage_tok, f"copy{copy_idx:02d}"], max_name_len=120)
     return str(out_dir / fname)
 
 

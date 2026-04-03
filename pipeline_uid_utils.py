@@ -4,10 +4,12 @@ import hashlib
 import os
 import os.path
 import random
+import re
 import sqlite3
 import threading
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Iterable
 
 
 # --- Path normalisation (Windows-friendly) ---
@@ -59,6 +61,90 @@ def stable_hash_int(s: str, person: str = "acft") -> int:
     # 8 bytes -> 64-bit integer
     hx = _blake2b_hex(s.encode("utf-8", errors="ignore"), digest_bytes=8, person=person.encode("ascii", errors="ignore"))
     return int(hx, 16)
+
+
+# --- Kaggle-safe filename helpers ---
+
+_KAGGLE_UNSAFE_CHARS_RE = re.compile(r"[^A-Za-z0-9._-]+")
+_KAGGLE_MULTI_UNDERSCORE_RE = re.compile(r"_+")
+_KAGGLE_MULTI_DASH_RE = re.compile(r"-+")
+_KAGGLE_MULTI_DOT_RE = re.compile(r"\.+")
+
+
+def _truncate_with_hash(text: str, max_len: int, person: str) -> str:
+    """Deterministically truncate long strings while preserving uniqueness."""
+    if max_len <= 0:
+        return ""
+    if len(text) <= max_len:
+        return text
+    suffix = stable_hash_hex(text, digest_bytes=4, person=person)
+    if max_len <= len(suffix):
+        return suffix[:max_len]
+    head_len = max_len - len(suffix) - 1
+    head = text[:head_len].rstrip("._-")
+    if not head:
+        return suffix[:max_len]
+    return f"{head}_{suffix}"
+
+
+def sanitize_kaggle_token(value: object, default: str = "x", max_len: int = 64) -> str:
+    """Normalize text to a Kaggle-safe token: [A-Za-z0-9._-]."""
+    default_text = "" if default is None else str(default).strip()
+    allow_empty_default = default_text == ""
+
+    text = "" if value is None else str(value).strip()
+    text = _KAGGLE_UNSAFE_CHARS_RE.sub("_", text)
+    text = _KAGGLE_MULTI_UNDERSCORE_RE.sub("_", text)
+    text = _KAGGLE_MULTI_DASH_RE.sub("-", text)
+    text = _KAGGLE_MULTI_DOT_RE.sub(".", text)
+    text = text.strip("._-")
+
+    if not text:
+        text = default_text
+
+    if max_len > 0 and text and len(text) > max_len:
+        text = _truncate_with_hash(text, max_len=max_len, person="kgtok")
+
+    text = text.strip("._-")
+    if text:
+        return text
+    if allow_empty_default:
+        return ""
+
+    fallback = default_text.strip("._-")
+    return fallback or "x"
+
+
+def sanitize_kaggle_filename(stem: object, ext: str = ".wav", max_name_len: int = 120) -> str:
+    """Build a Kaggle-safe filename with deterministic truncation."""
+    max_name_len = max(8, int(max_name_len))
+    raw_ext = (ext or ".wav").strip()
+    if not raw_ext.startswith("."):
+        raw_ext = "." + raw_ext
+    safe_ext = "." + sanitize_kaggle_token(raw_ext[1:], default="wav", max_len=16).lower()
+
+    stem_budget = max(1, max_name_len - len(safe_ext))
+    safe_stem = sanitize_kaggle_token(stem, default="audio", max_len=stem_budget)
+    safe_stem = safe_stem or "audio"
+
+    filename = f"{safe_stem}{safe_ext}"
+    if len(filename) <= max_name_len:
+        return filename
+
+    safe_stem = _truncate_with_hash(safe_stem, max_len=stem_budget, person="kgfile")
+    safe_stem = safe_stem.strip("._-") or "audio"
+    return f"{safe_stem}{safe_ext}"
+
+
+def kaggle_safe_wav_name(parts: Iterable[object], max_name_len: int = 120) -> str:
+    """Join parts into a normalized WAV filename."""
+    cleaned_parts = []
+    for part in parts:
+        token = sanitize_kaggle_token(part, default="", max_len=48)
+        if token:
+            cleaned_parts.append(token)
+    stem = "_".join(cleaned_parts) if cleaned_parts else "audio"
+    return sanitize_kaggle_filename(stem=stem, ext=".wav", max_name_len=max_name_len)
 
 
 # --- UID creation ---

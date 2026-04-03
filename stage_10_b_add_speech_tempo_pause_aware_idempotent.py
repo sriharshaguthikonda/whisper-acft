@@ -64,6 +64,8 @@ from pipeline_uid_utils import (
     default_seen_db,
     is_valid_wav,
     safe_unlink,
+    sanitize_kaggle_token,
+    kaggle_safe_wav_name,
     make_aug_uid,
     rng_for,
     safe_beep,
@@ -453,12 +455,17 @@ def build_out_wav_name(
 ) -> str:
     base_uid = (row.get("base_uid") or row.get("uid") or "")[:12]
     aug_uid = (new_uid or "")[:12]
+    stage_tok = sanitize_kaggle_token(stage_name, default="stage", max_len=40)
 
     ttag = f"{tempo_factor:.2f}".replace(".", "p")
     stag = f"{silence_factor:.2f}".replace(".", "p")
     ptag = "tr" if pause_policy == "truncate" else "cp"
+    ptag = sanitize_kaggle_token(ptag, default="pause", max_len=16)
 
-    fname = f"{base_uid}_{aug_uid}__{stage_name}__t{ttag}__s{stag}__{ptag}__c{copy_idx:02d}.wav"
+    fname = kaggle_safe_wav_name(
+        [base_uid, aug_uid, stage_tok, f"t{ttag}", f"s{stag}", ptag, f"c{copy_idx:02d}"],
+        max_name_len=120,
+    )
     return str(out_dir / fname)
 
 

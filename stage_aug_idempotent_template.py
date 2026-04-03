@@ -25,6 +25,8 @@ from pipeline_uid_utils import (
     default_seen_db,
     is_valid_wav,
     safe_unlink,
+    sanitize_kaggle_token,
+    kaggle_safe_wav_name,
     make_aug_uid,
     rng_for,
     safe_beep,
@@ -48,7 +50,8 @@ def build_out_wav_name(row: Dict[str, Any], stage_name: str, new_uid: str, copy_
     # 8 hex chars (32 bits) can collide once you scale; 12 chars (48 bits) is effectively safe here.
     base_uid = row.get("base_uid", "")[:12]
     aug_uid = new_uid[:12]
-    fname = f"{base_uid}_{aug_uid}__{stage_name}__c{copy_idx:02d}.wav"
+    stage_tok = sanitize_kaggle_token(stage_name, default="stage", max_len=40)
+    fname = kaggle_safe_wav_name([base_uid, aug_uid, stage_tok, f"c{copy_idx:02d}"], max_name_len=120)
     return str(out_dir / fname)
 
 
