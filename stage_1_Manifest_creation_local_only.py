@@ -3,6 +3,7 @@ import argparse
 import numpy as np
 from tqdm.auto import tqdm
 from transformers import AutoTokenizer
+from pipeline_uid_utils import sanitize_kaggle_filename
 
 # Try to use orjson for faster JSON parsing if available
 try:
@@ -24,6 +25,12 @@ def parse_args() -> argparse.Namespace:
     p.add_argument("--transcript-dir", default=r"I:\Transcriptions_patched_corrected", help="Directory of transcript JSON files")
     p.add_argument("--chunks-dir", default=r"I:\Record_chunks", help="Output chunks directory")
     p.add_argument("--audio-source-dir", default=r"I:\Record_harsha", help="Directory containing source audio files")
+    p.add_argument(
+        "--filename_policy",
+        default="kaggle_safe",
+        choices=["kaggle_safe", "legacy"],
+        help="Chunk naming policy for generated WAV files",
+    )
 
     p.add_argument("--target-sr", type=int, default=16000)
     p.add_argument("--max-out-seconds", type=float, default=30.0)
@@ -63,6 +70,7 @@ LOAD_MODEL_FOR_DEBUG = args.load_model_for_debug
 TRANSCRIPT_DIR = args.transcript_dir
 CHUNKS_DIR = args.chunks_dir
 AUDIO_SOURCE_DIR = args.audio_source_dir
+FILENAME_POLICY = args.filename_policy
 
 TARGET_SR = int(args.target_sr)
 MAX_OUT_SECONDS = float(args.max_out_seconds)
@@ -274,7 +282,10 @@ def safe_id_from_path(p: str, n: int = 10) -> str:
 def chunk_filename(audio_path: str, transcript_json_path: str, chunk_index: int) -> str:
     base = pathlib.Path(audio_path).stem
     jid = safe_id_from_path(transcript_json_path, n=10)
-    return f"{base}__{jid}_chunk{chunk_index:04d}.wav"
+    legacy_name = f"{base}__{jid}_chunk{chunk_index:04d}.wav"
+    if FILENAME_POLICY == "legacy":
+        return legacy_name
+    return sanitize_kaggle_filename(pathlib.Path(legacy_name).stem, ext=".wav", max_name_len=120)
 
 
 def is_useless_segment(seg: dict) -> bool:
@@ -617,6 +628,7 @@ print("Found JSONs:", len(json_files))
 print("Already processed (final manifest):", len(processed_jsons))
 print("Already processed (pending file):", len(pending_processed_jsons_from_file))
 print("Planning NEW JSONs now:", len(new_json_files))
+print(f"Filename policy: {FILENAME_POLICY} (allowlist: A-Z a-z 0-9 . _ -)")
 
 pending_pairs = []
 pending_tasks = []

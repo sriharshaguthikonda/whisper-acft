@@ -303,6 +303,30 @@ def log(msg: str) -> None:
     except Exception:
         pass
 
+
+def _kaggle_safe_stage_token(value: str) -> str:
+    token = re.sub(r"[^A-Za-z0-9._-]+", "_", str(value).strip())
+    token = re.sub(r"_+", "_", token).strip("._-")
+    return token or "stage"
+
+
+STAGE6_STAGE_NAME = _kaggle_safe_stage_token("noise_mix")
+STAGE7_STAGE_NAME = _kaggle_safe_stage_token("voice_mix")
+STAGE8_STAGE_NAME = _kaggle_safe_stage_token("random_gain")
+STAGE9_STAGE_NAME = _kaggle_safe_stage_token("reverb")
+STAGE10B_STAGE_NAME = _kaggle_safe_stage_token("tempo_speech_pause")
+
+log(
+    "[naming] Kaggle-safe filename policy enabled for generated audio files "
+    "(allowlist: A-Z a-z 0-9 . _ -; max filename length: 120)."
+)
+log(
+    "[naming] stage tokens: "
+    f"s6={STAGE6_STAGE_NAME}, s7={STAGE7_STAGE_NAME}, s8={STAGE8_STAGE_NAME}, "
+    f"s9={STAGE9_STAGE_NAME}, s10b={STAGE10B_STAGE_NAME}"
+)
+
+
 def log_drive_summary(msg: str) -> None:
     if not SYNC_IMPORTANT_TO_DRIVE:
         return
@@ -1719,8 +1743,8 @@ if should_run("stage_6", [STAGE6_MANIFEST]):
          "--noises_dir", NOISE_DIR,
          "--scores_csv", SCORES_CSV,
          "--out_dir", NOISE_OUT_DIR,
-         "--stage_name", "noise_mix",
-         "--seen_db", f"{SEEN_DIR}/stage6_noise_mix.sqlite",
+         "--stage_name", STAGE6_STAGE_NAME,
+         "--seen_db", f"{SEEN_DIR}/stage6_{STAGE6_STAGE_NAME}.sqlite",
          "--ratio", str(NOISE_RATIO),
          "--copies", str(NOISE_COPIES),
          "--snr_db_min", "5",
@@ -1749,8 +1773,8 @@ if should_run("stage_7", [STAGE7_MANIFEST]):
          "--max_bad_to_good_ratio", "0.15",
          "--scores_csv", SCORES_CSV,
          "--workers", str(AUG_WORKERS),
-         "--stage_name", "voice_mix",
-         "--seen_db", f"{SEEN_DIR}/stage7_voice_mix.sqlite"])
+         "--stage_name", STAGE7_STAGE_NAME,
+         "--seen_db", f"{SEEN_DIR}/stage7_{STAGE7_STAGE_NAME}.sqlite"])
     assert_outputs([STAGE7_MANIFEST], "stage_7")
     update_stage_state("stage_7", "done")
 # %%
@@ -1768,8 +1792,8 @@ if should_run("stage_8", [STAGE8_MANIFEST]):
          "--min_db", "-12",
          "--max_db", "12",
          "--workers", str(AUG_WORKERS),
-         "--stage_name", "random_gain",
-         "--seen_db", f"{SEEN_DIR}/stage8_random_gain.sqlite"])
+         "--stage_name", STAGE8_STAGE_NAME,
+         "--seen_db", f"{SEEN_DIR}/stage8_{STAGE8_STAGE_NAME}.sqlite"])
     assert_outputs([STAGE8_MANIFEST], "stage_8")
     update_stage_state("stage_8", "done")
 # %%
@@ -1787,8 +1811,8 @@ if should_run("stage_9", [STAGE9_MANIFEST]):
          "--ratio", str(REVERB_RATIO),
          "--copies", str(REVERB_COPIES),
          "--workers", str(AUG_WORKERS),
-         "--stage_name", "reverb",
-         "--seen_db", f"{SEEN_DIR}/stage9_reverb.sqlite"])
+         "--stage_name", STAGE9_STAGE_NAME,
+         "--seen_db", f"{SEEN_DIR}/stage9_{STAGE9_STAGE_NAME}.sqlite"])
     assert_outputs([STAGE9_MANIFEST], "stage_9")
     update_stage_state("stage_9", "done")
 # %%
@@ -1804,8 +1828,8 @@ if should_run("stage_10b", [STAGE10B_MANIFEST]):
          "--ratio", str(TEMPO_RATIO),
          "--copies", str(TEMPO_COPIES),
          "--workers", str(AUG_WORKERS),
-         "--stage_name", "tempo_speech_pause",
-         "--seen_db", f"{SEEN_DIR}/stage10b_tempo_pause.sqlite",
+         "--stage_name", STAGE10B_STAGE_NAME,
+         "--seen_db", f"{SEEN_DIR}/stage10b_{STAGE10B_STAGE_NAME}.sqlite",
          "--tempo_min", "1.05",
          "--tempo_max", "1.20",
          "--mode", "choice",
