@@ -1,0 +1,32 @@
+﻿{
+    "schemaVersion":  "repo-map-artifact-branch/v1",
+    "repo":  "sriharshaguthikonda/whisper-acft",
+    "generatedAt":  "2026-06-01T06:27:29.1366345Z",
+    "source":  "Repo_maps GitHub footprint publish runner",
+    "publishBranch":  "repo-intel-artifacts",
+    "mapCount":  3,
+    "totalBytes":  7439322,
+    "maps":  [
+                 {
+                     "name":  "clean-main",
+                     "ref":  "refs/remotes/origin/clean-main",
+                     "commit":  "d7928865af671d8a0bfc0e3e5a23f9e09f988a94",
+                     "path":  ".repo-intel/branches/remote-origin/clean-main__d7928865af67/repo-map-full.json",
+                     "bytes":  456860
+                 },
+                 {
+                     "name":  "main",
+                     "ref":  "refs/remotes/origin/main",
+                     "commit":  "2d6a08ee32f792b9314fa1dc7929eaf212bdc6a1",
+                     "path":  ".repo-intel/branches/remote-origin/main__2d6a08ee32f7/repo-map-full.json",
+                     "bytes":  3929998
+                 },
+                 {
+                     "name":  "save-bin",
+                     "ref":  "refs/remotes/origin/save-bin",
+                     "commit":  "d1b5a999522cdb666121cb7b0df73d37c4202ac1",
+                     "path":  ".repo-intel/branches/remote-origin/save-bin__d1b5a999522c/repo-map-full.json",
+                     "bytes":  3028315
+                 }
+             ]
+}
