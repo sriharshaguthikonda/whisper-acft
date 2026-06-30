@@ -36,4 +36,22 @@ None blocking.
 
 ## USER COMMENTS
 
-1. tell me how to run these as well!
+1. tell me how to run these on kaggle as well?
+2. dont think you have used the memory system?!
+
+## Agent Answers
+
+1. Kaggle run steps:
+   - Upload/copy `notebooks/kaggle/01_generate_chunks_publish.ipynb` into a Kaggle notebook.
+   - Attach all canonical private source datasets listed in `docs/KAGGLE_PRIMARY_TRAINING_DATA_EXPORT.md`.
+   - Attach repo files or set `ACFT_GIT_URL` to a cloneable repo URL.
+   - Run notebook 01 with defaults: `PROFILE=smoke`, `PUBLISH_AFTER_EACH_STAGE=1`, `DRY_RUN_PUBLISH=0`.
+   - Confirm the private chunks dataset appears as `drsriharshaguthik/acft-kaggle-chunks-<run-tag>-smoke`.
+   - Upload/copy `notebooks/kaggle/02_train_smoke_resume.ipynb`.
+   - Attach the chunks dataset from notebook 01, use a GPU runtime, and run with defaults: `LR_START=1e-6`, `MAX_EPOCHS=1`, `N_SAMPLES_PER_EPOCH=32`, `START_FRESH=0`.
+   - Confirm the private train dataset appears as `drsriharshaguthik/acft-kaggle-train-<run-tag>-smoke`.
+   - For resume tests, rerun with the same `RUN_TAG` and attach the previous chunks/train dataset. Notebook 01 restores `_kaggle_state`; notebook 02 restores `state/` and `checkpoints/`.
+2. Memory system was used:
+   - Queried project memory for canonical Kaggle source/export context and supersession.
+   - Used the active memory result that says canonical source datasets must come from `docs/KAGGLE_PRIMARY_TRAINING_DATA_EXPORT.md`, avoid failed attempt datasets, and keep generated chunks out of source mirror.
+   - Will write a closeout memory after push with the new notebook/helper/docs facts.

@@ -44,7 +44,7 @@ Notebook 01 reconstructs canonical Kaggle source datasets into `/kaggle/working/
 
 Notebook 02 attaches the generated chunks dataset, builds a conservative public-ASR mix, and calls the existing Stage 17 training script with smoke defaults: `LR_START=1e-6`, `MAX_EPOCHS=1`, small `N_SAMPLES_PER_EPOCH`, and `START_FRESH=0`.
 
-Resume state is stage-scoped. A stage is skipped only when declared outputs exist and the saved input/config signature matches. Published Kaggle Datasets are used as persistent storage between Kaggle sessions:
+Resume state is stage-scoped. A stage is skipped only when declared outputs exist and the saved input/config signature matches. Notebook 01 stores state inside the published chunks dataset at `_kaggle_state/<run-tag>`. Notebook 02 publishes its run root, including `state/` and `checkpoints/`. Published Kaggle Datasets are used as persistent storage between Kaggle sessions:
 
 - chunks/manifests: `drsriharshaguthik/acft-kaggle-chunks-<run-tag>-<profile>`
 - checkpoints/logs: `drsriharshaguthik/acft-kaggle-train-<run-tag>-<profile>`

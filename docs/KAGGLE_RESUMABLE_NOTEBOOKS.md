@@ -35,7 +35,8 @@ Behavior:
    - Stage 13: `stage_13_group_split_train_test.py`
    - Stage 15: `stage_15_b_advanced_randomize_manifest.py`
 4. Writes resume state under `/kaggle/working/acft_runs/<RUN_TAG>/state`.
-5. Versions `/kaggle/working/acft_data/Record_chunks` as a private Kaggle Dataset.
+5. Writes published resume state under `/kaggle/working/acft_data/Record_chunks/_kaggle_state/<RUN_TAG>`.
+6. Versions `/kaggle/working/acft_data/Record_chunks` as a private Kaggle Dataset.
 
 Chunk dataset handle pattern:
 
@@ -91,6 +92,8 @@ A stage is skipped only when:
 
 If Kaggle stops mid-run, rerun the notebook with the same `RUN_TAG` and attach the last published dataset. Stage 2 and Stage 17 also keep their own internal resume files/checkpoints.
 
+Notebook 01 restores an attached prior chunks dataset into `/kaggle/working/acft_data/Record_chunks` before running stages. Notebook 02 restores an attached prior train dataset into `/kaggle/working/acft_train_runs/<RUN_TAG>` before Stage 17.
+
 ## Publishing
 
 `tools/kaggle_acft_helpers.py` writes `dataset-metadata.json` and `_publish_plan.json`.
@@ -105,14 +108,19 @@ Set `DRY_RUN_PUBLISH=1` to validate metadata without uploading.
 
 ## Trial Run
 
-1. Create a Kaggle notebook from `01_generate_chunks_publish.ipynb`.
-2. Attach all canonical private source datasets from `docs/KAGGLE_PRIMARY_TRAINING_DATA_EXPORT.md`.
-3. Run with defaults for `PROFILE=smoke`.
-4. Confirm a private chunks dataset appears under the chunks handle pattern.
-5. Create a Kaggle notebook from `02_train_smoke_resume.ipynb`.
-6. Attach the chunks dataset from step 4.
-7. Run with defaults.
-8. Stop/restart once with the same `RUN_TAG`; verify Stage 17 resumes from checkpoint/state.
+1. In Kaggle, create a new notebook and upload/copy `notebooks/kaggle/01_generate_chunks_publish.ipynb`.
+2. Attach all canonical private source datasets listed in `docs/KAGGLE_PRIMARY_TRAINING_DATA_EXPORT.md`.
+3. Attach repo files, or set `ACFT_GIT_URL` to a cloneable repo URL.
+4. Keep defaults for first trial: `PROFILE=smoke`, `PUBLISH_AFTER_EACH_STAGE=1`, `DRY_RUN_PUBLISH=0`.
+5. Run all cells. If Kaggle API auth fails, add Kaggle API credentials through notebook secrets or `/root/.kaggle/kaggle.json`, then rerun the publish cell.
+6. Confirm a private chunks dataset appears under the chunks handle pattern.
+7. For a resume trial, restart with the same `RUN_TAG` and attach the chunks dataset from step 6; notebook 01 will restore `_kaggle_state` and skip matching completed stages.
+8. Create a Kaggle notebook from `02_train_smoke_resume.ipynb`.
+9. Attach the chunks dataset from step 6.
+10. Use a GPU runtime for Stage 17.
+11. Run with defaults: `LR_START=1e-6`, `MAX_EPOCHS=1`, `N_SAMPLES_PER_EPOCH=32`, `START_FRESH=0`.
+12. Confirm a private train dataset appears under the train handle pattern.
+13. For a training resume trial, restart with the same `RUN_TAG`, attach both the chunks dataset and the prior train dataset; notebook 02 will restore checkpoints/state before Stage 17.
 
 ## Local Validation
 
