@@ -2,3 +2,7 @@
 - [x] Locate Groq Whisper helper scripts/utilities for reuse
 - [x] Implement NFA corrections verification script
 - [ ] Run verification script on sample files and review report
+- [x] Publish primary training source data to private Kaggle datasets, excluding generated chunks
+- [x] Document canonical Kaggle source datasets and confirmed Kaggle rejects in `docs/KAGGLE_PRIMARY_TRAINING_DATA_EXPORT.md`
+- [ ] Update Kaggle/Colab notebooks to consume canonical source datasets instead of local `I:\` paths
+- [ ] Add a restore script for canonical Kaggle source datasets

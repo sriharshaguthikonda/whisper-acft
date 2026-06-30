@@ -1,0 +1,42 @@
+# Explicit recovery list for Record_harsha files missed by row-slice uploads after the live source directory changed.
+# Used with tools/kaggle_publish_primary_training_data.py --no_default_includes --no_default_extra_files --extra_file_list.
+Record_harsha/New recording 189.m4a
+Record_harsha/New recording 19.m4a
+Record_harsha/New recording 190.m4a
+Record_harsha/New recording 191.m4a
+Record_harsha/New recording 192.m4a
+Record_harsha/New recording 193.m4a
+Record_harsha/New recording 194.m4a
+Record_harsha/New recording 195.m4a
+Record_harsha/New recording 196.m4a
+Record_harsha/New recording 197.m4a
+Record_harsha/New recording 198.m4a
+Record_harsha/New recording 199.m4a
+Record_harsha/New recording 2.m4a
+Record_harsha/New recording 20.m4a
+Record_harsha/New recording 200.m4a
+Record_harsha/New recording 202.m4a
+Record_harsha/New recording 203.m4a
+Record_harsha/New recording 205.m4a
+Record_harsha/New recording 206.m4a
+Record_harsha/New recording 207.m4a
+Record_harsha/Sickles and anemia..m4a
+Record_harsha/simman copd.m4a
+Record_harsha/simman sepsis post uti.m4a
+Record_harsha/Son is Surgeon consent not taken from mother..m4a
+Record_harsha/sub arachanoid hemorrhage.m4a
+Record_harsha/Subconjunctival haemorrhage.m4a
+Record_harsha/Subdural Hematoma.m4a
+Record_harsha/Surgeon Mother Confidentiality.m4a
+Record_harsha/Teenage pregnancy vomiting..m4a
+Record_harsha/teenager_struggling_with_sexuality_and_mental_health.m4a
+Record_harsha/telephone obesity concern.m4a
+Record_harsha/Temper tantrums.m4a
+Record_harsha/Tension headache.m4a
+Record_harsha/Testosterone nosebleeds.m4a
+Record_harsha/TIA DVLA guidance.m4a
+Record_harsha/Trans man cervical smear.m4a
+Record_harsha/Transient Schemic Attack Management.m4a
+Record_harsha/trichomoniasis in male.m4a
+Record_harsha/Trichomoniasis vaginal discharge.m4a
+Record_harsha/uterine fibroids.m4a

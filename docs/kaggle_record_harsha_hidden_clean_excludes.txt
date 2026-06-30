@@ -1,0 +1,3 @@
+# Confirmed Kaggle-hidden audio files excluded from clean hidden-shard replacement upload.
+Record_harsha/Michael Lewis's Gender Dysphoria Consultation.m4a
+Record_harsha/Robbie's Post-Traumatic Stress Disorder_ A Doctor's Consultation.m4a

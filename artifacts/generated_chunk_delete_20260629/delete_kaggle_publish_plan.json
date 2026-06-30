@@ -1,0 +1,54 @@
+{
+  "generated_local": "2026-06-29T02:22:11",
+  "base": "J:\\kaggle_publish",
+  "targets": [
+    {
+      "Path": "J:\\kaggle_publish\\acft-moonshine-record-chunks-chunked-publish",
+      "Files": 201613,
+      "Bytes": 29614874532
+    },
+    {
+      "Path": "J:\\kaggle_publish\\acft-moonshine-record-test-chunks-chunked-publish",
+      "Files": 17950,
+      "Bytes": 2898947097
+    },
+    {
+      "Path": "J:\\kaggle_publish\\acft-moonshine-record-test-chunks-byte450-publish",
+      "Files": 17918,
+      "Bytes": 2847653650
+    },
+    {
+      "Path": "J:\\kaggle_publish\\acft-moonshine-Record_chunks_publish",
+      "Files": 192273,
+      "Bytes": 29228174345
+    },
+    {
+      "Path": "J:\\kaggle_publish\\kaggle-tar-smoke",
+      "Files": 2,
+      "Bytes": 302
+    },
+    {
+      "Path": "J:\\kaggle_publish\\probe_tar_smoke_download",
+      "Files": 1,
+      "Bytes": 7
+    },
+    {
+      "Path": "J:\\kaggle_publish\\probe_audio_001_download",
+      "Files": 1,
+      "Bytes": 120
+    },
+    {
+      "Path": "J:\\kaggle_publish\\probe_audio_001_meta",
+      "Files": 1,
+      "Bytes": 410
+    },
+    {
+      "Path": "J:\\kaggle_publish\\probe_test_manifest_meta",
+      "Files": 1,
+      "Bytes": 450
+    }
+  ],
+  "total_files": 429760,
+  "total_bytes": 64589650913,
+  "deletion_rule": "Delete generated Kaggle staging/probe folders for Record_chunks and Record_test_chunks only; keep canonical primary-source staging folders."
+}

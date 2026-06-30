@@ -1,0 +1,13 @@
+{
+  "generated_local": "2026-06-29T02:15:38",
+  "record_chunks_root": "I:\\Record_chunks",
+  "record_chunks_wav_files": 192223,
+  "record_chunks_wav_bytes": 26257168390,
+  "record_test_chunks_root": "I:\\Record_test_chunks",
+  "record_test_files": 17898,
+  "record_test_bytes": 2782251192,
+  "total_files": 210121,
+  "total_bytes": 29039419582,
+  "preserved_record_chunks_non_wav_count": 38,
+  "deletion_rule": "Delete generated chunk audio files only; keep I:\\Record_chunks and I:\\Record_test_chunks root folders; preserve non-wav manifest/state files in I:\\Record_chunks."
+}
