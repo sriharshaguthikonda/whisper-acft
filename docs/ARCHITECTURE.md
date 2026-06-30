@@ -1,6 +1,6 @@
 # Architecture
 
-Last updated: 2026-06-29
+Last updated: 2026-06-30
 
 ## Data Lineage
 
@@ -30,6 +30,26 @@ The Kaggle mirror for source recovery is documented in:
 Use the canonical dataset list there. It preserves top-level source folder names and excludes generated chunks.
 
 Generated chunk upload retries were stopped. Kaggle CLI tar mode strips the top folder from archive members, so any future chunk-training notebook must reconstruct old paths under `/kaggle/working/acft_chunks/<top-folder>/...` before consuming manifests that expect preserved `Record_chunks` or `Record_test_chunks` paths.
+
+## Resumable Kaggle Notebook Layer
+
+Kaggle execution now lives in:
+
+- `notebooks/kaggle/01_generate_chunks_publish.ipynb`
+- `notebooks/kaggle/02_train_smoke_resume.ipynb`
+- `tools/kaggle_acft_helpers.py`
+- `docs/KAGGLE_RESUMABLE_NOTEBOOKS.md`
+
+Notebook 01 reconstructs canonical Kaggle source datasets into `/kaggle/working/acft_data`, preserving the old top-level paths expected by existing scripts. It then calls Stage 1, Stage 2, Stage 13, and Stage 15 from the repo.
+
+Notebook 02 attaches the generated chunks dataset, builds a conservative public-ASR mix, and calls the existing Stage 17 training script with smoke defaults: `LR_START=1e-6`, `MAX_EPOCHS=1`, small `N_SAMPLES_PER_EPOCH`, and `START_FRESH=0`.
+
+Resume state is stage-scoped. A stage is skipped only when declared outputs exist and the saved input/config signature matches. Published Kaggle Datasets are used as persistent storage between Kaggle sessions:
+
+- chunks/manifests: `drsriharshaguthik/acft-kaggle-chunks-<run-tag>-<profile>`
+- checkpoints/logs: `drsriharshaguthik/acft-kaggle-train-<run-tag>-<profile>`
+
+Dataset publishing writes Kaggle metadata first, tries KaggleHub, then falls back to Kaggle CLI version/create.
 
 ## Repo Intel
 

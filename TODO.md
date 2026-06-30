@@ -4,5 +4,7 @@
 - [ ] Run verification script on sample files and review report
 - [x] Publish primary training source data to private Kaggle datasets, excluding generated chunks
 - [x] Document canonical Kaggle source datasets and confirmed Kaggle rejects in `docs/KAGGLE_PRIMARY_TRAINING_DATA_EXPORT.md`
-- [ ] Update Kaggle/Colab notebooks to consume canonical source datasets instead of local `I:\` paths
-- [ ] Add a restore script for canonical Kaggle source datasets
+- [x] Update Kaggle notebooks to consume canonical source datasets instead of local `I:\` paths
+- [x] Add Kaggle source reconstruction helper for canonical datasets
+- [ ] Run Kaggle notebook 01 smoke trial and verify private chunks dataset publish
+- [ ] Run Kaggle notebook 02 smoke trial, stop/restart once, and verify checkpoint resume
